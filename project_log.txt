@@ -1,0 +1,41 @@
+2023/01/29:
+    - Implemented Symlog function and inverse symlog function. Nice to do the math ourselves:
+        # To get to symlog inverse, we solve the symlog equation for x:
+        #     y = sign(x) * log(|x| + 1)
+        # <=> y / sign(x) = log(|x| + 1)
+        # <=> y =  log( x + 1) V x >= 0
+        #    -y =  log(-x + 1) V x <  0
+        # <=> exp(y)  =  x + 1  V x >= 0
+        #     exp(-y) = -x + 1  V x <  0
+        # <=> exp(y)  - 1 =  x   V x >= 0
+        #     exp(-y) - 1 = -x   V x <  0
+        # <=>  exp(y)  - 1 = x   V x >= 0 (if x >= 0, then y must also be >= 0)
+        #     -exp(-y) - 1 = x   V x <  0 (if x < 0, then y must also be < 0)
+        # <=> sign(y) * (exp(|y|) - 1) = x
+    - Started working on Atari CNN for encoder:
+        Difficulty: Understanding appendix B (table of hyperparams): How do I build
+        size=XS CNN? says: multiplier=24, strides=(2,2), stop (flatten) after image
+        has been reduced to dimensions 4x4, but what kernel should we use? If we use 4x4
+        (input=64x64x3, strides=2,2 filters=24,48,96) then the final image size would be 6x6x96
+2023/01/30:
+    - Completed Atari encoder CNN.
+        Found answer to above question in appendix C: Summary of differences:
+        kernel=3 (not 4 like in Schmidhuber's world models) and padding="same" (not "valid")
+    - Implemted z-generating sub-network.
+        Figured out the difficulty of sampling from a categorical distribution and
+        keeping the result differentiable (Dreamer V2 paper: Algorithm 1).
+
+2023/01/31:
+    - Completed Atari decoder CNNTranspose.
+        - Difficulties: How to reverse a CNN stack. Use same padding, same kernel, same strides.
+        - Start from reshaped (4x4x[final num CNN filters]) output of a dense layer and feed
+          that into the first conv2dtranspose.
+        - The final output are the means of a 64x64x3 diag-Gaussian with std=1.0, from which
+          we sample the final image.
+    - Completed Sequence (GRU) model.
+    - Completed Dynamics Predictor, using z-generator and MLP.
+    - Start implementing two-hot encoding.
+        Open question: What's the range used of the 255 buckets? -20 to +20?
+        Difficulty: What's the most performant way for the implementation?
+            answer: Using floor, ceil, tf.scatter_nd()
+
