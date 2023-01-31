@@ -3,4 +3,4 @@ Implementation (TensorFlow/keras) of the "DreamerV3" model-based reinforcement l
 (RL) algorithm by Hafner et al. 2023
 
 For algorithm details, please see:
-https://github.com/sven1977/dreamer_v3
+https://arxiv.org/pdf/2301.04104v1.pdf
