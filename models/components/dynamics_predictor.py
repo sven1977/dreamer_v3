@@ -19,7 +19,7 @@ class DynamicsPredictor(tf.keras.Model):
         super().__init__()
 
         self.mlp = MLP(output_layer_size=None)
-        self.repr_layer = RepresentationLayer(
+        self.representation_layer = RepresentationLayer(
             num_categoricals=num_categoricals,
             num_classes_per_categorical=num_classes_per_categorical,
         )
@@ -32,8 +32,8 @@ class DynamicsPredictor(tf.keras.Model):
         """
         # Send internal state through MLP.
         out = self.mlp(h)
-        # Generate a z vector (sample).
-        z = self.repr_layer(out)
+        # Generate a z vector (stochastic, discrete sample).
+        z = self.representation_layer(out)
         return z
 
 

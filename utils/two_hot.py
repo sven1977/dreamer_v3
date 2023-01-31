@@ -34,7 +34,7 @@ def two_hot(value, num_buckets, lower_bound=20.0, upper_bound=20.0):
     # Tensor of batch indices: [0, B=batch size).
     batch_indices = tf.range(0, value.shape[0], dtype=tf.float32)
     # Calculate the step deltas (how much space between each bucket's central value?).
-    delta = (upper_bound - lower_bound + 1) / num_buckets
+    delta = (upper_bound - lower_bound) / (num_buckets - 1)
     # Compute the float indices (might be non-int numbers: sitting between two buckets).
     idx = (-lower_bound + value) / delta
     # k
@@ -64,5 +64,6 @@ def two_hot(value, num_buckets, lower_bound=20.0, upper_bound=20.0):
 
 
 if __name__ == "__main__":
-    print(two_hot(tf.convert_to_tensor([2.5, 0.1]), 11, -5, 5))
-    print(two_hot(tf.convert_to_tensor([-0.5, -1.2]), 10, -6, 3))
+    print(two_hot(tf.convert_to_tensor([2.5, 0.1]), 11, -5.0, 5.0))
+    print(two_hot(tf.convert_to_tensor([0.1]), 5, -1.0, 1.0))
+    print(two_hot(tf.convert_to_tensor([-0.5, -1.2]), 10, -6.0, 3.0))

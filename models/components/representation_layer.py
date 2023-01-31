@@ -51,19 +51,32 @@ class RepresentationLayer(tf.keras.layers.Layer):
             -> Now sample has the gradients of the probs.
 
         Args:
-            input_: The input to our z-generating layer.
+            input_: The input to our z-generating layer. This might be a) the combined
+                (concatenated) outputs of the (image?) encoder + the last hidden
+                deterministic state, or b) the output of the dynamics predictor MLP
+                network.
         """
+        # Compute the logits (no activation) for our `num_categoricals` Categorical
+        # distributions (with `num_classes_per_categorical` classes each).
         logits = self.z_generating_layer(input_)
+        # Reshape the logits to [B, num_categoricals, num_classes]
         logits = tf.reshape(
             logits,
             shape=(-1, self.num_categoricals, self.num_classes_per_categorical),
         )
+        # Build the tfp distribution object using the logits.
         distribution = tfp.distributions.Categorical(logits=logits)
+        # Draw a sample and one-hot the results (B, num_categoricals, num_classes)
         sample = tf.one_hot(
             distribution.sample(),
             depth=self.num_classes_per_categorical,
         )
+        # Compute the probs (based on logits) via softmax.
         probs = tf.nn.softmax(logits)
+        # Make sure we can take gradients "straight-through" the sampling step
+        # by adding the probs and subtracting the sg(probs). Note that `sample`
+        # does not have any gradients as it's the result of a Categorical sample step,
+        # which is non-differentiable (other than say a Gaussian sample step).
         return sample + probs - tf.stop_gradient(probs)
 
 

@@ -12,6 +12,13 @@ import tensorflow as tf
 
 class MLP(tf.keras.Model):
     def __init__(self, output_layer_size=None):
+        """TODO:
+
+        Args:
+            output_layer_size: The size of an optional linear (no activation) output
+                layer. If None, no output layer will be added on top of the MLP dense
+                stack.
+        """
         super().__init__()
 
         self.dense_layers = []
@@ -27,19 +34,13 @@ class MLP(tf.keras.Model):
                 output_layer_size, activation=None,
             )
 
-    def call(self, h, z=None):
+    def call(self, input_):
         """
 
         Args:
-            h: The deterministic hidden state of the sequence model.
-            z: The stochastic discrete representation of the original observation
-                input. Note: `z` is not used for the dynamics predictor model (which
-                predicts z from h).
+            input_: The input tensor for the MLP dense stack.
         """
-        if z is not None:
-            out = tf.concat([h, z], axis=-1)
-        else:
-            out = h
+        out = input_
 
         for dense_layer, layer_norm in zip(self.dense_layers, self.layer_normalizations):
             out = layer_norm(dense_layer(out))

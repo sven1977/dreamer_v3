@@ -17,6 +17,7 @@
         size=XS CNN? says: multiplier=24, strides=(2,2), stop (flatten) after image
         has been reduced to dimensions 4x4, but what kernel should we use? If we use 4x4
         (input=64x64x3, strides=2,2 filters=24,48,96) then the final image size would be 6x6x96
+
 2023/01/30:
     - Completed Atari encoder CNN.
         Found answer to above question in appendix C: Summary of differences:
@@ -34,8 +35,7 @@
           we sample the final image.
     - Completed Sequence (GRU) model.
     - Completed Dynamics Predictor, using z-generator and MLP.
-    - Start implementing two-hot encoding.
+    - Implemented two-hot encoding.
         Open question: What's the range used of the 255 buckets? -20 to +20?
         Difficulty: What's the most performant way for the implementation?
             answer: Using floor, ceil, tf.scatter_nd()
-
