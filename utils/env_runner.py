@@ -33,7 +33,7 @@ class EnvRunner:
                 num_envs=self.config.num_envs_per_worker,
                 asynchronous=self.config.remote_worker_envs,
             )
-        self.needs_reset = True
+        self.needs_initial_reset = True
         self.observations = [[] for _ in range(self.env.num_envs)]
         #self.next_observations = []
         self.actions = [[] for _ in range(self.env.num_envs)]
@@ -85,9 +85,9 @@ class EnvRunner:
         return_rewards = []
         return_masks = []
 
-        if force_reset or self.needs_reset:
+        if force_reset or self.needs_initial_reset:
             obs, _ = self.env.reset()
-            self.needs_reset = False
+            self.needs_initial_reset = False
             for i, o in enumerate(self._split_by_env(obs)):
                 self.observations[i].append(o)
 
@@ -176,5 +176,5 @@ if __name__ == "__main__":
         .environment("ALE/MsPacman-v5")
         .rollouts(num_envs_per_worker=2, rollout_fragment_length=200)
     )
-    env_runner = EnvRunner(model=None, config=config)
+    env_runner = EnvRunner(model=None, config=config, max_seq_len=64)
     print(env_runner.sample(random_actions=True))
