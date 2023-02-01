@@ -15,7 +15,7 @@ class ContinuePredictor(tf.keras.Model):
         super().__init__()
         self.mlp = MLP(output_layer_size=1)
 
-    def call(self, h, z, return_bernoulli_prob=False):
+    def call(self, h, z, return_distribution=False):
         """TODO
 
         Args:
@@ -30,12 +30,15 @@ class ContinuePredictor(tf.keras.Model):
         out = tf.concat([h, z], axis=-1)
         # Send h-cat-z through MLP.
         out = self.mlp(out)
+        # Transform to a single prob value for a Bernoulli distribution.
         prob = tf.nn.sigmoid(out)
-        distribution = tfp.distributions.Bernoulli(prob)
-        continue_ = distribution.sample()
+        bernoulli = tfp.distributions.Bernoulli(prob)
+        # Draw a sample.
+        continue_ = bernoulli.sample()
+
         # Return Bernoulli sample (whether to continue) OR (continue?, Bernoulli prob).
-        if return_bernoulli_prob:
-            return continue_, prob
+        if return_distribution:
+            return continue_, bernoulli
         return continue_
 
 

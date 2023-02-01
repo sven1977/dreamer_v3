@@ -39,3 +39,8 @@
         Open question: What's the range used of the 255 buckets? -20 to +20?
         Difficulty: What's the most performant way for the implementation?
             answer: Using floor, ceil, tf.scatter_nd()
+    - Implemented Reward-predictor and continue-predictor.
+
+
+2023/02/01
+    -

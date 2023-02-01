@@ -24,17 +24,19 @@ class DynamicsPredictor(tf.keras.Model):
             num_classes_per_categorical=num_classes_per_categorical,
         )
 
-    def call(self, h):
+    def call(self, h, return_z_probs=False):
         """
 
         Args:
             h: The deterministic hidden state of the sequence model.
+            return_z_probs: Whether to return the probabilities for the categorical
+                distribution (in the shape of [B, num_categoricals, num_classes])
+                as a second return value.
         """
         # Send internal state through MLP.
         out = self.mlp(h)
         # Generate a z vector (stochastic, discrete sample).
-        z = self.representation_layer(out)
-        return z
+        return self.representation_layer(out, return_z_probs=return_z_probs)
 
 
 if __name__ == "__main__":

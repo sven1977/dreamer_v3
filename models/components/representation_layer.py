@@ -33,13 +33,10 @@ class RepresentationLayer(tf.keras.layers.Layer):
             activation=None,
         )
 
-    def call(self, input_):
-        """Produces a discrete, differentiable z-sample from the output of our layer.
+    def call(self, input_, return_z_probs=False):
+        """Produces a discrete, differentiable z-sample from some 1D input tensor.
 
-        First concatenates the incoming tensors (x from the observation-encoder, h from
-        the sequence model).
-
-        Pushes the concatenated vector through our dense layer, which outputs
+        Pushes the input_ tensor through our dense layer, which outputs
         32(B=num categoricals)*32(c=num classes) logits. Logits are used to:
 
         1) sample stochastically
@@ -55,6 +52,9 @@ class RepresentationLayer(tf.keras.layers.Layer):
                 (concatenated) outputs of the (image?) encoder + the last hidden
                 deterministic state, or b) the output of the dynamics predictor MLP
                 network.
+            return_z_probs: Whether to return the probabilities for the categorical
+                distribution (in the shape of [B, num_categoricals, num_classes])
+                as a second return value.
         """
         # Compute the logits (no activation) for our `num_categoricals` Categorical
         # distributions (with `num_classes_per_categorical` classes each).
@@ -77,7 +77,10 @@ class RepresentationLayer(tf.keras.layers.Layer):
         # by adding the probs and subtracting the sg(probs). Note that `sample`
         # does not have any gradients as it's the result of a Categorical sample step,
         # which is non-differentiable (other than say a Gaussian sample step).
-        return sample + probs - tf.stop_gradient(probs)
+        differentiable_sample = sample + probs - tf.stop_gradient(probs)
+        if return_z_probs:
+            return differentiable_sample, probs
+        return differentiable_sample
 
 
 if __name__ == "__main__":

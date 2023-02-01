@@ -57,7 +57,7 @@ class ConvTransposeAtari(tf.keras.Model):
         for _ in range(len(self.conv_transpose_layers)):
             self.layer_normalizations.append(tf.keras.layers.LayerNormalization())
 
-    def call(self, h, z):
+    def call(self, h, z, return_distribution=False):
         """TODO
 
         Args:
@@ -84,7 +84,10 @@ class ConvTransposeAtari(tf.keras.Model):
         # "Distributions The image predictor outputs the mean of a diagonal Gaussian
         # likelihood with unit variance, ..."
         distribution = tfp.distributions.Normal(loc=out, scale=1.0)
-        return distribution.sample()
+        pred_obs = distribution.sample()
+        if return_distribution:
+            return pred_obs, distribution
+        return pred_obs
 
 
 if __name__ == "__main__":
