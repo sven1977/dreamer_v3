@@ -8,6 +8,7 @@ import tensorflow as tf
 
 def symlog(x):
     """The symlog function as described in [1]"""
+    x = tf.cast(x, tf.float32)
     return tf.math.sign(x) * tf.math.log(tf.math.abs(x) + 1)
 
 

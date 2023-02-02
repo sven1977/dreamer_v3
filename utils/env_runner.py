@@ -1,10 +1,23 @@
+from functools import partial
 import gymnasium as gym
 import numpy as np
+from supersuit.generic_wrappers import resize_v1
 import tensorflow as tf
 from typing import Optional
 
 from ray.rllib.algorithms.algorithm_config import AlgorithmConfig
 from ray.rllib.policy.sample_batch import MultiAgentBatch
+
+
+class CountEnv(gym.ObservationWrapper):
+    def reset(self, **kwargs):
+        self.__counter = 0
+        return super().reset(**kwargs)
+
+    def observation(self, observation):
+        observation[0][0][0] = self.__counter
+        self.__counter += 1
+        return observation
 
 
 class EnvRunner:
@@ -24,6 +37,7 @@ class EnvRunner:
             self.env = gym.vector.make(
                 "GymV26Environment-v0",
                 env_id=self.config.env,
+                wrappers=[partial(resize_v1, x_size=64, y_size=64), CountEnv],
                 num_envs=self.config.num_envs_per_worker,
                 asynchronous=self.config.remote_worker_envs,
             )
@@ -35,9 +49,10 @@ class EnvRunner:
             )
         self.needs_initial_reset = True
         self.observations = [[] for _ in range(self.env.num_envs)]
-        #self.next_observations = []
         self.actions = [[] for _ in range(self.env.num_envs)]
         self.rewards = [[] for _ in range(self.env.num_envs)]
+        self.terminateds = [[] for _ in range(self.env.num_envs)]
+        self.truncateds = [[] for _ in range(self.env.num_envs)]
         self.episode_lengths = [0, 0]
 
     def sample(self, explore: bool = True, random_actions: bool = False):
@@ -77,12 +92,12 @@ class EnvRunner:
         Returns:
             A MultiAgentBatch holding the collected experiences.
         """
-        ts = 0
-        ts_sequences = [len(self.observations[i]) for i in range(self.env.num_envs)]
         return_obs = []
-        #return_next_obs = []
+        return_next_obs = []
         return_actions = []
         return_rewards = []
+        return_terminateds = []
+        return_truncateds = []
         return_masks = []
 
         if force_reset or self.needs_initial_reset:
@@ -90,10 +105,16 @@ class EnvRunner:
             self.needs_initial_reset = False
             for i, o in enumerate(self._split_by_env(obs)):
                 self.observations[i].append(o)
+        else:
+            obs = np.stack([o[-1] for o in self.observations])
+
+        ts = 0
+        ts_sequences = [len(self.observations[i]) - 1 for i in range(self.env.num_envs)]
 
         while True:
             if random_actions:
                 actions = self.env.action_space.sample()
+                print(f"took action {actions}")
             else:
                 action_logits = self.model(obs)
                 # Sample.
@@ -105,13 +126,21 @@ class EnvRunner:
 
             obs, rewards, terminateds, truncateds, infos = self.env.step(actions)
 
-            #self.next_observations.append(next_obs)
-            for i, a in enumerate(self._split_by_env(actions)):
+            for i, (o, a, r, term, trunc) in enumerate(zip(
+                    self._split_by_env(obs),
+                    self._split_by_env(actions),
+                    self._split_by_env(rewards),
+                    self._split_by_env(terminateds),
+                    self._split_by_env(truncateds),
+            )):
+                self.observations[i].append(o)
                 self.actions[i].append(a)
-            for i, r in enumerate(self._split_by_env(rewards)):
                 self.rewards[i].append(r)
-
-            #obs = next_obs
+                self.terminateds[i].append(term)
+                self.truncateds[i].append(trunc)
+            # Make sure we always have one more obs stored than rewards (and actions)
+            # due to the reset and last-obs logic of an MDP.
+            assert(len(self.observations[0]) == len(self.rewards[0]) + 1)
 
             ts += self.env.num_envs
             for i in range(self.env.num_envs):
@@ -119,34 +148,45 @@ class EnvRunner:
                 if terminateds[i] or truncateds[i] or ts_sequences[i] == self.max_seq_len:
                     seq_len = ts_sequences[i]
                     ts_sequences[i] = 0
+                    # The last entry in self.observations[i] is already the reset obs
+                    # of the new episode.
                     if terminateds[i] or truncateds[i]:
-                        self.observations[i].append(infos["final_observation"][i])
+                        return_next_obs.append(infos["final_observation"][i])
+                    # Last entry in self.observations[i] is the next obs (continuing
+                    # the ongoing episode).
+                    else:
+                        return_next_obs.append(self.observations[i][-1])
 
-                    return_obs.append(self._process_and_pad(self.observations[i]))
-                    #return_next_obs.append(self._process_and_pad(self.next_observations))
+                    return_obs.append(self._process_and_pad(self.observations[i][:-1]))
                     return_actions.append(self._process_and_pad(self.actions[i]))
                     return_rewards.append(self._process_and_pad(self.rewards[i]))
+                    return_terminateds.append(self._process_and_pad(self.terminateds[i]))
+                    return_truncateds.append(self._process_and_pad(self.truncateds[i]))
                     return_masks.append(seq_len)
 
-                    self.observations[i] = []
-                    #self.next_observations = []
+                    self.observations[i] = [self.observations[i][-1]]
                     self.actions[i] = []
                     self.rewards[i] = []
+                    self.terminateds[i] = []
+                    self.truncateds[i] = []
 
-            for i, o in enumerate(self._split_by_env(obs)):
-                self.observations[i].append(o)
+            # Make sure we always have one more obs stored than rewards (and actions)
+            # due to the reset and last-obs logic of an MDP.
+            assert(len(self.observations[0]) == len(self.rewards[0]) + 1)
 
             if ts >= num_timesteps:
                 break
 
         # Batch all trajectories together along batch axis.
         return_obs = np.stack(return_obs, axis=0)
-        #return_next_obs = np.concatenate(return_next_obs, axis=0)
+        return_next_obs = np.stack(return_next_obs, axis=0)
         return_actions = np.stack(return_actions, axis=0)
         return_rewards = np.stack(return_rewards, axis=0)
+        return_terminateds = np.stack(return_terminateds, axis=0)
+        return_truncateds = np.stack(return_truncateds, axis=0)
         return_masks = np.array([[1.0 if i < m else 0.0 for i in range(self.max_seq_len)] for m in return_masks])
 
-        return return_obs, return_actions, return_rewards, return_masks
+        return return_obs, return_next_obs, return_actions, return_rewards, return_terminateds, return_truncateds, return_masks
 
     def _split_by_env(self, inputs):
         return [inputs[i] for i in range(self.env.num_envs)]
@@ -155,17 +195,13 @@ class EnvRunner:
         # inputs=T x [dim]
         inputs = np.stack(inputs, axis=0)
         # inputs=[T, dim]
-
-        if len(inputs.shape) == 2:
-            inputs = np.pad(inputs, ((0, self.max_seq_len - inputs.shape[0]), (0, 0)), "constant", constant_values=0.0)
-        else:
-            inputs = np.pad(
-                inputs,
-                (0, self.max_seq_len - inputs.shape[0],),
-                "constant",
-                constant_values=0.0,
-            )
-        # inputs=[[B (num_envs), Tmax, dim]
+        inputs = np.pad(
+            inputs,
+            [(0, self.max_seq_len - inputs.shape[0])] + [(0, 0)] * (len(inputs.shape) - 1),
+            "constant",
+            constant_values=0.0,
+        )
+        # inputs=[[B=num_envs, Tmax, ... dims]
         return inputs
 
 
@@ -177,4 +213,13 @@ if __name__ == "__main__":
         .rollouts(num_envs_per_worker=2, rollout_fragment_length=200)
     )
     env_runner = EnvRunner(model=None, config=config, max_seq_len=64)
-    print(env_runner.sample(random_actions=True))
+    for _ in range(100):
+        obs, next_obs, actions, rewards, terminateds, truncateds, mask = (
+            env_runner.sample(random_actions=True)
+        )
+        print(obs.shape) # obs shape
+        print(obs[:, :, 0,0,0])
+        print(next_obs[:, 0,0,0])
+        print(actions)
+        print(terminateds)
+        print(mask)

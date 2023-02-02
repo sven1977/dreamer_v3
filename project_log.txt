@@ -41,6 +41,42 @@
             answer: Using floor, ceil, tf.scatter_nd()
     - Implemented Reward-predictor and continue-predictor.
 
-
 2023/02/01
-    -
+    - Complete Atari World Model code (roughly, w/o actually running it).
+    - Complete World Model loss functions (L_pred, L_dyn, L_rep) (roughly w/o
+      actually running it).
+    - Lift existing EnvRunner from other project ("Attention is all you need") and adjust
+      such that:
+        - It can run on vectorized Atari envs using gymnasium.vector.make()
+        - It produces samples (obs, actions, rewards, trunc., term., valid-masks) of
+          shape (B=num-sub-envs, T=max-seq-len, ...)
+          Note that T does NOT go beyond episode boundaries. If an episode ends within
+          a current T-rollout, the remaining max-seq-len - len timesteps are filled with
+          zero values. The returned mask indicates, which exact B,T positions are valid
+          and which aren't and thus can be used to properly mask the total loss
+          computation.
+        - Next obs are NOT fully (B, T)-provided to save space. They are only ever
+          needed in case of a truncated rollout (max-seq-len) or the episode is truncated
+          in the middle of the rollout (before T is reached). Thus next_obs are returned
+          as (B, dim), NOT as (B, T, dim)
+        - Returned samples could be inserted as is (after splitting along the B-axis)
+          into a Dreamer-style replay buffer with max-seq-len being the "batch len"
+          described in the paper.
+
+2023/02/02
+    - Finished fixing bugs in EnvRunner; wrote a small test script for collecting
+      vectorized Pacman samples.
+    - Wrote quick non-RLlib training script for a AtariWorlModel using the above simple
+      EnvRunner; this does not include a buffer yet, but has an Atari world model,
+      optimizer, calls loss functions and updates the model.
+    - Started debugging World Model training code by stepping through the above example
+      script and weeding out errors in the code. For example:
+        - output of decoder is NOT a Normal, but a MultivariateNormalDiag (each pixel
+          is an independent variable).
+        - weights of reward-bucket dense layer must be zero-initialized according to the
+          paper.
+        -
+    Open questions:
+    - When symlog'ing Atari image observations, do we brutally just pass in the 0-255 uint8
+      values into the symlog function? Or do we - even though we have symlog - still have
+      to normalize observations?

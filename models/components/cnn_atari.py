@@ -33,7 +33,7 @@ class CNNAtari(tf.keras.Model):
                 activation=tf.nn.silu,
             ),
             tf.keras.layers.Conv2D(
-                filters=96,
+                filters=72,
                 kernel_size=3,
                 strides=(2, 2),
                 padding="same",
@@ -41,7 +41,7 @@ class CNNAtari(tf.keras.Model):
             ),
             # .. until output is 4 x 4 x [num_filters].
             tf.keras.layers.Conv2D(
-                filters=192,
+                filters=96,
                 kernel_size=3,
                 strides=(2, 2),
                 padding="same",

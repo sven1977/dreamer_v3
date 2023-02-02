@@ -25,7 +25,17 @@ class RewardPredictorLayer(tf.keras.layers.Layer):
         self.lower_bound = lower_bound
         self.upper_bound = upper_bound
         self.reward_buckets_layer = tf.keras.layers.Dense(
-            self.num_buckets, activation=None
+            self.num_buckets,
+            activation=None,
+
+            # From [1]:
+            # "We further noticed that the randomly initialized reward predictor and
+            # critic networks at the start of training can result in large predicted
+            # rewards that can delay the onset of learning. We initialize the output
+            # weights of the reward predictor and critic to zeros, which effectively
+            # alleviates the problem and accelerates early learning."
+            kernel_initializer="zeros",
+            bias_initializer="zeros",  # default anyways
         )
         # Size of each reward bucket.
         self.bucket_delta = (

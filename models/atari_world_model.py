@@ -46,6 +46,9 @@ class AtariWorldModel(tf.keras.Model):
         # Decoder (h, z -> x^).
         self.cnn_transpose_atari = ConvTransposeAtari()
 
+    def call(self, inputs, *args, **kwargs):
+        return self.forward_train(inputs, *args, **kwargs)
+
     def forward_inference(self, observations, actions, h):
         """TODO: inference
 
@@ -83,7 +86,7 @@ class AtariWorldModel(tf.keras.Model):
         #  world model).
         return h_tp1
 
-    def forward_train(self, observations, actions, initial_h):
+    def forward_train(self, observations, actions, initial_h, training=None):
         """TODO: training
 
         All inputs have shape (B x T x ...)
@@ -93,7 +96,7 @@ class AtariWorldModel(tf.keras.Model):
         # encoder_outs=[B, T, ...]
 
         # Fold time dimension for CNN pass.
-        T = observations.shape[1]
+        B, T = observations.shape[0], observations.shape[1]
         observations = tf.reshape(observations, shape=[-1] + observations.shape.as_list()[2:])
         encoder_out = self.cnn_atari(symlog(observations))
         # Unfold time dimension.
@@ -106,36 +109,46 @@ class AtariWorldModel(tf.keras.Model):
         zs = []
         z_probs_encoder = []
         z_probs_dynamics = []
-        hs = [initial_h]
+        hs = [initial_h or self._get_initial_h(batch_size=B)]
+        h_tp1 = hs[-1]
         for t in range(self.batch_length_T):
             h_t = hs[-1]
             repr_input = tf.concat([encoder_out[:, t], h_t], axis=-1)
             # Draw one z-sample (z(t)) and also get the z-distribution for dynamics and
             # representation loss computations.
             z_t, z_probs = self.representation_layer(repr_input, return_z_probs=True)
+            # z_t=[B, ]
             z_probs_encoder.append(z_probs)
-            # Flatten z to [B, T, dim]:
-            z_t = tf.reshape(z_t, shape=(z_t.shape[0], z_t.shape[1], -1))
-            assert len(z_t.shape) == 3
+            # Flatten z to [B, num_categoricals x num_classes]:
             zs.append(z_t)
 
             # Compute the predicted z_t (z^) using the dynamics model.
             _, z_probs = self.dynamics_predictor(h_t, return_z_probs=True)
             z_probs_dynamics.append(z_probs)
 
-            # Compute h(t+1); not needed for the last time step.
+            # Compute h(t+1).
+            # Make sure z- and action inputs to sequence model are sequences.
+            # Expand to T=1:
+            h_tp1 = self.sequence_model(
+                z=tf.expand_dims(z_t, axis=1),
+                a=actions[:, t:t+1],  # Make sure actions also has a T dimension.
+                h=h_t,  # Initial state must NOT have a T dimension.
+            )
+            # Not needed for the last time step.
             if t < self.batch_length_T - 1:
-                h_tp1 = self.sequence_model(z_t, actions[:, t], h_t)
                 hs.append(h_tp1)
 
-        hs = tf.stack(hs, axis=0)
-        zs = tf.stack(zs, axis=0)
+        # Stack at time dimension to yield: [B, T, ...].
+        hs = tf.stack(hs, axis=1)
+        zs = tf.stack(zs, axis=1)
         # Fold time axis to retrieve the final (loss ready) categorical distribution.
+        z_probs_encoder = tf.stack(z_probs_encoder, axis=1)
         z_distribution_encoder = tfp.distributions.Categorical(
-            logits=tf.reshape(tf.concat(z_probs_encoder, axis=1), [-1])
+            logits=tf.reshape(z_probs_encoder, [-1] + z_probs_encoder.shape.as_list()[2:])
         )
+        z_probs_dynamics = tf.stack(z_probs_dynamics, axis=1)
         z_distribution_dynamics = tfp.distributions.Categorical(
-            logits=tf.reshape(tf.concat(z_probs_dynamics, axis=1), [-1])
+            logits=tf.reshape(z_probs_dynamics, [-1] + z_probs_dynamics.shape.as_list()[2:])
         )
 
         # Fold time dimension.
@@ -163,8 +176,17 @@ class AtariWorldModel(tf.keras.Model):
             "continue_distribution": continue_distribution,
             "z_distribution_encoder": z_distribution_encoder,
             "z_distribution_dynamics": z_distribution_dynamics,
+            # Next deterministic internal states (h). This needs to be passed into
+            # the next call to this method.
+            "h_tp1": h_tp1,
         }
+
+    def _get_initial_h(self, batch_size: int):
+        return tf.zeros(
+            shape=(batch_size, self.sequence_model.gru_unit.units),
+            dtype=tf.float32,
+        )
 
 
 if __name__ == "__main__":
-    world_model =
+    pass#world_model =

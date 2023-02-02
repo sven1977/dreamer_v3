@@ -1,3 +1,4 @@
+import numpy as np
 import tensorflow as tf
 import tensorflow_probability as tfp
 
@@ -13,6 +14,8 @@ def world_model_prediction_loss(
 ):
     obs_distr = forward_train_outs["obs_distribution"]
     # Learn to produce symlog'd observation predictions.
+    # Fold time dim.
+    observations = tf.reshape(observations, shape=[-1, int(np.prod(observations.shape.as_list()[2:]))])
     decoder_loss = - obs_distr.log_prob(symlog(observations))
 
     # Probabilities of the individual reward value buckets computed by our reward

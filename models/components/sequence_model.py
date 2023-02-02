@@ -20,8 +20,8 @@ class SequenceModel(tf.keras.Model):
         self.action_space = action_space
         self.gru_unit = tf.keras.layers.GRU(
             num_gru_units,
-            return_sequences=True,
-            return_state=True,
+            return_sequences=False,
+            return_state=False,
         )
 
     def call(self, z, a, h=None):

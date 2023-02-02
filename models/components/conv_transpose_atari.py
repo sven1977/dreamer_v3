@@ -8,6 +8,8 @@ D. Hafner, T. Lillicrap, M. Norouzi, J. Ba
 https://arxiv.org/pdf/2010.02193.pdf
 """
 import numpy as np
+from typing import Tuple
+
 import tensorflow as tf
 import tensorflow_probability as tfp
 
@@ -15,16 +17,22 @@ import tensorflow_probability as tfp
 class ConvTransposeAtari(tf.keras.Model):
     # TODO: Un-hard-code all hyperparameters, such as input dims, activation,
     #  filters, etc..
-    def __init__(self):
+    def __init__(self, input_dims: Tuple[int] = (4, 4, 96)):
         super().__init__()
+        # The shape going into the first Conv2DTranspose layer.
+        self.input_dims = tuple(input_dims)
+
         # See appendix B in [1]:
         # "The decoder starts with a dense layer, followed by reshaping
         # to 4 × 4 × C and then inverts the encoder architecture. ..."
-        self.dense_layer = tf.keras.layers.Dense(4 * 4 * 192, activation=tf.nn.silu)
+        self.dense_layer = tf.keras.layers.Dense(
+            units=int(np.prod(self.input_dims)),
+            activation=tf.nn.silu,
+        )
         # Inverse conv2d stack. See cnn_atari.py for Conv2D stack.
         self.conv_transpose_layers = [
             tf.keras.layers.Conv2DTranspose(
-                filters=96,
+                filters=72,
                 kernel_size=3,
                 strides=(2, 2),
                 padding="same",
@@ -75,7 +83,7 @@ class ConvTransposeAtari(tf.keras.Model):
         # for the first conv2dtranspose layer.
         out = self.dense_layer(out)
         # Reshape to image format.
-        out = tf.reshape(out, shape=(-1, 4, 4, 192))
+        out = tf.reshape(out, shape=(-1,) + self.input_dims)
         # Pass through stack of Conv2DTransport layers (and layer norms).
         for conv_transpose_2d, layer_norm in zip(self.conv_transpose_layers, self.layer_normalizations):
             out = layer_norm(inputs=conv_transpose_2d(out))
@@ -83,7 +91,13 @@ class ConvTransposeAtari(tf.keras.Model):
         # From [2]:
         # "Distributions The image predictor outputs the mean of a diagonal Gaussian
         # likelihood with unit variance, ..."
-        distribution = tfp.distributions.Normal(loc=out, scale=1.0)
+        # Reshape out for the diagonal multi-variate Gaussian (each pixel is its own
+        # independent (diagonal co-variance matrix) variable).
+        loc = tf.reshape(out, shape=[out.shape.as_list()[0], -1])
+        distribution = tfp.distributions.MultivariateNormalDiag(
+            loc=loc,
+            scale_diag=tf.ones_like(loc),
+        )
         pred_obs = distribution.sample()
         if return_distribution:
             return pred_obs, distribution
