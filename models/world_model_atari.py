@@ -17,7 +17,9 @@ from models.components.sequence_model import SequenceModel
 from utils.symlog import symlog
 
 
-class AtariWorldModel(tf.keras.Model):
+class WorldModelAtari(tf.keras.Model):
+    """TODO
+    """
     def __init__(self, action_space: gym.Space, batch_length_T: int = 64):
         """TODO
 

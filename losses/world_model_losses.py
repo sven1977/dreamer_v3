@@ -5,7 +5,7 @@ import tensorflow_probability as tfp
 from utils.symlog import symlog
 
 
-def world_model_prediction_loss(
+def world_model_prediction_losses(
         observations,
         rewards,
         terminateds,
@@ -23,6 +23,8 @@ def world_model_prediction_loss(
     # [B x num_buckets].
     reward_distr = forward_train_outs["reward_distribution"]
     # Learn to produce symlog'd reward predictions.
+    # Fold time dim.
+    rewards = tf.reshape(rewards, shape=[-1])
     reward_loss = - reward_distr.log_prob(symlog(rewards))
 
     # Continue predictor loss.
@@ -31,9 +33,16 @@ def world_model_prediction_loss(
     # [B]
     continue_distr = forward_train_outs["continue_distribution"]
     # -log(p) loss
+    # Fold time dim.
+    continues = tf.reshape(continues, shape=[-1])
     continue_loss = - continue_distr.log_prob(continues)
 
-    return decoder_loss + reward_loss + continue_loss
+    return {
+        "decoder_loss": decoder_loss,
+        "reward_loss": reward_loss,
+        "continue_loss": continue_loss,
+        "total_loss": decoder_loss + reward_loss + continue_loss,
+    }
 
 
 def world_model_dynamics_and_representation_loss(forward_train_outs):
@@ -60,10 +69,16 @@ def world_model_dynamics_and_representation_loss(forward_train_outs):
     # on its prediction loss"
     L_dyn = tf.math.maximum(
         1.0,
-        tfp.distributions.kl_divergence(sg_z_distr_encoder, z_distr_dynamics),
+        tf.reduce_mean(  # average over all `num_categoricals`.
+            tfp.distributions.kl_divergence(sg_z_distr_encoder, z_distr_dynamics),
+            axis=-1,
+        ),
     )
     L_rep = tf.math.maximum(
         1.0,
-        tfp.distributions.kl_divergence(z_distr_encoder, sg_z_distr_dynamics),
+        tf.reduce_mean(  # average over all `num_categoricals`.
+            tfp.distributions.kl_divergence(z_distr_encoder, sg_z_distr_dynamics),
+            axis=-1,
+        ),
     )
     return L_dyn, L_rep

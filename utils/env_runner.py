@@ -184,7 +184,7 @@ class EnvRunner:
         return_rewards = np.stack(return_rewards, axis=0)
         return_terminateds = np.stack(return_terminateds, axis=0)
         return_truncateds = np.stack(return_truncateds, axis=0)
-        return_masks = np.array([[1.0 if i < m else 0.0 for i in range(self.max_seq_len)] for m in return_masks])
+        return_masks = np.array([[1.0 if i < m else 0.0 for i in range(self.max_seq_len)] for m in return_masks], dtype=np.float32)
 
         return return_obs, return_next_obs, return_actions, return_rewards, return_terminateds, return_truncateds, return_masks
 

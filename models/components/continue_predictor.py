@@ -19,9 +19,9 @@ class ContinuePredictor(tf.keras.Model):
         """TODO
 
         Args:
-            h: The deterministic hidden state of the sequence model.
+            h: The deterministic hidden state of the sequence model. [B, dim(h)].
             z: The stochastic discrete representations of the original
-                observation input.
+                observation input. [B, num_categoricals, num_classes].
         """
         # Flatten last two dims of z.
         assert len(z.shape) == 3
@@ -30,6 +30,10 @@ class ContinuePredictor(tf.keras.Model):
         out = tf.concat([h, z], axis=-1)
         # Send h-cat-z through MLP.
         out = self.mlp(out)
+        # Remove the extra [B, 1] dimension at the end to get a proper Bernoulli
+        # distribution. Otherwise, tfp will think that the batch dims are [B, 1]
+        # where they should be just [B].
+        out= tf.squeeze(out, axis=-1)
         # Transform to a single prob value for a Bernoulli distribution.
         prob = tf.nn.sigmoid(out)
         bernoulli = tfp.distributions.Bernoulli(prob)
