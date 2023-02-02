@@ -111,7 +111,7 @@ class WorldModelAtari(tf.keras.Model):
         zs = []
         z_probs_encoder = []
         z_probs_dynamics = []
-        hs = [initial_h or self._get_initial_h(batch_size=B)]
+        hs = [initial_h if initial_h is not None else self._get_initial_h(batch_size=B)]
         h_tp1 = hs[-1]
         for t in range(self.batch_length_T):
             h_t = hs[-1]

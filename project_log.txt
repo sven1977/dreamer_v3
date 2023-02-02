@@ -75,7 +75,7 @@
           is an independent variable).
         - weights of reward-bucket dense layer must be zero-initialized according to the
           paper.
-    - Got the entire sampling + loss + updating loop to run.
+    - Got the entire sampling + loss + updating loop to run for the world model.
     - TODO: Continue debugging and successfully train.
 
     Open questions:
@@ -90,6 +90,8 @@
           Answer: Use FiniteDiscrete with `atol`==bucket_delta / 2.0.
 
 OPEN PROBLEMS:
-- mask returned by EnvRunner is wrong (still logic from attention net, where mask
+- TODO: mask returned by EnvRunner is wrong (still logic from attention net, where mask
   has a different task (mask future timesteps for self-attention that model cannot
   know (yet))).
+- Figure out reason of actor loss:
+

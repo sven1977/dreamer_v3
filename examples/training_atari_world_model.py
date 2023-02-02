@@ -12,20 +12,28 @@ from losses.world_model_losses import (
 # EnvRunner config (an RLlib algorithm config).
 config = (
     AlgorithmConfig()
-        .environment("ALE/MsPacman-v5")
-        .rollouts(num_envs_per_worker=2, rollout_fragment_length=200)
+    .environment("ALE/MsPacman-v5")
+    .rollouts(num_envs_per_worker=2, rollout_fragment_length=200)
 )
 # The vectorized gymnasium EnvRunner to collect samples of shape (B, T, ...).
 env_runner = EnvRunner(model=None, config=config, max_seq_len=64)
+
 # Our DreamerV3 world model.
-world_model = WorldModelAtari(action_space=env_runner.env.single_action_space, batch_length_T=64)
+batch_size_B = 16
+batch_length_T = 64
+world_model = WorldModelAtari(
+    action_space=env_runner.env.single_action_space,
+    batch_length_T=batch_length_T,
+)
+
 # Use an Adam optimizer.
 optimizer = tf.keras.optimizers.Adam(learning_rate=1e-4, epsilon=1e-8)
+
 # World model grad clipping according to [1].
 grad_clip = 1000.0
 
 last_h = None
-for epoch in range(1):
+for epoch in range(10):
     # Sample one round.
     obs, next_obs, actions, rewards, terminateds, truncateds, mask = (
         env_runner.sample(random_actions=True)
@@ -62,10 +70,11 @@ for epoch in range(1):
         )
         L_total = 1.0 * L_pred + 0.5 * L_dyn + 0.1 * L_rep
 
-        # Sum up timesteps, and average over batch (eq. 4 in [1]).
+        # Bring back into (B, T)-shape.
         L_total = tf.reshape(L_total, shape=(B, T))
         # Mask out invalid timesteps (episode terminated/truncated).
         L_total = L_total * mask_tensor
+        # Sum up timesteps, and average over batch (see eq. 4 in [1]).
         L_total = tf.reduce_mean(tf.reduce_sum(L_total, axis=-1))
 
     # Get the gradients from the tape.
