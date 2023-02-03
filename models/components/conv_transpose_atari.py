@@ -62,18 +62,22 @@ class ConvTransposeAtari(tf.keras.Model):
                 padding="same",
                 activation=tf.nn.silu,
             ),
-            # .. until output is 64 x 64 x 3.
-            tf.keras.layers.Conv2DTranspose(
-                filters=3,
-                kernel_size=3,
-                strides=(2, 2),
-                padding="same",
-                activation=tf.nn.silu,
-            ),
         ]
         self.layer_normalizations = []
         for _ in range(len(self.conv_transpose_layers)):
             self.layer_normalizations.append(tf.keras.layers.LayerNormalization())
+
+        # .. until output is 64 x 64 x 3.
+        # No activation or layer norm for last layer as the outputs of this go directly
+        # into the diag-gaussian as parameters. This distribution then outputs
+        # symlog'd images, which need to be inverse-symlog'd to be actual RGB-images.
+        self.output_conv2d_transpose = tf.keras.layers.Conv2DTranspose(
+            filters=3,
+            kernel_size=3,
+            strides=(2, 2),
+            padding="same",
+            activation=None,
+        )
 
     def call(self, h, z, return_distribution=False):
         """TODO
@@ -94,15 +98,19 @@ class ConvTransposeAtari(tf.keras.Model):
         out = self.dense_layer(out)
         # Reshape to image format.
         out = tf.reshape(out, shape=(-1,) + self.input_dims)
+
         # Pass through stack of Conv2DTransport layers (and layer norms).
         for conv_transpose_2d, layer_norm in zip(self.conv_transpose_layers, self.layer_normalizations):
             out = layer_norm(inputs=conv_transpose_2d(out))
+        # Last output conv2d-transpose layer:
+        out = self.output_conv2d_transpose(out)
+
         # Interpret output as means of a diag-Gaussian with std=1.0:
         # From [2]:
         # "Distributions The image predictor outputs the mean of a diagonal Gaussian
         # likelihood with unit variance, ..."
         # Reshape out for the diagonal multi-variate Gaussian (each pixel is its own
-        # independent (diagonal co-variance matrix) variable).
+        # independent (b/c diagonal co-variance matrix) variable).
         loc = tf.reshape(out, shape=[out.shape.as_list()[0], -1])
         distribution = tfp.distributions.MultivariateNormalDiag(
             loc=loc,
