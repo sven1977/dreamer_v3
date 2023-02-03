@@ -37,15 +37,17 @@ class EnvRunner:
             self.env = gym.vector.make(
                 "GymV26Environment-v0",
                 env_id=self.config.env,
-                wrappers=[partial(resize_v1, x_size=64, y_size=64), CountEnv],
+                wrappers=[partial(resize_v1, x_size=64, y_size=64)],#, CountEnv],
                 num_envs=self.config.num_envs_per_worker,
                 asynchronous=self.config.remote_worker_envs,
+                make_kwargs=self.config.env_config,
             )
         else:
             self.env = gym.vector.make(
                 self.config.env,
                 num_envs=self.config.num_envs_per_worker,
                 asynchronous=self.config.remote_worker_envs,
+                make_kwargs=self.config.env_config,
             )
         self.needs_initial_reset = True
         self.observations = [[] for _ in range(self.env.num_envs)]
@@ -229,7 +231,14 @@ if __name__ == "__main__":
     #gym.register("atari", lambda: gym.wrappers.EnvCompatibility(gym.make("GymV26Environment-v0", env_id="ALE/MsPacman-v5")))
     config = (
         AlgorithmConfig()
-        .environment("ALE/MsPacman-v5")
+        .environment("ALE/MsPacman-v5", env_config={
+            # TODO: For now, do deterministic only.
+            #  According to SimplE paper, stochastic envs should NOT be a problem, though.
+            "frameskip": 4,
+            # DreamerV3 paper does not specify, whether Atari100k is run
+            # w/ or w/o sticky actions, just that frameskip=4.
+            "repeat_action_probability": 0.0,
+        })
         .rollouts(num_envs_per_worker=2, rollout_fragment_length=200)
     )
     env_runner = EnvRunner(model=None, config=config, max_seq_len=64)

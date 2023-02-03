@@ -128,3 +128,5 @@ OPEN PROBLEMS:
 - Figure out reason of actor loss:
 - Implement unimix categoricals for world model representation layer and dynamics predictor.
 - Implement unimix categoricals for actor network (for discrete actions?)
+- For now, I have been training deterministic Atari only:
+  no sticky actions (action_repeat_probability=0.0), and frameskip=4

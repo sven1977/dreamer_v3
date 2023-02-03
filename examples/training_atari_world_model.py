@@ -18,7 +18,7 @@ batch_length_T = 64
 # EnvRunner config (an RLlib algorithm config).
 config = (
     AlgorithmConfig()
-    .environment("ALE/MsPacman-v5")
+    .environment("ALE/MsPacman-v5", env_config={"frameskip": 4})
     .rollouts(num_envs_per_worker=2, rollout_fragment_length=200)
 )
 # The vectorized gymnasium EnvRunner to collect samples of shape (B, T, ...).
@@ -91,6 +91,9 @@ def train_one_step(sample):
     return L_total, L_pred, L_dyn, L_rep
 
 
+total_env_steps = 0
+total_replayed_steps = 0
+
 for iteration in range(1000):
     # Push enough samples into buffer initially before we start training.
     env_steps = 0
@@ -127,13 +130,27 @@ for iteration in range(1000):
         if len(buffer) >= batch_size_B:
             break
 
-    # Draw a sample from the replay buffer.
-    sample = buffer.sample(num_items=batch_size_B)
-    # Convert samples (numpy) to tensors.
-    sample = tree.map_structure(lambda v: tf.convert_to_tensor(v), sample)
-    L_total, L_pred, L_dyn, L_rep = train_one_step(sample)
+    total_env_steps += env_steps
 
+    replayed_steps = 0
+
+    sub_iter = 0
+    while replayed_steps / env_steps < training_ratio:
+        # Draw a sample from the replay buffer.
+        sample = buffer.sample(num_items=batch_size_B)
+        replayed_steps += batch_size_B * batch_length_T
+
+        # Convert samples (numpy) to tensors.
+        sample = tree.map_structure(lambda v: tf.convert_to_tensor(v), sample)
+        L_total, L_pred, L_dyn, L_rep = train_one_step(sample)
+
+        print(
+            f"Iter {iteration}/{sub_iter}) L_total={L_total.numpy()} "
+            f"(L_pred={L_pred.numpy()}; L_dyn={L_dyn.numpy()}; L_rep={L_rep.numpy()})"
+        )
+        sub_iter += 1
+
+    total_replayed_steps += replayed_steps
     print(
-        f"Iter {iteration}) L_total={L_total.numpy()} "
-        f"(L_pred={L_pred.numpy()}; L_dyn={L_dyn.numpy()}; L_rep={L_rep.numpy()})"
+        f"\treplayed-steps: {total_replayed_steps}; env-steps: {total_env_steps}"
     )
