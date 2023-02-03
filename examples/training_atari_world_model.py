@@ -47,7 +47,7 @@ grad_clip = 1000.0
 training_ratio = 1024
 
 
-@tf.function
+#@tf.function
 def train_one_step(sample):
     # Compute losses.
     with tf.GradientTape() as tape:

@@ -68,9 +68,11 @@ class ConvTransposeAtari(tf.keras.Model):
             self.layer_normalizations.append(tf.keras.layers.LayerNormalization())
 
         # .. until output is 64 x 64 x 3.
-        # No activation or layer norm for last layer as the outputs of this go directly
-        # into the diag-gaussian as parameters. This distribution then outputs
-        # symlog'd images, which need to be inverse-symlog'd to be actual RGB-images.
+
+        # Important! No activation or layer norm for last layer as the outputs of
+        # this one go directly into the diag-gaussian as parameters.
+        # This distribution then outputs symlog'd images, which need to be
+        # inverse-symlog'd to become actual RGB-images.
         self.output_conv2d_transpose = tf.keras.layers.Conv2DTranspose(
             filters=3,
             kernel_size=3,

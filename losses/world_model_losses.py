@@ -5,7 +5,7 @@ import tensorflow_probability as tfp
 from utils.symlog import symlog
 
 
-@tf.function
+#@tf.function
 def world_model_prediction_losses(
         observations,
         rewards,
