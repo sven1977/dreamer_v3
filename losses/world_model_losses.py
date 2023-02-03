@@ -5,7 +5,7 @@ import tensorflow_probability as tfp
 from utils.symlog import symlog
 
 
-#@tf.function
+@tf.function
 def world_model_prediction_losses(
         observations,
         rewards,
@@ -15,9 +15,11 @@ def world_model_prediction_losses(
 ):
     obs_distr = forward_train_outs["obs_distribution"]
     # Learn to produce symlog'd observation predictions.
-    # Fold time dim.
+    # Fold time dim and flatten all other (image) dims.
     observations = tf.reshape(observations, shape=[-1, int(np.prod(observations.shape.as_list()[2:]))])
-    decoder_loss = - obs_distr.log_prob(symlog(observations))
+    #decoder_loss = - obs_distr.log_prob(symlog(observations))
+    #TODO: try MSE (instead of -log(p))
+    decoder_loss = tf.losses.mse(symlog(observations), obs_distr.loc)
 
     # Probabilities of the individual reward value buckets computed by our reward
     # predictor.

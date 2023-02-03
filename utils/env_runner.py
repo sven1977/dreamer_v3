@@ -47,7 +47,7 @@ class EnvRunner:
             self.env = gym.vector.make(
                 "GymV26Environment-v0",
                 env_id=self.config.env,
-                wrappers=[partial(resize_v1, x_size=64, y_size=64), NormalizeImageObs],# CountEnv],
+                wrappers=[partial(resize_v1, x_size=64, y_size=64)],# NormalizeImageObs],# CountEnv],
                 num_envs=self.config.num_envs_per_worker,
                 asynchronous=self.config.remote_worker_envs,
                 make_kwargs=self.config.env_config,
