@@ -3,6 +3,8 @@
 D. Hafner, J. Pasukonis, J. Ba, T. Lillicrap
 https://arxiv.org/pdf/2301.04104v1.pdf
 """
+from typing import Optional
+
 import numpy as np
 import tensorflow as tf
 
@@ -13,13 +15,15 @@ from models.components.reward_predictor_layer import RewardPredictorLayer
 class RewardPredictor(tf.keras.Model):
     def __init__(
         self,
+        *,
+        model_dimension: Optional[str] = "XS",
         num_buckets: int = 255,
         lower_bound: float = -20.0,
         upper_bound: float = 20.0,
     ):
         super().__init__()
 
-        self.mlp = MLP(output_layer_size=None)
+        self.mlp = MLP(model_dimension=model_dimension, output_layer_size=None)
         self.reward_layer = RewardPredictorLayer(
             num_buckets=num_buckets,
             lower_bound=lower_bound,

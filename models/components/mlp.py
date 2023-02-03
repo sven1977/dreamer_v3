@@ -7,11 +7,21 @@ https://arxiv.org/pdf/2301.04104v1.pdf
 D. Hafner, T. Lillicrap, M. Norouzi, J. Ba
 https://arxiv.org/pdf/2010.02193.pdf
 """
+from typing import Optional
+
 import tensorflow as tf
 
+from utils.model_sizes import get_dense_hidden_units, get_num_dense_layers
 
 class MLP(tf.keras.Model):
-    def __init__(self, output_layer_size=None):
+    def __init__(
+        self,
+        *,
+        model_dimension: Optional[str] = "XS",
+        num_dense_layers: Optional[int] = None,
+        dense_hidden_units: Optional[int] = None,
+        output_layer_size=None,
+    ):
         """TODO:
 
         Args:
@@ -21,9 +31,17 @@ class MLP(tf.keras.Model):
         """
         super().__init__()
 
+        num_dense_layers = get_num_dense_layers(
+            model_dimension, default=num_dense_layers
+        )
+        dense_hidden_units = get_dense_hidden_units(
+            model_dimension, default=dense_hidden_units
+        )
+
         self.dense_layers = []
-        for _ in range(1):
-            self.dense_layers.append(tf.keras.layers.Dense(256, activation=tf.nn.silu))
+        for _ in range(num_dense_layers):
+            self.dense_layers.append(tf.keras.layers.Dense(dense_hidden_units, activation=tf.nn.silu))
+
         self.layer_normalizations = []
         for _ in range(len(self.dense_layers)):
             self.layer_normalizations.append(tf.keras.layers.LayerNormalization())

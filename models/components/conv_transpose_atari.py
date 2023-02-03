@@ -8,19 +8,29 @@ D. Hafner, T. Lillicrap, M. Norouzi, J. Ba
 https://arxiv.org/pdf/2010.02193.pdf
 """
 import numpy as np
-from typing import Tuple
+from typing import Optional, Tuple
 
 import tensorflow as tf
 import tensorflow_probability as tfp
+
+from utils.model_sizes import get_cnn_multiplier
 
 
 class ConvTransposeAtari(tf.keras.Model):
     # TODO: Un-hard-code all hyperparameters, such as input dims, activation,
     #  filters, etc..
-    def __init__(self, input_dims: Tuple[int] = (4, 4, 96)):
+    def __init__(
+        self,
+        *,
+        model_dimension: Optional[str] = "XS",
+        cnn_multiplier: Optional[int] = None,
+    ):
         super().__init__()
+
+        cnn_multiplier = get_cnn_multiplier(model_dimension, default=cnn_multiplier)
+
         # The shape going into the first Conv2DTranspose layer.
-        self.input_dims = tuple(input_dims)
+        self.input_dims = (4, 4, 8 * cnn_multiplier)
 
         # See appendix B in [1]:
         # "The decoder starts with a dense layer, followed by reshaping
@@ -32,21 +42,21 @@ class ConvTransposeAtari(tf.keras.Model):
         # Inverse conv2d stack. See cnn_atari.py for Conv2D stack.
         self.conv_transpose_layers = [
             tf.keras.layers.Conv2DTranspose(
-                filters=72,
+                filters=4 * cnn_multiplier,
                 kernel_size=3,
                 strides=(2, 2),
                 padding="same",
                 activation=tf.nn.silu,
             ),
             tf.keras.layers.Conv2DTranspose(
-                filters=48,
+                filters=2 * cnn_multiplier,
                 kernel_size=3,
                 strides=(2, 2),
                 padding="same",
                 activation=tf.nn.silu,
             ),
             tf.keras.layers.Conv2DTranspose(
-                filters=24,
+                filters=1 * cnn_multiplier,
                 kernel_size=3,
                 strides=(2, 2),
                 padding="same",

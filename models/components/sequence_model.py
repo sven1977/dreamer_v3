@@ -3,19 +3,31 @@
 D. Hafner, J. Pasukonis, J. Ba, T. Lillicrap
 https://arxiv.org/pdf/2301.04104v1.pdf
 """
+from typing import Optional
+
 import gymnasium as gym
 import numpy as np
 import tensorflow as tf
 
+from utils.model_sizes import get_gru_units
 
-# TODO: de-hardcode the action processing.
+
+# TODO: de-hardcode the discrete action processing (currently one-hot).
 class SequenceModel(tf.keras.Model):
-    """The "sequence model" of the RSSM, predicting ht+1 given (ht, zt, at).
+    """The "sequence model" of the RSSM, computing ht+1 given (ht, zt, at).
 
     Here, h is the GRU unit output.
     """
-    def __init__(self, action_space: gym.Space, num_gru_units: int = 256):
+    def __init__(
+        self,
+        *,
+        model_dimension: Optional[str] = "XS",
+        action_space: gym.Space,
+        num_gru_units: Optional[int] = None,
+    ):
         super().__init__()
+
+        num_gru_units = get_gru_units(model_dimension, default=num_gru_units)
 
         self.action_space = action_space
         self.gru_unit = tf.keras.layers.GRU(

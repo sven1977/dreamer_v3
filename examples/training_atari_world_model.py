@@ -26,6 +26,7 @@ env_runner = EnvRunner(model=None, config=config, max_seq_len=batch_length_T)
 
 # Our DreamerV3 world model.
 world_model = WorldModelAtari(
+    model_dimension="S",
     action_space=env_runner.env.single_action_space,
     batch_length_T=batch_length_T,
 )
@@ -34,7 +35,7 @@ world_model = WorldModelAtari(
 env_runner.model = world_model
 
 # The replay buffer for storing actual env samples.
-buffer = ReplayBuffer(capacity=10000)
+buffer = ReplayBuffer(capacity=int(1e6 / batch_length_T))
 
 # Use an Adam optimizer.
 optimizer = tf.keras.optimizers.Adam(learning_rate=1e-4, epsilon=1e-8)
@@ -43,7 +44,7 @@ optimizer = tf.keras.optimizers.Adam(learning_rate=1e-4, epsilon=1e-8)
 grad_clip = 1000.0
 
 # Training ratio: Ratio of replayed steps over env steps.
-training_ratio = 64
+training_ratio = 1024
 
 
 @tf.function

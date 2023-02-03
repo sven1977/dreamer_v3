@@ -64,15 +64,26 @@ class RepresentationLayer(tf.keras.layers.Layer):
             logits,
             shape=(-1, self.num_categoricals, self.num_classes_per_categorical),
         )
-        # Build the tfp distribution object using the logits.
-        distribution = tfp.distributions.Categorical(logits=logits)
+        # Compute the probs (based on logits) via softmax.
+        probs = tf.nn.softmax(logits)
+        # Add the unimix weighting (1% uniform) to the probs.
+        # See [1]: "Unimix categoricals: We parameterize the categorical distributions
+        # for the world model representations and dynamics, as well as for the actor
+        # network, as mixtures of 1% uniform and 99% neural network output to ensure
+        # a minimal amount of probability mass on every class and thus keep log
+        # probabilities and KL divergences well behaved."
+        probs = 0.99 * probs + 0.01 * tf.fill(
+            dims=probs.shape, value=1.0 / self.num_classes_per_categorical
+        )
+
+        # Create the distribution object using the unimix'd probs.
+        distribution = tfp.distributions.Categorical(probs=probs)
+
         # Draw a sample and one-hot the results (B, num_categoricals, num_classes)
         sample = tf.one_hot(
             distribution.sample(),
             depth=self.num_classes_per_categorical,
         )
-        # Compute the probs (based on logits) via softmax.
-        probs = tf.nn.softmax(logits)
         # Make sure we can take gradients "straight-through" the sampling step
         # by adding the probs and subtracting the sg(probs). Note that `sample`
         # does not have any gradients as it's the result of a Categorical sample step,

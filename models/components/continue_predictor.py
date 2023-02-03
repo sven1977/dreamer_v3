@@ -3,6 +3,8 @@
 D. Hafner, J. Pasukonis, J. Ba, T. Lillicrap
 https://arxiv.org/pdf/2301.04104v1.pdf
 """
+from typing import Optional
+
 import numpy as np
 import tensorflow as tf
 import tensorflow_probability as tfp
@@ -11,9 +13,9 @@ from models.components.mlp import MLP
 
 
 class ContinuePredictor(tf.keras.Model):
-    def __init__(self):
+    def __init__(self, *, model_dimension: Optional[str] = "XS"):
         super().__init__()
-        self.mlp = MLP(output_layer_size=1)
+        self.mlp = MLP(model_dimension=model_dimension, output_layer_size=1)
 
     def call(self, h, z, return_distribution=False):
         """TODO

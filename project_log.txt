@@ -1,3 +1,8 @@
+[1] Mastering Diverse Domains through World Models - 2023
+D. Hafner, J. Pasukonis, J. Ba, T. Lillicrap
+https://arxiv.org/pdf/2301.04104v1.pdf
+
+
 2023/01/29:
     - Implemented Symlog function and inverse symlog function. Nice to do the math ourselves:
         # To get to symlog inverse, we solve the symlog equation for x:
@@ -101,7 +106,13 @@
       KL is computed as a sum(!) (not mean) of the individual distributions' KLs.
       Note: We do the same in RLlib for our multi-action distribution
     - Write 30 lines replay buffer.
-    - Got example to run and learn a little ().
+    - Got example to run and learn a little (commit 1cf47fecd32a3c2ca1cf7aa757465f3856b26710).
+        - Have to fix the training ratio (1024) and the model size (S instead of currently XS).
+    - Implemented `model_dimension` parameter for all components, such that the world-model
+      can be constructed with a simple scaling parameter: "XS", "S", ... (see [1] appendix B)
+
+    - TODO: Implement unimix categoricals for world model representation layer and dynamics
+       predictor.
 
     - Open questions:
         According to the paper: "DreamerV2 used a replay buffer that only replays time
@@ -115,3 +126,5 @@
 
 OPEN PROBLEMS:
 - Figure out reason of actor loss:
+- Implement unimix categoricals for world model representation layer and dynamics predictor.
+- Implement unimix categoricals for actor network (for discrete actions?)

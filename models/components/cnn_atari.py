@@ -3,15 +3,26 @@
 D. Hafner, J. Pasukonis, J. Ba, T. Lillicrap
 https://arxiv.org/pdf/2301.04104v1.pdf
 """
+from typing import Optional
+
 import numpy as np
 import tensorflow as tf
 
+from utils.model_sizes import get_cnn_multiplier
 
 class CNNAtari(tf.keras.Model):
     # TODO: Un-hard-code all hyperparameters, such as input dims, activation,
     #  filters, etc..
-    def __init__(self):
+    def __init__(
+        self,
+        *,
+        model_dimension: Optional[str] = "XS",
+        cnn_multiplier: Optional[int] = None,
+    ):
         super().__init__()
+
+        cnn_multiplier = get_cnn_multiplier(model_dimension, default=cnn_multiplier)
+
         # See appendix C in [1]:
         # "We use a similar network architecture but employ layer normalization and
         # SiLU as the activation function. For better framework support, we use
@@ -19,21 +30,21 @@ class CNNAtari(tf.keras.Model):
         # valid-padded convolutions with larger kernels ..."
         self.conv_layers = [
             tf.keras.layers.Conv2D(
-                filters=24,
+                filters=1 * cnn_multiplier,
                 kernel_size=3,
                 strides=(2, 2),
                 padding="same",
                 activation=tf.nn.silu,
             ),
             tf.keras.layers.Conv2D(
-                filters=48,
+                filters=2 * cnn_multiplier,
                 kernel_size=3,
                 strides=(2, 2),
                 padding="same",
                 activation=tf.nn.silu,
             ),
             tf.keras.layers.Conv2D(
-                filters=72,
+                filters=4 * cnn_multiplier,
                 kernel_size=3,
                 strides=(2, 2),
                 padding="same",
@@ -41,7 +52,7 @@ class CNNAtari(tf.keras.Model):
             ),
             # .. until output is 4 x 4 x [num_filters].
             tf.keras.layers.Conv2D(
-                filters=96,
+                filters=8 * cnn_multiplier,
                 kernel_size=3,
                 strides=(2, 2),
                 padding="same",
@@ -58,12 +69,13 @@ class CNNAtari(tf.keras.Model):
         out = inputs
         for conv_2d, layer_norm in zip(self.conv_layers, self.layer_normalizations):
             out = layer_norm(inputs=conv_2d(out))
+        assert out.shape[1] == 4 and out.shape[2] == 4
         return self.flatten_layer(out)
 
 
 if __name__ == "__main__":
     # World Models (and DreamerV2/3) Atari input space: 64 x 64 x 3
     inputs = np.random.random(size=(1, 64, 64, 3))
-    model = CNNAtari()
+    model = CNNAtari(model_dimension="XS")
     out = model(inputs)
     print(out.shape)

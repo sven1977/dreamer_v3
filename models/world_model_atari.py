@@ -44,24 +44,36 @@ class WorldModelAtari(tf.keras.Model):
         """
         super().__init__()
 
+        assert model_dimension in [None, "XS", "S", "M", "L", "XL"]
+        self.model_dimension = model_dimension
+
         self.batch_length_T = batch_length_T
 
         # RSSM (Recurrent State-Space Model)
         # Encoder + z-generator (x, h -> z).
-        self.cnn_atari = CNNAtari()
+        self.cnn_atari = CNNAtari(model_dimension=self.model_dimension)
         self.representation_layer = RepresentationLayer()
         # Dynamics predictor (h -> z^).
-        self.dynamics_predictor = DynamicsPredictor()
+        self.dynamics_predictor = DynamicsPredictor(
+            model_dimension=self.model_dimension
+        )
         # Sequence Model (h-1, a-1, z-1 -> h).
-        self.sequence_model = SequenceModel(action_space=action_space)
+        self.sequence_model = SequenceModel(
+            model_dimension=self.model_dimension,
+            action_space=action_space,
+        )
 
         # Reward Predictor.
-        self.reward_predictor = RewardPredictor()
+        self.reward_predictor = RewardPredictor(model_dimension=self.model_dimension)
         # Continue Predictor.
-        self.continue_predictor = ContinuePredictor()
+        self.continue_predictor = ContinuePredictor(
+            model_dimension=self.model_dimension
+        )
 
         # Decoder (h, z -> x^).
-        self.cnn_transpose_atari = ConvTransposeAtari()
+        self.cnn_transpose_atari = ConvTransposeAtari(
+            model_dimension=self.model_dimension
+        )
 
     def call(self, inputs, *args, **kwargs):
         return self.forward_train(inputs, *args, **kwargs)
