@@ -110,9 +110,8 @@ https://arxiv.org/pdf/2301.04104v1.pdf
         - Have to fix the training ratio (1024) and the model size (S instead of currently XS).
     - Implemented `model_dimension` parameter for all components, such that the world-model
       can be constructed with a simple scaling parameter: "XS", "S", ... (see [1] appendix B)
-
-    - TODO: Implement unimix categoricals for world model representation layer and dynamics
-       predictor.
+    - Implemented unimix categoricals for world model representation layer and dynamics
+      predictor.
 
     - Open questions:
         According to the paper: "DreamerV2 used a replay buffer that only replays time
@@ -122,11 +121,22 @@ https://arxiv.org/pdf/2301.04104v1.pdf
         sequences, which may cross episode boundaries. This would solve the problem of some
         batches having smaller losses due to masking some of the timesteps, but introduce the
         new problem of having to GAE (for critic/actor loss) within the same sequence.
+    - According to eq. 5 in [1], the prediction loss is solely using neg-log(p) style loss terms.
+      However, it also says in Appendix C: "Symlog predictions: We symlog encode inputs to
+      the world model and use symlog predictions with **squared error** for reconstructing
+      inputs ...". This seems contradictory.
+    - How do we store h(0) in the buffer? We need this to start the z-computations (and subsequent
+      h-computations).
+      a) Store the initial_h along with the trajectories
+      (you currently store the last(!) h instead and use that as the initial one for the
+      same sequence, which is completely wrong).
+      b) Update the initial_h of sequence B inside the buffer, iff we just made a training
+      pass through sequence A, whose end is the beginning of sequence B.
+      c) Don't store anything and always start with zero-vector.
 
 
 OPEN PROBLEMS:
 - Figure out reason of actor loss:
-- Implement unimix categoricals for world model representation layer and dynamics predictor.
 - Implement unimix categoricals for actor network (for discrete actions?)
 - For now, I have been training deterministic Atari only:
   no sticky actions (action_repeat_probability=0.0), and frameskip=4
