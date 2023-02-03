@@ -36,7 +36,9 @@
     - Completed Sequence (GRU) model.
     - Completed Dynamics Predictor, using z-generator and MLP.
     - Implemented two-hot encoding.
-        Open question: What's the range used of the 255 buckets? -20 to +20?
+        Question: What's the range used of the 255 buckets
+            Answer: -20 to +20 (since the range is for the symlog'd values, -20 to 20
+            covers almost any possible reward range)
         Difficulty: What's the most performant way for the implementation?
             answer: Using floor, ceil, tf.scatter_nd()
     - Implemented Reward-predictor and continue-predictor.
@@ -89,9 +91,15 @@
           real reward)?
           Answer: Use FiniteDiscrete with `atol`==bucket_delta / 2.0.
 
-OPEN PROBLEMS:
-- TODO: mask returned by EnvRunner is wrong (still logic from attention net, where mask
-  has a different task (mask future timesteps for self-attention that model cannot
-  know (yet))).
-- Figure out reason of actor loss:
+2023/02/03
+    - Answered question on how to compute the KL-divergence for two different
+      z-distributions. Each z-distribution is a 32xCategorical (over 32 classes each)
+      distribution. We could use the tfp Independent distribution for that with
+      args:
+        `distribution=Categorical(probs=[B, num_categoricals, num_classes])`
+        `reinterpreted_batch_ndims=1` <- dim 1 above are the independent categoricals
+     KL is computed as a sum(!) (not mean) of the individual distributions' KLs.
+     Note: We do the same in RLlib for our multi-action distribution
 
+OPEN PROBLEMS:
+- Figure out reason of actor loss:

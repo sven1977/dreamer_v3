@@ -53,7 +53,7 @@ class EnvRunner:
         self.rewards = [[] for _ in range(self.env.num_envs)]
         self.terminateds = [[] for _ in range(self.env.num_envs)]
         self.truncateds = [[] for _ in range(self.env.num_envs)]
-        self.episode_lengths = [0, 0]
+        self.next_h_states = None
 
     def sample(self, explore: bool = True, random_actions: bool = False):
         if self.config.batch_mode == "complete_episodes":
@@ -99,9 +99,13 @@ class EnvRunner:
         return_terminateds = []
         return_truncateds = []
         return_masks = []
+        return_h_states = []
 
         if force_reset or self.needs_initial_reset:
             obs, _ = self.env.reset()
+            self.next_h_states = self.model._get_initial_h(
+                batch_size=self.config.num_envs_per_worker
+            ).numpy()
             self.needs_initial_reset = False
             for i, o in enumerate(self._split_by_env(obs)):
                 self.observations[i].append(o)
@@ -113,8 +117,13 @@ class EnvRunner:
 
         while True:
             if random_actions:
+                # TODO: hack; right now, our model (a world model) does not have an
+                #  actor head yet. Still perform a forward pass to get the next h-states.
                 actions = self.env.action_space.sample()
-                print(f"took action {actions}")
+                #print(f"took action {actions}")
+                self.next_h_states = (
+                    self.model.forward_inference(obs, actions, tf.convert_to_tensor(self.next_h_states))
+                ).numpy()
             else:
                 action_logits = self.model(obs)
                 # Sample.
@@ -148,21 +157,25 @@ class EnvRunner:
                 if terminateds[i] or truncateds[i] or ts_sequences[i] == self.max_seq_len:
                     seq_len = ts_sequences[i]
                     ts_sequences[i] = 0
-                    # The last entry in self.observations[i] is already the reset obs
-                    # of the new episode.
-                    if terminateds[i] or truncateds[i]:
-                        return_next_obs.append(infos["final_observation"][i])
-                    # Last entry in self.observations[i] is the next obs (continuing
-                    # the ongoing episode).
-                    else:
-                        return_next_obs.append(self.observations[i][-1])
 
                     return_obs.append(self._process_and_pad(self.observations[i][:-1]))
                     return_actions.append(self._process_and_pad(self.actions[i]))
                     return_rewards.append(self._process_and_pad(self.rewards[i]))
                     return_terminateds.append(self._process_and_pad(self.terminateds[i]))
                     return_truncateds.append(self._process_and_pad(self.truncateds[i]))
+                    return_h_states.append(self.next_h_states[i])
                     return_masks.append(seq_len)
+
+                    # The last entry in self.observations[i] is already the reset obs
+                    # of the new episode.
+                    if terminateds[i] or truncateds[i]:
+                        return_next_obs.append(infos["final_observation"][i])
+                        # Reset h-states to all zeros b/c we are starting a new episode.
+                        self.next_h_states[i] = self.model._get_initial_h(batch_size=0).numpy()
+                    # Last entry in self.observations[i] is the next obs (continuing
+                    # the ongoing episode).
+                    else:
+                        return_next_obs.append(self.observations[i][-1])
 
                     self.observations[i] = [self.observations[i][-1]]
                     self.actions[i] = []
@@ -184,9 +197,16 @@ class EnvRunner:
         return_rewards = np.stack(return_rewards, axis=0)
         return_terminateds = np.stack(return_terminateds, axis=0)
         return_truncateds = np.stack(return_truncateds, axis=0)
-        return_masks = np.array([[1.0 if i < m else 0.0 for i in range(self.max_seq_len)] for m in return_masks], dtype=np.float32)
+        return_h_states = np.stack(return_h_states, axis=0)
+        return_masks = np.array(
+            [
+                [1.0 if i < m else 0.0 for i in range(self.max_seq_len)]
+                for m in return_masks
+            ],
+            dtype=np.float32,
+        )
 
-        return return_obs, return_next_obs, return_actions, return_rewards, return_terminateds, return_truncateds, return_masks
+        return return_obs, return_next_obs, return_actions, return_rewards, return_terminateds, return_truncateds, return_h_states, return_masks
 
     def _split_by_env(self, inputs):
         return [inputs[i] for i in range(self.env.num_envs)]

@@ -54,11 +54,11 @@ def world_model_dynamics_and_representation_loss(forward_train_outs):
 
     # Stop gradient for encoder's z-outputs:
     sg_z_distr_encoder = tfp.distributions.Categorical(
-        logits=tf.stop_gradient(z_distr_encoder.logits)
+        probs=tf.stop_gradient(z_distr_encoder.probs)
     )
     # Stop gradient for dynamics model's z-outputs:
     sg_z_distr_dynamics = tfp.distributions.Categorical(
-        logits=tf.stop_gradient(z_distr_dynamics.logits)
+        probs=tf.stop_gradient(z_distr_dynamics.probs)
     )
 
     # Implement free bits. According to [1]:
@@ -69,14 +69,20 @@ def world_model_dynamics_and_representation_loss(forward_train_outs):
     # on its prediction loss"
     L_dyn = tf.math.maximum(
         1.0,
-        tf.reduce_mean(  # average over all `num_categoricals`.
+        # Sum KL over all `num_categoricals` as these are independent.
+        # This is the same thing that a tfp.distributions.Independent() distribution
+        # with an underlying set of different Categoricals would do.
+        tf.reduce_sum(
             tfp.distributions.kl_divergence(sg_z_distr_encoder, z_distr_dynamics),
             axis=-1,
         ),
     )
     L_rep = tf.math.maximum(
         1.0,
-        tf.reduce_mean(  # average over all `num_categoricals`.
+        # Sum KL over all `num_categoricals` as these are independent.
+        # This is the same thing that a tfp.distributions.Independent() distribution
+        # with an underlying set of different Categoricals would do.
+        tf.reduce_sum(
             tfp.distributions.kl_divergence(z_distr_encoder, sg_z_distr_dynamics),
             axis=-1,
         ),
