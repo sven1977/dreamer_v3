@@ -42,41 +42,9 @@ optimizer = tf.keras.optimizers.Adam(learning_rate=1e-4, epsilon=1e-8)
 # World model grad clipping according to [1].
 grad_clip = 1000.0
 
-for iteration in range(10):
-    # Push enough samples into buffer initially before we start training.
-    while True:
-        # Sample one round.
-        (
-            obs,
-            next_obs,
-            actions,
-            rewards,
-            terminateds,
-            truncateds,
-            h_states,
-            mask,
-        # TODO: random_actions=False; right now, we act randomly, but perform a
-        #  world-model forward pass using the random actions (in order to compute
-        #  the h-states).
-        ) = env_runner.sample(random_actions=True)
-        buffer.add({
-            "obs": obs,
-            "next_obs": next_obs,
-            "actions": actions,
-            "rewards": rewards,
-            "terminateds": terminateds,
-            "truncateds": truncateds,
-            "mask": mask,
-            "h_states": h_states,
-        })
-        if len(buffer) >= batch_size_B:
-            break
 
-    # Draw a sample from the replay buffer.
-    sample = buffer.sample(num_items=batch_size_B)
-    # Convert samples (numpy) to tensors.
-    sample = tree.map_structure(lambda v: tf.convert_to_tensor(v), sample)
-
+@tf.function
+def train_one_step(sample):
     # Compute losses.
     with tf.GradientTape() as tape:
         # Compute forward values.
@@ -115,6 +83,46 @@ for iteration in range(10):
         clipped_gradients.append(tf.clip_by_value(grad, -grad_clip, grad_clip))
     # Apply gradients to our model.
     optimizer.apply_gradients(zip(clipped_gradients, world_model.trainable_variables))
+
+    return L_total, L_pred, L_dyn, L_rep
+
+
+for iteration in range(10):
+    # Push enough samples into buffer initially before we start training.
+    while True:
+        # Sample one round.
+        # TODO: random_actions=False; right now, we act randomly, but perform a
+        #  world-model forward pass using the random actions (in order to compute
+        #  the h-states).
+        (
+            obs,
+            next_obs,
+            actions,
+            rewards,
+            terminateds,
+            truncateds,
+            h_states,
+            mask,
+        ) = env_runner.sample(random_actions=True)
+        buffer.add({
+            "obs": obs,
+            "next_obs": next_obs,
+            "actions": actions,
+            "rewards": rewards,
+            "terminateds": terminateds,
+            "truncateds": truncateds,
+            "mask": mask,
+            "h_states": h_states,
+        })
+        if len(buffer) >= batch_size_B:
+            break
+
+    # Draw a sample from the replay buffer.
+    sample = buffer.sample(num_items=batch_size_B)
+    # Convert samples (numpy) to tensors.
+    sample = tree.map_structure(lambda v: tf.convert_to_tensor(v), sample)
+
+    L_total, L_pred, L_dyn, L_rep = train_one_step(sample)
 
     print(
         f"Iter {iteration}) L_total={L_total.numpy()} "

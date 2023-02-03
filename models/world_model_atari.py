@@ -66,6 +66,7 @@ class WorldModelAtari(tf.keras.Model):
     def call(self, inputs, *args, **kwargs):
         return self.forward_train(inputs, *args, **kwargs)
 
+    @tf.function
     def forward_inference(self, observations, actions, initial_h):
         """Performs a forward step for inference.
 
@@ -110,6 +111,7 @@ class WorldModelAtari(tf.keras.Model):
         #  world model).
         return h_tp1
 
+    @tf.function
     def forward_train(self, observations, actions, initial_h, training=None):
         """Performs a forward step for training.
 
@@ -231,6 +233,7 @@ class WorldModelAtari(tf.keras.Model):
             "h_tp1": h_tp1,
         }
 
+    @tf.function
     def _get_initial_h(self, batch_size: int):
         # No batch dim at all.
         if batch_size == 0:

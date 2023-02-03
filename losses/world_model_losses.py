@@ -5,6 +5,7 @@ import tensorflow_probability as tfp
 from utils.symlog import symlog
 
 
+@tf.function
 def world_model_prediction_losses(
         observations,
         rewards,
@@ -45,6 +46,7 @@ def world_model_prediction_losses(
     }
 
 
+@tf.function
 def world_model_dynamics_and_representation_loss(forward_train_outs):
     # Actual distribution over stochastic internal states (z) produced by the encoder.
     z_distr_encoder = forward_train_outs["z_distribution_encoder"]
