@@ -98,8 +98,20 @@
       args:
         `distribution=Categorical(probs=[B, num_categoricals, num_classes])`
         `reinterpreted_batch_ndims=1` <- dim 1 above are the independent categoricals
-     KL is computed as a sum(!) (not mean) of the individual distributions' KLs.
-     Note: We do the same in RLlib for our multi-action distribution
+      KL is computed as a sum(!) (not mean) of the individual distributions' KLs.
+      Note: We do the same in RLlib for our multi-action distribution
+    - Write 30 lines replay buffer.
+    - Got example to run and learn a little ().
+
+    - Open questions:
+        According to the paper: "DreamerV2 used a replay buffer that only replays time
+        steps from completed episodes. To shorten the feedback loop, DreamerV3 uniformly
+        samples from all inserted subsequences of size batch length regardless of
+        episode boundaries." -> Need to probably fix our env-runner to return (non-masked)
+        sequences, which may cross episode boundaries. This would solve the problem of some
+        batches having smaller losses due to masking some of the timesteps, but introduce the
+        new problem of having to GAE (for critic/actor loss) within the same sequence.
+
 
 OPEN PROBLEMS:
 - Figure out reason of actor loss:

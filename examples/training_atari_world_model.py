@@ -42,6 +42,9 @@ optimizer = tf.keras.optimizers.Adam(learning_rate=1e-4, epsilon=1e-8)
 # World model grad clipping according to [1].
 grad_clip = 1000.0
 
+# Training ratio: Ratio of replayed steps over env steps.
+training_ratio = 64
+
 
 @tf.function
 def train_one_step(sample):
@@ -87,13 +90,15 @@ def train_one_step(sample):
     return L_total, L_pred, L_dyn, L_rep
 
 
-for iteration in range(10):
+for iteration in range(1000):
     # Push enough samples into buffer initially before we start training.
+    env_steps = 0
     while True:
         # Sample one round.
         # TODO: random_actions=False; right now, we act randomly, but perform a
         #  world-model forward pass using the random actions (in order to compute
-        #  the h-states).
+        #  the h-states). Note that a world-model forward pass does NOT compute any
+        #  new actions. This is covered by the Actor network.
         (
             obs,
             next_obs,
@@ -104,6 +109,10 @@ for iteration in range(10):
             h_states,
             mask,
         ) = env_runner.sample(random_actions=True)
+
+        # We took B x T env steps.
+        env_steps += rewards.shape[0] * rewards.shape[1]
+
         buffer.add({
             "obs": obs,
             "next_obs": next_obs,
@@ -121,7 +130,6 @@ for iteration in range(10):
     sample = buffer.sample(num_items=batch_size_B)
     # Convert samples (numpy) to tensors.
     sample = tree.map_structure(lambda v: tf.convert_to_tensor(v), sample)
-
     L_total, L_pred, L_dyn, L_rep = train_one_step(sample)
 
     print(
