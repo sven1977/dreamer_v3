@@ -1,3 +1,4 @@
+import os
 import tree  # pip install dm_tree
 import tensorflow as tf
 
@@ -45,6 +46,9 @@ grad_clip = 1000.0
 
 # Training ratio: Ratio of replayed steps over env steps.
 training_ratio = 1024
+
+# Create the checkpoint path, if it doesn't exist yet.
+os.makedirs("checkpoints", exist_ok=True)
 
 
 @tf.function
@@ -149,6 +153,9 @@ for iteration in range(1000):
             f"(L_pred={L_pred.numpy()}; L_dyn={L_dyn.numpy()}; L_rep={L_rep.numpy()})"
         )
         sub_iter += 1
+
+    # Save the model every iteration.
+    world_model.save(f"checkpoints/world_model_{iteration}")
 
     total_replayed_steps += replayed_steps
     print(
