@@ -209,12 +209,16 @@ for iteration in range(1000):
 
         # Convert samples (numpy) to tensors.
         sample = tree.map_structure(lambda v: tf.convert_to_tensor(v), sample)
+        total_train_steps_tensor = tf.convert_to_tensor(
+            total_train_steps, dtype=tf.int64
+        )
+
         # Perform one training step.
         if total_train_steps % 50 == 0:
             with tb_writer.as_default():
-                L_total, L_pred, L_dyn, L_rep = train_one_step(sample, total_train_steps)
+                L_total, L_pred, L_dyn, L_rep = train_one_step(sample, total_train_steps_tensor)
         else:
-            L_total, L_pred, L_dyn, L_rep = train_one_step(sample, total_train_steps)
+            L_total, L_pred, L_dyn, L_rep = train_one_step(sample, total_train_steps_tensor)
 
         print(
             f"Iter {iteration}/{sub_iter}) L_total={L_total.numpy()} "
