@@ -214,11 +214,11 @@ for iteration in range(1000):
         )
 
         # Perform one training step.
-        if total_train_steps % 50 == 0:
-            with tb_writer.as_default():
-                L_total, L_pred, L_dyn, L_rep = train_one_step(sample, total_train_steps_tensor)
-        else:
+        #if total_train_steps % 50 == 0:
+        with tb_writer.as_default():
             L_total, L_pred, L_dyn, L_rep = train_one_step(sample, total_train_steps_tensor)
+        #else:
+        #    L_total, L_pred, L_dyn, L_rep = train_one_step(sample, total_train_steps_tensor)
 
         print(
             f"Iter {iteration}/{sub_iter}) L_total={L_total.numpy()} "
