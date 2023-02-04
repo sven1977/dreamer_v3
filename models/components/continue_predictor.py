@@ -27,7 +27,8 @@ class ContinuePredictor(tf.keras.Model):
         """
         # Flatten last two dims of z.
         assert len(z.shape) == 3
-        z = tf.reshape(tf.cast(z, tf.float32), shape=(z.shape[0], -1))
+        z_shape = tf.shape(z)
+        z = tf.reshape(tf.cast(z, tf.float32), shape=(z_shape[0], -1))
         assert len(z.shape) == 2
         out = tf.concat([h, z], axis=-1)
         # Send h-cat-z through MLP.

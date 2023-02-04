@@ -52,7 +52,8 @@ class SequenceModel(tf.keras.Model):
             a = tf.one_hot(a, depth=self.action_space.n)
         # Flatten last two dims of z.
         assert len(z.shape) == 4
-        z = tf.reshape(tf.cast(z, tf.float32), shape=(z.shape[0], z.shape[1], -1))
+        z_shape = tf.shape(z)
+        z = tf.reshape(tf.cast(z, tf.float32), shape=(z_shape[0], z_shape[1], -1))
         assert len(z.shape) == 3
         assert len(a.shape) == 3
         out = tf.concat([z, a], axis=-1)

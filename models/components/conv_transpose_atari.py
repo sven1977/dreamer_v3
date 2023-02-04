@@ -92,7 +92,8 @@ class ConvTransposeAtari(tf.keras.Model):
         """
         # Flatten last two dims of z.
         assert len(z.shape) == 3
-        z = tf.reshape(tf.cast(z, tf.float32), shape=(z.shape[0], -1))
+        z_shape = tf.shape(z)
+        z = tf.reshape(tf.cast(z, tf.float32), shape=(z_shape[0], -1))
         assert len(z.shape) == 2
         out = tf.concat([h, z], axis=-1)
         # Feed through initial dense layer to get the right number of input nodes
@@ -106,6 +107,7 @@ class ConvTransposeAtari(tf.keras.Model):
             out = layer_norm(inputs=conv_transpose_2d(out))
         # Last output conv2d-transpose layer:
         out = self.output_conv2d_transpose(out)
+        out_shape = tf.shape(out)
 
         # Interpret output as means of a diag-Gaussian with std=1.0:
         # From [2]:
@@ -113,7 +115,7 @@ class ConvTransposeAtari(tf.keras.Model):
         # likelihood with unit variance, ..."
         # Reshape `out` for the diagonal multi-variate Gaussian (each pixel is its own
         # independent (b/c diagonal co-variance matrix) variable).
-        loc = tf.reshape(out, shape=[out.shape.as_list()[0], -1])
+        loc = tf.reshape(out, shape=(out_shape[0], -1))
         distribution = tfp.distributions.MultivariateNormalDiag(
             loc=loc,
             scale_diag=tf.ones_like(loc),
