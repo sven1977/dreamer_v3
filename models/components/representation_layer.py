@@ -72,9 +72,7 @@ class RepresentationLayer(tf.keras.layers.Layer):
         # network, as mixtures of 1% uniform and 99% neural network output to ensure
         # a minimal amount of probability mass on every class and thus keep log
         # probabilities and KL divergences well behaved."
-        probs = 0.99 * probs + 0.01 * tf.fill(
-            dims=probs.shape, value=1.0 / self.num_classes_per_categorical
-        )
+        probs = 0.99 * probs + 0.01 * (1.0 / self.num_classes_per_categorical)
 
         # Create the distribution object using the unimix'd probs.
         distribution = tfp.distributions.Categorical(probs=probs)
