@@ -1,18 +1,31 @@
+"""
+[1] Mastering Diverse Domains through World Models - 2023
+D. Hafner, J. Pasukonis, J. Ba, T. Lillicrap
+https://arxiv.org/pdf/2301.04104v1.pdf
+"""
+
 import os
 import tree  # pip install dm_tree
 import tensorflow as tf
 
 from ray.rllib.algorithms.algorithm_config import AlgorithmConfig
 
-from models.world_model_atari import WorldModelAtari
-from utils.env_runner import EnvRunner
-from utils.replay_buffer import ReplayBuffer
 from losses.world_model_losses import (
     world_model_dynamics_and_representation_loss,
     world_model_prediction_losses,
 )
+from models.world_model_atari import WorldModelAtari
+from utils.env_runner import EnvRunner
+from utils.replay_buffer import ReplayBuffer
+from utils.symlog import inverse_symlog
 
+# Create the checkpoint path, if it doesn't exist yet.
+os.makedirs("checkpoints", exist_ok=True)
+# Create the tensorboard summary data dir.
+os.makedirs("tensorboard", exist_ok=True)
+tb_writer = tf.summary.create_file_writer("tensorboard")
 
+# Set batch size and -length according to [1]:
 batch_size_B = 16
 batch_length_T = 64
 
@@ -47,12 +60,12 @@ grad_clip = 1000.0
 # Training ratio: Ratio of replayed steps over env steps.
 training_ratio = 1024
 
-# Create the checkpoint path, if it doesn't exist yet.
-os.makedirs("checkpoints", exist_ok=True)
-
 
 @tf.function
-def train_one_step(sample):
+def train_one_step(sample, step):
+    tf.summary.image("sampled_images[0]", sample["obs"][0], step)
+    tf.summary.histogram("sampled_rewards", sample["rewards"], step)
+
     # Compute losses.
     with tf.GradientTape() as tape:
         # Compute forward values.
@@ -60,6 +73,19 @@ def train_one_step(sample):
             inputs=sample["obs"],
             actions=sample["actions"],
             initial_h=sample["h_states"],
+        )
+        tf.summary.image(
+            "predicted_images[0]",
+            tf.reshape(
+                inverse_symlog(forward_train_outs["obs_distribution"].loc[0:batch_length_T]),
+                shape=(-1, 64, 64, 3),
+            ),
+            step,
+        )
+        tf.summary.histogram(
+            "predicted_rewards",
+            tf.reshape(forward_train_outs["reward_distribution"].mean(), shape=(batch_size_B, batch_length_T)),
+            step,
         )
 
         prediction_losses = world_model_prediction_losses(
@@ -70,11 +96,46 @@ def train_one_step(sample):
             forward_train_outs=forward_train_outs,
         )
         L_pred = prediction_losses["total_loss"]
+        tf.summary.histogram(
+            "L_decoder_BxT",
+            tf.reshape(prediction_losses["decoder_loss"], shape=(batch_size_B, batch_length_T)),
+            step,
+        )
+        tf.summary.histogram(
+            "L_reward_BxT",
+            tf.reshape(prediction_losses["reward_loss"], shape=(batch_size_B, batch_length_T)),
+            step,
+        )
+        tf.summary.histogram(
+            "L_continue_BxT",
+            tf.reshape(prediction_losses["continue_loss"], shape=(batch_size_B, batch_length_T)),
+            step,
+        )
+        tf.summary.histogram(
+            "L_pred_BxT",
+            tf.reshape(prediction_losses["total_loss"], shape=(batch_size_B, batch_length_T)),
+            step,
+        )
 
         L_dyn, L_rep = world_model_dynamics_and_representation_loss(
             forward_train_outs=forward_train_outs
         )
         L_total = 1.0 * L_pred + 0.5 * L_dyn + 0.1 * L_rep
+        tf.summary.histogram(
+            "L_dyn_BxT",
+            tf.reshape(L_dyn, shape=(batch_size_B, batch_length_T)),
+            step,
+        )
+        tf.summary.histogram(
+            "L_rep_BxT",
+            tf.reshape(L_rep, shape=(batch_size_B, batch_length_T)),
+            step,
+        )
+        tf.summary.histogram(
+            "L_total_BxT",
+            tf.reshape(L_total, shape=(batch_size_B, batch_length_T)),
+            step,
+        )
 
         # Bring back into (B, T)-shape.
         L_total = tf.reshape(L_total, shape=(batch_size_B, batch_length_T))
@@ -82,6 +143,7 @@ def train_one_step(sample):
         L_total = L_total * sample["mask"]
         # Sum up timesteps, and average over batch (see eq. 4 in [1]).
         L_total = tf.reduce_mean(tf.reduce_sum(L_total, axis=-1))
+        tf.summary.scalar("L_total", L_total, step)
 
     # Get the gradients from the tape.
     gradients = tape.gradient(L_total, world_model.trainable_variables)
@@ -97,6 +159,7 @@ def train_one_step(sample):
 
 total_env_steps = 0
 total_replayed_steps = 0
+total_train_steps = 0
 
 for iteration in range(1000):
     # Push enough samples into buffer initially before we start training.
@@ -146,13 +209,16 @@ for iteration in range(1000):
 
         # Convert samples (numpy) to tensors.
         sample = tree.map_structure(lambda v: tf.convert_to_tensor(v), sample)
-        L_total, L_pred, L_dyn, L_rep = train_one_step(sample)
+        # Perform one training step.
+        with tb_writer.as_default():
+            L_total, L_pred, L_dyn, L_rep = train_one_step(sample, total_train_steps)
 
         print(
             f"Iter {iteration}/{sub_iter}) L_total={L_total.numpy()} "
             f"(L_pred={L_pred.numpy()}; L_dyn={L_dyn.numpy()}; L_rep={L_rep.numpy()})"
         )
         sub_iter += 1
+        total_train_steps += 1
 
     # Save the model every iteration.
     world_model.save(f"checkpoints/world_model_{iteration}")

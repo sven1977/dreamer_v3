@@ -111,7 +111,7 @@ class ConvTransposeAtari(tf.keras.Model):
         # From [2]:
         # "Distributions The image predictor outputs the mean of a diagonal Gaussian
         # likelihood with unit variance, ..."
-        # Reshape out for the diagonal multi-variate Gaussian (each pixel is its own
+        # Reshape `out` for the diagonal multi-variate Gaussian (each pixel is its own
         # independent (b/c diagonal co-variance matrix) variable).
         loc = tf.reshape(out, shape=[out.shape.as_list()[0], -1])
         distribution = tfp.distributions.MultivariateNormalDiag(
