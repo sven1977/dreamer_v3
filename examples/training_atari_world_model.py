@@ -210,7 +210,10 @@ for iteration in range(1000):
         # Convert samples (numpy) to tensors.
         sample = tree.map_structure(lambda v: tf.convert_to_tensor(v), sample)
         # Perform one training step.
-        with tb_writer.as_default():
+        if total_train_steps % 50 == 0:
+            with tb_writer.as_default():
+                L_total, L_pred, L_dyn, L_rep = train_one_step(sample, total_train_steps)
+        else:
             L_total, L_pred, L_dyn, L_rep = train_one_step(sample, total_train_steps)
 
         print(
