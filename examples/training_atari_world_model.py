@@ -74,12 +74,15 @@ def train_one_step(sample, step):
             actions=sample["actions"],
             initial_h=sample["h_states"],
         )
+        predicted_images = tf.cast(
+            inverse_symlog(
+                forward_train_outs["obs_distribution"].loc[0:batch_length_T]
+            ),
+            dtype=tf.uint8,
+        )
         tf.summary.image(
             "predicted_images[0]",
-            tf.reshape(
-                inverse_symlog(forward_train_outs["obs_distribution"].loc[0:batch_length_T]),
-                shape=(-1, 64, 64, 3),
-            ),
+            tf.reshape(predicted_images, shape=(-1, 64, 64, 3)),
             step,
         )
         tf.summary.histogram(
