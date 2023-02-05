@@ -25,7 +25,9 @@ os.makedirs("checkpoints", exist_ok=True)
 os.makedirs("tensorboard", exist_ok=True)
 tb_writer = tf.summary.create_file_writer("tensorboard")
 # Every how many training steps do we write data to TB?
-summary_frequency = 5
+summary_frequency = 50
+# Every how many (main) iterations (sample + N train steps) do we save our model?
+model_save_frequency = 10
 
 # Set batch size and -length according to [1]:
 batch_size_B = 16
@@ -41,13 +43,19 @@ config = (
 env_runner = EnvRunner(model=None, config=config, max_seq_len=batch_length_T)
 
 # Our DreamerV3 world model.
-world_model = WorldModelAtari(
-    model_dimension="S",
-    action_space=env_runner.env.single_action_space,
-    batch_length_T=batch_length_T,
-)
+from_checkpoint = None
+# Uncomment this next line to load from a saved model.
+#from_checkpoint = "checkpoints/world_model_0"
+if from_checkpoint is not None:
+    world_model = tf.keras.models.load_model(from_checkpoint)
+else:
+    world_model = WorldModelAtari(
+        model_dimension="S",
+        action_space=env_runner.env.single_action_space,
+        batch_length_T=batch_length_T,
+    )
 # TODO: ugly hack (resulting from the insane fact that you cannot know
-#  an env's spaces prior to actually constructing an instance of it :(
+#  an env's spaces prior to actually constructing an instance of it) :(
 env_runner.model = world_model
 
 # The replay buffer for storing actual env samples.
@@ -235,7 +243,8 @@ for iteration in range(1000):
         total_train_steps += 1
 
     # Save the model every iteration.
-    world_model.save(f"checkpoints/world_model_{iteration}")
+    if iteration % model_save_frequency == 0:
+        world_model.save(f"checkpoints/world_model_{iteration}")
 
     total_replayed_steps += replayed_steps
     print(
