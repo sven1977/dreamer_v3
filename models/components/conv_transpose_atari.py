@@ -63,8 +63,10 @@ class ConvTransposeAtari(tf.keras.Model):
                 activation=tf.nn.silu,
             ),
         ]
+        # Create one LayerNorm layer for each of the Conv2DTranspose
+        # plus the initial dense layer.
         self.layer_normalizations = []
-        for _ in range(len(self.conv_transpose_layers)):
+        for _ in range(len(self.conv_transpose_layers) + 1):
             self.layer_normalizations.append(tf.keras.layers.LayerNormalization())
 
         # .. until output is 64 x 64 x 3.

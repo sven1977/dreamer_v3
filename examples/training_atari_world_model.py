@@ -24,6 +24,8 @@ os.makedirs("checkpoints", exist_ok=True)
 # Create the tensorboard summary data dir.
 os.makedirs("tensorboard", exist_ok=True)
 tb_writer = tf.summary.create_file_writer("tensorboard")
+# Every how many training steps do we write data to TB?
+summary_frequency = 5
 
 # Set batch size and -length according to [1]:
 batch_size_B = 16
@@ -219,11 +221,11 @@ for iteration in range(1000):
         )
 
         # Perform one training step.
-        #if total_train_steps % 50 == 0:
-        with tb_writer.as_default():
+        if total_train_steps % summary_frequency == 0:
+            with tb_writer.as_default():
+                L_total, L_pred, L_dyn, L_rep = train_one_step(sample, total_train_steps_tensor)
+        else:
             L_total, L_pred, L_dyn, L_rep = train_one_step(sample, total_train_steps_tensor)
-        #else:
-        #    L_total, L_pred, L_dyn, L_rep = train_one_step(sample, total_train_steps_tensor)
 
         print(
             f"Iter {iteration}/{sub_iter}) L_total={L_total.numpy()} "
