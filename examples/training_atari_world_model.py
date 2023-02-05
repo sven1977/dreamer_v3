@@ -37,7 +37,7 @@ batch_length_T = 64
 config = (
     AlgorithmConfig()
     .environment("ALE/MsPacman-v5", env_config={"frameskip": 4})
-    .rollouts(num_envs_per_worker=2, rollout_fragment_length=200)
+    .rollouts(num_envs_per_worker=1, rollout_fragment_length=64)
 )
 # The vectorized gymnasium EnvRunner to collect samples of shape (B, T, ...).
 env_runner = EnvRunner(model=None, config=config, max_seq_len=batch_length_T)
