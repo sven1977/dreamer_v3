@@ -63,7 +63,6 @@ training_ratio = 1024
 
 @tf.function
 def train_one_step(sample, step):
-    tf.summary.image("sampled_images[0]", sample["obs"][0], step)
     tf.summary.histogram("sampled_rewards", sample["rewards"], step)
 
     # Compute losses.
@@ -74,17 +73,20 @@ def train_one_step(sample, step):
             actions=sample["actions"],
             initial_h=sample["h_states"],
         )
-        predicted_images = tf.cast(
-            inverse_symlog(
-                forward_train_outs["obs_distribution"].loc[0:batch_length_T]
+        predicted_images_b0 = tf.reshape(
+            tf.cast(
+                inverse_symlog(
+                    forward_train_outs["obs_distribution"].loc[0:batch_length_T]
+                ),
+                dtype=tf.uint8,
             ),
-            dtype=tf.uint8,
+            shape=(-1, 64, 64, 3),
         )
-        tf.summary.image(
-            "predicted_images[0]",
-            tf.reshape(predicted_images, shape=(-1, 64, 64, 3)),
-            step,
-        )
+        # Concat sampled and predicted images along the height axis (2) such that
+        # real images show on top of respective predicted ones.
+        # (B, w, h, C)
+        sampled_vs_predicted_images = tf.concat([predicted_images_b0, sample["obs"][0]], axis=2)
+        tf.summary.image("sampled_vs_predicted_images[0]", sampled_vs_predicted_images, step)
         tf.summary.histogram(
             "predicted_rewards",
             tf.reshape(forward_train_outs["reward_distribution"].mean(), shape=(batch_size_B, batch_length_T)),
