@@ -95,7 +95,7 @@ def train_one_step(sample, step):
         # Concat sampled and predicted images along the height axis (2) such that
         # real images show on top of respective predicted ones.
         # (B, w, h, C)
-        sampled_vs_predicted_images = tf.concat([predicted_images_b0, sample["obs"][0]], axis=2)
+        sampled_vs_predicted_images = tf.concat([predicted_images_b0, sample["obs"][0]], axis=1)
         tf.summary.image("sampled_vs_predicted_images[0]", sampled_vs_predicted_images, step)
         tf.summary.histogram(
             "predicted_rewards",
