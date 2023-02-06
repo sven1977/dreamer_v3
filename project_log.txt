@@ -22,6 +22,7 @@ https://arxiv.org/pdf/2301.04104v1.pdf
         size=XS CNN? says: multiplier=24, strides=(2,2), stop (flatten) after image
         has been reduced to dimensions 4x4, but what kernel should we use? If we use 4x4
         (input=64x64x3, strides=2,2 filters=24,48,96) then the final image size would be 6x6x96
+        Answer: Use kernel=3 stride=2 padding="same" (as indicated at a different location in the paper ;) )
 
 2023/01/30:
     - Completed Atari encoder CNN.
@@ -37,7 +38,7 @@ https://arxiv.org/pdf/2301.04104v1.pdf
         - Start from reshaped (4x4x[final num CNN filters]) output of a dense layer and feed
           that into the first conv2dtranspose.
         - The final output are the means of a 64x64x3 diag-Gaussian with std=1.0, from which
-          we sample the final image.
+          we sample the (symlog'd) image. Then 1) inverse_symlog, 2) clamp between 0.0 and 255.0, 3) cast to uint8.
     - Completed Sequence (GRU) model.
     - Completed Dynamics Predictor, using z-generator and MLP.
     - Implemented two-hot encoding.
@@ -62,7 +63,7 @@ https://arxiv.org/pdf/2301.04104v1.pdf
           zero values. The returned mask indicates, which exact B,T positions are valid
           and which aren't and thus can be used to properly mask the total loss
           computation.
-        - Next obs are NOT fully (B, T)-provided to save space. They are only ever
+        - "Next-obs" are NOT fully (B, T)-provided to save space. They are only ever
           needed in case of a truncated rollout (max-seq-len) or the episode is truncated
           in the middle of the rollout (before T is reached). Thus next_obs are returned
           as (B, dim), NOT as (B, T, dim)
@@ -73,14 +74,14 @@ https://arxiv.org/pdf/2301.04104v1.pdf
 2023/02/02
     - Finished fixing bugs in EnvRunner; wrote a small test script for collecting
       vectorized Pacman samples.
-    - Wrote quick non-RLlib training script for a AtariWorlModel using the above simple
+    - Wrote quick non-RLlib training script for a AtariWorldModel using the above simple
       EnvRunner; this does not include a buffer yet, but has an Atari world model,
       optimizer, calls loss functions and updates the model.
     - Started debugging World Model training code by stepping through the above example
       script and weeding out errors in the code. For example:
         - output of decoder is NOT a Normal, but a MultivariateNormalDiag (each pixel
           is an independent variable).
-        - weights of reward-bucket dense layer must be zero-initialized according to the
+        - weights of reward-bucket dense layer(s) must be zero-initialized according to the
           paper.
     - Got the entire sampling + loss + updating loop to run for the world model.
     - TODO: Continue debugging and successfully train.
@@ -105,7 +106,7 @@ https://arxiv.org/pdf/2301.04104v1.pdf
         `reinterpreted_batch_ndims=1` <- dim 1 above are the independent categoricals
       KL is computed as a sum(!) (not mean) of the individual distributions' KLs.
       Note: We do the same in RLlib for our multi-action distribution
-    - Write 30 lines replay buffer.
+    - Wrote a 30-lines-only simple FIFO replay buffer.
     - Got example to run and learn a little (commit 1cf47fecd32a3c2ca1cf7aa757465f3856b26710).
         - Have to fix the training ratio (1024) and the model size (S instead of currently XS).
     - Implemented `model_dimension` parameter for all components, such that the world-model
@@ -128,7 +129,7 @@ https://arxiv.org/pdf/2301.04104v1.pdf
     - How do we store h(0) in the buffer? We need this to start the z-computations (and subsequent
       h-computations).
       a) Store the initial_h along with the trajectories
-      (you currently store the last(!) h instead and use that as the initial one for the
+      (FIXED: we currently store the last(!) h instead and use that as the initial one for the
       same sequence, which is completely wrong).
       b) Update the initial_h of sequence B inside the buffer, iff we just made a training
       pass through sequence A, whose end is the beginning of sequence B.
@@ -145,10 +146,17 @@ https://arxiv.org/pdf/2301.04104v1.pdf
 
 2023/02/06
     - Started coding Actor and Critic (same as Reward predictor).
-    -
+    - Adding a LayerNorm after the GRU layer seems to be super important.
+      However, changing the default GRU activations from tanh/sigmoid to silu/silu (as hinted
+      in the paper for all other layers), seems to deteriorate performance.
+      -> We keep the layer-norm, but stick to tanh/sigmoid activation, just for the GRU layer
+      (all other layers (except the distribution parameter producing ones) do use SiLU).
+    - TODO: Need to fix reward/return loss in using two-hot instead of plain -log(p).
 
 OPEN PROBLEMS:
+- We are not using `two_hot` yet at all, also not for the reward predictions, how come?
 - Figure out reason of actor loss:
 - Implement unimix categoricals for actor network (for discrete actions?)
 - For now, I have been training deterministic Atari only:
   no sticky actions (action_repeat_probability=0.0), and frameskip=4
+-

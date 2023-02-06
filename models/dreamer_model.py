@@ -7,7 +7,7 @@ import gymnasium as gym
 import tensorflow as tf
 
 from models.components.actor_network import ActorNetwork
-from models.components.mlp import MLP
+from models.components.reward_predictor import RewardPredictor
 
 
 class DreamerModel(tf.keras.Model):
@@ -49,8 +49,7 @@ class DreamerModel(tf.keras.Model):
             action_space=action_space,
             model_dimension=model_dimension,
         )
-        self.critic = CriticNetwork(
-            action_space=action_space,
+        self.critic = RewardPredictor(
             model_dimension=model_dimension,
         )
 
