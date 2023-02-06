@@ -34,7 +34,10 @@ class SequenceModel(tf.keras.Model):
             num_gru_units,
             return_sequences=False,
             return_state=False,
+            activation=tf.nn.silu,
+            recurrent_activation=tf.nn.silu,
         )
+        self.layer_norm = tf.keras.layers.LayerNorm()
 
     def call(self, z, a, h=None):
         """
@@ -57,7 +60,10 @@ class SequenceModel(tf.keras.Model):
         assert len(z.shape) == 3
         assert len(a.shape) == 3
         out = tf.concat([z, a], axis=-1)
-        return self.gru_unit(out, initial_state=h)
+        # Pass through GRU.
+        out = self.gru_unit(out, initial_state=h)
+        # Pass through LayerNorm.
+        return self.layer_norm(out)
 
 
 if __name__ == "__main__":

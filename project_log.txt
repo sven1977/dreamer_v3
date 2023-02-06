@@ -134,6 +134,18 @@ https://arxiv.org/pdf/2301.04104v1.pdf
       pass through sequence A, whose end is the beginning of sequence B.
       c) Don't store anything and always start with zero-vector.
 
+2023/02/04-05
+    - Run different random-actions experiments (w/o Actor/Critic) with MsPacman to
+      stabilize the world model training run and fix various bugs.
+    - Try warmup for replay buffer of 10k random action timesteps.
+    - Make sure inverse_symlog is properly applied to predictions prior to TB'ing them
+        - Careful with casting from float32 (model output) to uint8 (RGB image) due to the overflow
+        problem (e.g. predicted 258.0 translates to uint8=3, predicted -1.0 translates to uint8=255)
+    - Added layernorm after initial dense layer before the decoder stack.
+
+2023/02/06
+    - Started coding Actor and Critic (same as Reward predictor).
+    -
 
 OPEN PROBLEMS:
 - Figure out reason of actor loss:
