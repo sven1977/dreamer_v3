@@ -188,7 +188,7 @@ class EnvRunner:
 
                     # The last entry in self.observations[i] is already the reset obs
                     # of the new episode.
-                    if terminateds[i] or truncateds[i]:
+                    if terminateds[i] or truncateds[i]:#
                         return_next_obs.append(infos["final_observation"][i])
                         # Reset h-states to all zeros b/c we are starting a new episode.
                         if self.model is not None:
