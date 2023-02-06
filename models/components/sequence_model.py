@@ -34,8 +34,8 @@ class SequenceModel(tf.keras.Model):
             num_gru_units,
             return_sequences=False,
             return_state=False,
-            activation=tf.nn.silu,
-            recurrent_activation=tf.nn.silu,
+            #activation=tf.nn.silu,
+            #recurrent_activation=tf.nn.silu,
         )
         self.layer_norm = tf.keras.layers.LayerNormalization()
 
