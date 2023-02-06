@@ -87,9 +87,9 @@ def train_one_step(sample, step):
         )
         predicted_images_b0 = tf.reshape(
             tf.cast(
-                inverse_symlog(
+                tf.clip_by_value(0.0, 255.0, inverse_symlog(
                     forward_train_outs["obs_distribution"].loc[0:batch_length_T]
-                ),
+                )),
                 dtype=tf.uint8,
             ),
             shape=(-1, 64, 64, 3),
