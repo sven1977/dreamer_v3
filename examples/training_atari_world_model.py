@@ -218,7 +218,7 @@ for iteration in range(1000):
             # Got to have more timesteps than warm up setting.
             len(buffer) * batch_length_T > warm_up_timesteps
             # But also more episodes (rows) than the batch size B.
-            or len(buffer) > batch_size_B
+            and len(buffer) > batch_size_B
         ):
             break
 
