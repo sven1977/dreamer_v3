@@ -212,6 +212,7 @@ for iteration in range(1000):
             "mask": mask,
             "h_states": h_states,
         })
+        print(f"Sampled total env-steps={env_steps}; buffer-size={len(buffer)}")
 
     total_env_steps += env_steps
 
