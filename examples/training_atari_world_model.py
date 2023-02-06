@@ -78,7 +78,7 @@ grad_clip = 1000.0
 training_ratio = 1024
 
 
-#@tf.function
+@tf.function
 def train_one_step(sample, step):
     tf.summary.histogram("sampled_rewards", sample["rewards"], step)
 
