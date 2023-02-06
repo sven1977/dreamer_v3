@@ -61,7 +61,7 @@ env_runner.model = world_model
 # The replay buffer for storing actual env samples.
 buffer = ReplayBuffer(capacity=int(1e6 / batch_length_T))
 # Timesteps to put into the buffer before the first learning step.
-warm_up_timesteps = 10000
+warm_up_timesteps = 0
 
 # Use an Adam optimizer.
 optimizer = tf.keras.optimizers.Adam(learning_rate=1e-4, epsilon=1e-8)
@@ -181,7 +181,12 @@ total_train_steps = 0
 for iteration in range(1000):
     # Push enough samples into buffer initially before we start training.
     env_steps = env_steps_last_sample = 0
-    while len(buffer) < warm_up_timesteps:
+    while (
+        # Got to have more timesteps than warm up setting.
+        len(buffer) * batch_length_T < warm_up_timesteps
+        # But also more episodes (rows) than the batch size B.
+        or len(buffer) < batch_size_B
+    ):
         # Sample one round.
         # TODO: random_actions=False; right now, we act randomly, but perform a
         #  world-model forward pass using the random actions (in order to compute
