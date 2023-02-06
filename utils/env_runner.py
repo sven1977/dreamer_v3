@@ -47,7 +47,7 @@ class EnvRunner:
             self.env = gym.vector.make(
                 "GymV26Environment-v0",
                 env_id=self.config.env,
-                wrappers=[partial(resize_v1, x_size=64, y_size=64)],# NormalizeImageObs],# CountEnv],
+                wrappers=[partial(resize_v1, x_size=64, y_size=64), CountEnv],# NormalizeImageObs],# CountEnv],
                 num_envs=self.config.num_envs_per_worker,
                 asynchronous=self.config.remote_worker_envs,
                 make_kwargs=self.config.env_config,
@@ -116,9 +116,12 @@ class EnvRunner:
 
         if force_reset or self.needs_initial_reset:
             obs, _ = self.env.reset()
-            self.next_h_states = self.model._get_initial_h(
-                batch_size=self.config.num_envs_per_worker
-            ).numpy()
+            if self.model is not None:
+                self.next_h_states = self.model._get_initial_h(
+                    batch_size=self.config.num_envs_per_worker
+                ).numpy()
+            else:
+                self.next_h_states = np.array([0.0, 0.0])
             self.current_sequence_initial_h = self.next_h_states.copy()
             self.needs_initial_reset = False
             for i, o in enumerate(self._split_by_env(obs)):
@@ -135,9 +138,12 @@ class EnvRunner:
                 #  actor head yet. Still perform a forward pass to get the next h-states.
                 actions = self.env.action_space.sample()
                 #print(f"took action {actions}")
-                self.next_h_states = (
-                    self.model.forward_inference(obs, actions, tf.convert_to_tensor(self.next_h_states))
-                ).numpy()
+                if self.model is not None:
+                    self.next_h_states = (
+                        self.model.forward_inference(obs, actions, tf.convert_to_tensor(self.next_h_states))
+                    ).numpy()
+                else:
+                    self.next_h_states = np.array([1.0, -1.0])
             else:
                 action_logits = self.model(obs)
                 # Sample.
@@ -185,7 +191,10 @@ class EnvRunner:
                     if terminateds[i] or truncateds[i]:
                         return_next_obs.append(infos["final_observation"][i])
                         # Reset h-states to all zeros b/c we are starting a new episode.
-                        self.next_h_states[i] = self.model._get_initial_h(batch_size=0).numpy()
+                        if self.model is not None:
+                            self.next_h_states[i] = self.model._get_initial_h(batch_size=0).numpy()
+                        else:
+                            self.next_h_states[i] = 0.0
                     # Last entry in self.observations[i] is the next obs (continuing
                     # the ongoing episode).
                     else:
@@ -252,11 +261,11 @@ if __name__ == "__main__":
             # w/ or w/o sticky actions, just that frameskip=4.
             "repeat_action_probability": 0.0,
         })
-        .rollouts(num_envs_per_worker=2, rollout_fragment_length=200)
+        .rollouts(num_envs_per_worker=1, rollout_fragment_length=64)
     )
     env_runner = EnvRunner(model=None, config=config, max_seq_len=64)
     for _ in range(100):
-        obs, next_obs, actions, rewards, terminateds, truncateds, mask = (
+        obs, next_obs, actions, rewards, terminateds, truncateds, initial_h, mask = (
             env_runner.sample(random_actions=True)
         )
         print(obs.shape) # obs shape

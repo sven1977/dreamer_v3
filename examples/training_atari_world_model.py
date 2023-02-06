@@ -36,7 +36,12 @@ batch_length_T = 64
 # EnvRunner config (an RLlib algorithm config).
 config = (
     AlgorithmConfig()
-    .environment("ALE/MsPacman-v5", env_config={"frameskip": 4})
+    .environment("ALE/MsPacman-v5", env_config={
+        # DreamerV3 paper does not specify, whether Atari100k is run
+        # w/ or w/o sticky actions, just that frameskip=4.
+        "frameskip": 4,
+        "repeat_action_probability": 0.0,
+    })
     .rollouts(num_envs_per_worker=1, rollout_fragment_length=64)
 )
 # The vectorized gymnasium EnvRunner to collect samples of shape (B, T, ...).
@@ -61,7 +66,7 @@ env_runner.model = world_model
 # The replay buffer for storing actual env samples.
 buffer = ReplayBuffer(capacity=int(1e6 / batch_length_T))
 # Timesteps to put into the buffer before the first learning step.
-warm_up_timesteps = 10000
+warm_up_timesteps = 0
 
 # Use an Adam optimizer.
 optimizer = tf.keras.optimizers.Adam(learning_rate=1e-4, epsilon=1e-8)
@@ -73,7 +78,7 @@ grad_clip = 1000.0
 training_ratio = 1024
 
 
-@tf.function
+#@tf.function
 def train_one_step(sample, step):
     tf.summary.histogram("sampled_rewards", sample["rewards"], step)
 
