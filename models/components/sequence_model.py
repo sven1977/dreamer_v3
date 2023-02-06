@@ -37,7 +37,7 @@ class SequenceModel(tf.keras.Model):
             activation=tf.nn.silu,
             recurrent_activation=tf.nn.silu,
         )
-        self.layer_norm = tf.keras.layers.LayerNorm()
+        self.layer_norm = tf.keras.layers.LayerNormalization()
 
     def call(self, z, a, h=None):
         """
