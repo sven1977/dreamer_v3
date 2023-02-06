@@ -61,7 +61,7 @@ env_runner.model = world_model
 # The replay buffer for storing actual env samples.
 buffer = ReplayBuffer(capacity=int(1e6 / batch_length_T))
 # Timesteps to put into the buffer before the first learning step.
-warm_up_timesteps = 0
+warm_up_timesteps = 10000
 
 # Use an Adam optimizer.
 optimizer = tf.keras.optimizers.Adam(learning_rate=1e-4, epsilon=1e-8)
@@ -101,7 +101,10 @@ def train_one_step(sample, step):
         tf.summary.image("sampled_vs_predicted_images[0]", sampled_vs_predicted_images, step)
         tf.summary.histogram(
             "predicted_rewards",
-            tf.reshape(forward_train_outs["reward_distribution"].mean(), shape=(batch_size_B, batch_length_T)),
+            tf.reshape(
+                inverse_symlog(forward_train_outs["reward_distribution"].mean()),
+                shape=(batch_size_B, batch_length_T),
+            ),
             step,
         )
 
@@ -212,13 +215,13 @@ for iteration in range(1000):
             "mask": mask,
             "h_states": h_states,
         })
-        print(f"Sampled total env-steps={env_steps}; buffer-size={len(buffer)}")
+        print(f"Sampled env-steps={env_steps}; buffer-size={len(buffer)}")
 
         if (
             # Got to have more timesteps than warm up setting.
             len(buffer) * batch_length_T > warm_up_timesteps
             # But also more episodes (rows) than the batch size B.
-            and len(buffer) > batch_size_B
+            and len(buffer) >= batch_size_B
         ):
             break
 
