@@ -181,12 +181,7 @@ total_train_steps = 0
 for iteration in range(1000):
     # Push enough samples into buffer initially before we start training.
     env_steps = env_steps_last_sample = 0
-    while (
-        # Got to have more timesteps than warm up setting.
-        len(buffer) * batch_length_T < warm_up_timesteps
-        # But also more episodes (rows) than the batch size B.
-        or len(buffer) < batch_size_B
-    ):
+    while True:
         # Sample one round.
         # TODO: random_actions=False; right now, we act randomly, but perform a
         #  world-model forward pass using the random actions (in order to compute
@@ -219,6 +214,14 @@ for iteration in range(1000):
         })
         print(f"Sampled total env-steps={env_steps}; buffer-size={len(buffer)}")
 
+        if (
+            # Got to have more timesteps than warm up setting.
+            len(buffer) * batch_length_T > warm_up_timesteps
+            # But also more episodes (rows) than the batch size B.
+            or len(buffer) > batch_size_B
+        ):
+            break
+
     total_env_steps += env_steps
 
     replayed_steps = 0
@@ -249,8 +252,8 @@ for iteration in range(1000):
         sub_iter += 1
         total_train_steps += 1
 
-    # Save the model every iteration.
-    if iteration % model_save_frequency == 0:
+    # Save the model every N iterations (but not after the very first).
+    if iteration != 0 and iteration % model_save_frequency == 0:
         world_model.save(f"checkpoints/world_model_{iteration}")
 
     total_replayed_steps += replayed_steps
