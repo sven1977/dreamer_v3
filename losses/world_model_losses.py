@@ -30,11 +30,12 @@ def world_model_prediction_losses(
     # Fold time dim.
     rewards = tf.reshape(rewards, shape=[-1])
     # Symlog + two-hot encode.
-    two_hot_rewards = two_hot(symlog(rewards))
+    #two_hot_rewards = two_hot(symlog(rewards))
     # two_hot_rewards=[B*T, num_buckets]
-    predicted_reward_log_probs = tf.math.log(reward_distr.probs)
+    #predicted_reward_log_probs = tf.math.log(reward_distr.probs)
     # predicted_reward_log_probs=[B*T, num_buckets]
-    reward_loss = - tf.reduce_sum(tf.multiply(two_hot_rewards, predicted_reward_log_probs), axis=-1)
+    reward_loss = - reward_distr.log_prob(symlog(rewards))
+    #reward_loss = - tf.reduce_sum(tf.multiply(two_hot_rewards, predicted_reward_log_probs), axis=-1)
 
     # Continue predictor loss.
     continues = tf.logical_not(tf.logical_or(terminateds, truncateds))
