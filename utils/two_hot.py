@@ -6,7 +6,12 @@ https://arxiv.org/pdf/2301.04104v1.pdf
 import tensorflow as tf
 
 
-def two_hot(value, num_buckets, lower_bound=20.0, upper_bound=20.0):
+def two_hot(
+    value,
+    num_buckets: int = 255,
+    lower_bound: float = -20.0,
+    upper_bound: float = 20.0,
+):
     """Returns a two-hot vector of dim=num_buckets with two entries != 0.0.
 
     Entries in the vector represent equally sized buckets within some fixed range

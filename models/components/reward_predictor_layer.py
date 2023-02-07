@@ -44,7 +44,6 @@ class RewardPredictorLayer(tf.keras.layers.Layer):
         self.reward_buckets_layer = tf.keras.layers.Dense(
             units=self.num_buckets + 1,  # num_outcomes=num_buckets+1
             activation=None,
-
             # From [1]:
             # "We further noticed that the randomly initialized reward predictor and
             # critic networks at the start of training can result in large predicted

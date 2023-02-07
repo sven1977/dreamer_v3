@@ -153,6 +153,9 @@ https://arxiv.org/pdf/2301.04104v1.pdf
       (all other layers (except the distribution parameter producing ones) do use SiLU).
     - TODO: Need to fix reward/return loss in using two-hot instead of plain -log(p).
 
+2023/02/07
+    - Fix two-hot labels/losses for reward- and value predictors.
+
 OPEN PROBLEMS:
 - We are not using `two_hot` yet at all, also not for the reward predictions, how come?
 - Figure out reason of actor loss:
