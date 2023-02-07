@@ -118,37 +118,41 @@ def train_one_step(sample, step):
             rewards=sample["rewards"],
             terminateds=sample["terminateds"],
             truncateds=sample["truncateds"],
+            mask=sample["mask"],
+            B=tf.convert_to_tensor(batch_size_B),
+            T=tf.convert_to_tensor(batch_length_T),
             forward_train_outs=forward_train_outs,
         )
-        L_pred_BxT = tf.reshape(prediction_losses["total_loss"], shape=(batch_size_B, batch_length_T))
+        L_pred_BxT = prediction_losses["total_loss"]
         L_pred = tf.reduce_mean(tf.reduce_sum(L_pred_BxT, axis=-1))
         tf.summary.histogram("L_pred_BxT", L_pred_BxT, step)
         tf.summary.histogram("L_pred", L_pred, step)
 
-        L_decoder_BxT = tf.reshape(prediction_losses["decoder_loss"], shape=(batch_size_B, batch_length_T))
+        L_decoder_BxT = prediction_losses["decoder_loss"]
         L_decoder = tf.reduce_mean(tf.reduce_sum(L_decoder_BxT, axis=-1))
         tf.summary.histogram("L_decoder_BxT", L_decoder_BxT, step)
         tf.summary.histogram("L_decoder", L_decoder, step)
 
-        L_reward_BxT = tf.reshape(prediction_losses["reward_loss"], shape=(batch_size_B, batch_length_T))
+        L_reward_BxT = prediction_losses["reward_loss"]
         L_reward = tf.reduce_mean(tf.reduce_sum(L_reward_BxT, axis=-1))
         tf.summary.histogram("L_reward_BxT", L_reward_BxT, step)
         tf.summary.histogram("L_reward", L_reward, step)
 
-        L_continue_BxT = tf.reshape(prediction_losses["continue_loss"], shape=(batch_size_B, batch_length_T))
+        L_continue_BxT = prediction_losses["continue_loss"]
         L_continue = tf.reduce_mean(tf.reduce_sum(L_continue_BxT, axis=-1))
         tf.summary.histogram("L_continue_BxT", L_continue_BxT, step)
         tf.summary.histogram("L_continue", L_continue, step)
 
-        L_dyn_BT, L_rep_BT = world_model_dynamics_and_representation_loss(
-            forward_train_outs=forward_train_outs
+        L_dyn_BxT, L_rep_BxT = world_model_dynamics_and_representation_loss(
+            mask=sample["mask"],
+            B=tf.convert_to_tensor(batch_size_B),
+            T=tf.convert_to_tensor(batch_length_T),
+            forward_train_outs=forward_train_outs,
         )
-        L_dyn_BxT = tf.reshape(L_dyn_BT, shape=(batch_size_B, batch_length_T))
         L_dyn = tf.reduce_mean(tf.reduce_sum(L_dyn_BxT, axis=-1))
         tf.summary.histogram("L_dyn_BxT", L_dyn_BxT, step)
         tf.summary.histogram("L_dyn", L_dyn, step)
 
-        L_rep_BxT = tf.reshape(L_rep_BT, shape=(batch_size_B, batch_length_T))
         L_rep = tf.reduce_mean(tf.reduce_sum(L_rep_BxT, axis=-1))
         tf.summary.histogram("L_rep_BxT", L_rep_BxT, step)
         tf.summary.histogram("L_rep", L_rep, step)
@@ -156,8 +160,6 @@ def train_one_step(sample, step):
         L_total_BxT = 1.0 * L_pred_BxT + 0.5 * L_dyn_BxT + 0.1 * L_rep_BxT
         tf.summary.histogram("L_total_BxT", L_total_BxT, step)
 
-        # Mask out invalid timesteps (episode terminated/truncated).
-        L_total_BxT = L_total_BxT * sample["mask"]
         # Sum up timesteps, and average over batch (see eq. 4 in [1]).
         L_total = tf.reduce_mean(tf.reduce_sum(L_total_BxT, axis=-1))
         tf.summary.scalar("L_total", L_total, step)

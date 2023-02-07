@@ -12,6 +12,9 @@ def world_model_prediction_losses(
         rewards,
         terminateds,
         truncateds,
+        mask,
+        B,
+        T,
         forward_train_outs,
 ):
     obs_distr = forward_train_outs["obs_distribution"]
@@ -21,6 +24,8 @@ def world_model_prediction_losses(
     #decoder_loss = - obs_distr.log_prob(symlog(observations))
     #TODO: try MSE (instead of -log(p))
     decoder_loss = tf.losses.mse(symlog(observations), obs_distr.loc)
+    # Reshape and mask out invalid timesteps (episode terminated/truncated).
+    decoder_loss = tf.reshape(decoder_loss, (B, T)) * mask
 
     # Probabilities of the individual reward value buckets computed by our reward
     # predictor.
@@ -36,6 +41,8 @@ def world_model_prediction_losses(
     # predicted_reward_log_probs=[B*T, num_buckets]
     reward_loss = - reward_distr.log_prob(symlog(rewards))
     #reward_loss = - tf.reduce_sum(tf.multiply(two_hot_rewards, predicted_reward_log_probs), axis=-1)
+    # Reshape and mask out invalid timesteps (episode terminated/truncated).
+    reward_loss = tf.reshape(reward_loss, (B, T)) * mask
 
     # Continue predictor loss.
     continues = tf.logical_not(tf.logical_or(terminateds, truncateds))
@@ -46,6 +53,8 @@ def world_model_prediction_losses(
     # Fold time dim.
     continues = tf.reshape(continues, shape=[-1])
     continue_loss = - continue_distr.log_prob(continues)
+    # Reshape and mask out invalid timesteps (episode terminated/truncated).
+    continue_loss = tf.reshape(continue_loss, (B, T)) * mask
 
     return {
         "decoder_loss": decoder_loss,
@@ -56,7 +65,7 @@ def world_model_prediction_losses(
 
 
 @tf.function
-def world_model_dynamics_and_representation_loss(forward_train_outs):
+def world_model_dynamics_and_representation_loss(forward_train_outs, mask, B, T):
     # Actual distribution over stochastic internal states (z) produced by the encoder.
     z_distr_encoder = forward_train_outs["z_distribution_encoder"]
     # Actual distribution over stochastic internal states (z) produced by the
@@ -88,6 +97,7 @@ def world_model_dynamics_and_representation_loss(forward_train_outs):
             axis=-1,
         ),
     )
+    L_dyn = tf.reshape(L_dyn, (B, T)) * mask
     L_rep = tf.math.maximum(
         1.0,
         # Sum KL over all `num_categoricals` as these are independent.
@@ -98,4 +108,6 @@ def world_model_dynamics_and_representation_loss(forward_train_outs):
             axis=-1,
         ),
     )
+    # Reshape and mask out invalid timesteps (episode terminated/truncated).
+    L_rep = tf.reshape(L_rep, (B, T)) * mask
     return L_dyn, L_rep
