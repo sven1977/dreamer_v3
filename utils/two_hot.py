@@ -39,16 +39,16 @@ def two_hot(
     # Tensor of batch indices: [0, B=batch size).
     batch_indices = tf.range(0, value.shape[0], dtype=tf.float32)
     # Calculate the step deltas (how much space between each bucket's central value?).
-    delta = (upper_bound - lower_bound) / (num_buckets - 1)
+    bucket_delta = (upper_bound - lower_bound) / num_buckets
     # Compute the float indices (might be non-int numbers: sitting between two buckets).
-    idx = (-lower_bound + value) / delta
+    idx = (-lower_bound + value) / bucket_delta
     # k
     k = tf.math.floor(idx)
     # k+1
     kp1 = tf.math.ceil(idx)
     # The actual values found at k and k+1 inside the set of buckets.
-    values_k = lower_bound + k * delta
-    values_kp1 = lower_bound + kp1 * delta
+    values_k = lower_bound + k * bucket_delta
+    values_kp1 = lower_bound + kp1 * bucket_delta
     # Compute the two-hot weights (adding up to 1.0) to use at index k and k+1.
     weights_k = (value - values_kp1) / (values_k - values_kp1)
     weights_kp1 = 1.0 - weights_k
@@ -64,11 +64,11 @@ def two_hot(
     return tf.scatter_nd(
         tf.cast(indices, tf.int32),
         updates,
-        shape=(value.shape[0], num_buckets),
+        shape=(value.shape[0], num_buckets + 1),
     )
 
 
 if __name__ == "__main__":
-    print(two_hot(tf.convert_to_tensor([2.5, 0.1]), 11, -5.0, 5.0))
-    print(two_hot(tf.convert_to_tensor([0.1]), 5, -1.0, 1.0))
-    print(two_hot(tf.convert_to_tensor([-0.5, -1.2]), 10, -6.0, 3.0))
+    print(two_hot(tf.convert_to_tensor([2.5, 0.1]), 10, -5.0, 5.0))
+    print(two_hot(tf.convert_to_tensor([0.1]), 4, -1.0, 1.0))
+    print(two_hot(tf.convert_to_tensor([-0.5, -1.2]), 9, -6.0, 3.0))
