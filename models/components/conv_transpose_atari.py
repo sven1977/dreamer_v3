@@ -83,7 +83,7 @@ class ConvTransposeAtari(tf.keras.Model):
             activation=None,
         )
 
-    def call(self, h, z, return_distribution=False):
+    def call(self, h, z):
         """TODO
 
         Args:
@@ -123,9 +123,9 @@ class ConvTransposeAtari(tf.keras.Model):
             scale_diag=tf.ones_like(loc),
         )
         pred_obs = distribution.sample()
-        if return_distribution:
-            return pred_obs, distribution
-        return pred_obs
+        #if return_distribution:
+        return pred_obs, distribution
+        #return pred_obs
 
 
 if __name__ == "__main__":

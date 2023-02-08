@@ -20,7 +20,6 @@ class DreamerModel(tf.keras.Model):
             *,
             model_dimension: str = "XS",
             action_space: gym.Space,
-            batch_length_T: int = 64,
             world_model,
     ):
         """TODO
@@ -29,21 +28,11 @@ class DreamerModel(tf.keras.Model):
              model_dimension: The "Model Size" used according to [1] Appendinx B.
                 Use None for manually setting the different network sizes.
              action_space: The action space the our environment used.
-             batch_length_T: The length (T) of the sequences used for training. The
-                actual shape of the input data (e.g. rewards) is then: [B, T, ...],
-                where B is the "batch size", T is the "batch length" (this arg) and
-                "..." is the dimension of the data (e.g. (64, 64, 3) for Atari image
-                observations). Note that a single sequence (within a batch) only ever
-                contains continuous time-step data from one episode. Should an
-                episode have ended inside a sequence, the reset of that sequence will be
-                filled with zero-data.
         """
         super().__init__()
 
         assert model_dimension in [None, "XS", "S", "M", "L", "XL"]
         self.model_dimension = model_dimension
-
-        self.batch_length_T = batch_length_T
 
         self.world_model = world_model
 
@@ -104,7 +93,8 @@ class DreamerModel(tf.keras.Model):
         a_dreamed = []
         r_dreamed = []
         for _ in range(timesteps):
-            # Compute z using the dynamics model.
+            # Compute z from h, using the dynamics model (we don't have an actual
+            # observation at this timestep).
             z = self.world_model.dynamics_predictor(h=h)
             z_dreamed.append(z)
 
@@ -115,7 +105,7 @@ class DreamerModel(tf.keras.Model):
             # Compute `a` using actor network.
             #a = self.actor(h=h, z=z)
             #TODO: compute actor-produced actions, instead of random actions
-            a = tf.random.uniform(tf.shape(r), 0, self.action_space.n, tf.int32)
+            a = tf.random.uniform(tf.shape(r), 0, self.action_space.n, tf.int64)
             #TODO: END: random actions
 
             a_dreamed.append(a)
@@ -147,37 +137,60 @@ if __name__ == "__main__":
     from moviepy.editor import ImageSequenceClip
     import time
 
+    from ray.rllib.algorithms.algorithm_config import AlgorithmConfig
+
     from models.world_model_atari import WorldModelAtari
+    from utils.env_runner import EnvRunner
 
     B = 1
     T = 16
     burn_in_T = 4
 
-    world_model = WorldModelAtari(
-        model_dimension="XS",
-        action_space=gym.spaces.Discrete(2),
-        batch_length_T=T,
+    config = (
+        AlgorithmConfig()
+            .environment("ALE/MontezumaRevenge-v5", env_config={
+            # DreamerV3 paper does not specify, whether Atari100k is run
+            # w/ or w/o sticky actions, just that frameskip=4.
+            "frameskip": 4,
+            "repeat_action_probability": 0.0,
+        })
+        .rollouts(num_envs_per_worker=1, rollout_fragment_length=burn_in_T + T)
     )
+    # The vectorized gymnasium EnvRunner to collect samples of shape (B, T, ...).
+    env_runner = EnvRunner(model=None, config=config, max_seq_len=T)
+
+    # Our DreamerV3 world model.
+    from_checkpoint = "/Users/sven/Dropbox/Projects/dreamer_v3/examples/checkpoints/montezuma_world_model_330"
+    world_model = tf.keras.models.load_model(from_checkpoint)
+    # TODO: ugly hack (resulting from the insane fact that you cannot know
+    #  an env's spaces prior to actually constructing an instance of it) :(
+    env_runner.model = world_model
+
     dreamer_model = DreamerModel(
-        model_dimension="XS",
-        action_space=gym.spaces.Discrete(2),
-        batch_length_T=T,
+        model_dimension="S",
+        action_space=env_runner.env.single_action_space,
         world_model=world_model,
     )
-    obs = np.random.randint(0, 256, size=(B, burn_in_T, 64, 64, 3), dtype=np.uint8)
-    actions = np.random.randint(0, 2, size=(B, burn_in_T), dtype=np.uint8)
-    initial_h = np.random.random(size=(B, 256)).astype(np.float32)
+    #obs = np.random.randint(0, 256, size=(B, burn_in_T, 64, 64, 3), dtype=np.uint8)
+    #actions = np.random.randint(0, 2, size=(B, burn_in_T), dtype=np.uint8)
+    #initial_h = np.random.random(size=(B, 256)).astype(np.float32)
+
+    sampled_obs, _, sampled_actions, _, _, _, sampled_h, _ = env_runner.sample(random_actions=True)
+
     dreamed_trajectory = dreamer_model.dream_trajectory(
-        obs, actions, initial_h, timesteps=16
+        sampled_obs[:, :burn_in_T], sampled_actions.astype(np.int64)[:, :burn_in_T], sampled_h, timesteps=T
     )
     print(dreamed_trajectory)
 
     # Compute observations using h and z and the decoder net.
-    # Note that the last h-state is NOT
-    dreamed_images = world_model.cnn_transpose_atari(
-        h=tf.reshape(dreamed_trajectory["h_states"][:,:-1], (B * T, -1)),
-        z=tf.reshape(dreamed_trajectory["z_dreamed"], (B * T) + dreamed_trajectory["z_dreamed"].shape[2:]),
+    # Note that the last h-state is NOT used here as it's already part of
+    # a new trajectory.
+    _, dreamed_images_distr = world_model.cnn_transpose_atari(
+        tf.reshape(dreamed_trajectory["h_states"][:,:-1], (B * T, -1)),
+        tf.reshape(dreamed_trajectory["z_dreamed"], (B * T) + dreamed_trajectory["z_dreamed"].shape[2:]),
     )
+    # Use mean() of the Gaussian, no sample!
+    dreamed_images = dreamed_images_distr.mean()
     dreamed_images = tf.reshape(
         tf.cast(
             tf.clip_by_value(

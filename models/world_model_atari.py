@@ -221,9 +221,7 @@ class WorldModelAtari(tf.keras.Model):
         zs = tf.reshape(zs, shape=[-1] + zs.shape.as_list()[2:])
 
         # Compute predicted symlog'd observations from h and z using the decoder.
-        _, obs_distribution = self.cnn_transpose_atari(
-            h=hs, z=zs, return_distribution=True
-        )
+        _, obs_distribution = self.cnn_transpose_atari(h=hs, z=zs)
         # Compute (predicted) reward distributions.
         _, reward_distribution = self.reward_predictor(
             h=hs, z=zs, return_distribution=True
