@@ -42,6 +42,7 @@ config = (
         # w/ or w/o sticky actions, just that frameskip=4.
         "frameskip": 4,
         "repeat_action_probability": 0.0,
+        "full_action_space": False,
     })
     .rollouts(num_envs_per_worker=1, rollout_fragment_length=64)
 )

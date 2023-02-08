@@ -29,6 +29,19 @@ class ReplayBuffer:
             sample[key] = np.stack([buf[i] for i in indices], axis=0)
         return sample
 
+    def save(self):
+        np.savez("buffer.npz", {
+            key: np.stack(deq, axis=0)
+            for key, deq in self.buffers.items()
+        })
+
+    def load(self):
+        buffer_content = np.load("buffer.npz")
+        for key, value in buffer_content.items():
+            self.buffers[key].clear()
+            for row in list(value):
+                self.buffers[key].append(row)
+
     def __len__(self):
         return len(self.buffers["obs"])
 

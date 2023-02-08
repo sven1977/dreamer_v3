@@ -165,7 +165,8 @@ if __name__ == "__main__":
     env_runner = EnvRunner(model=None, config=config, max_seq_len=burn_in_T + T)
 
     # Our DreamerV3 world model.
-    from_checkpoint = 'C:\Dropbox\Projects\dreamer_v3\examples\checkpoints\mspacman_world_model_170'
+    #from_checkpoint = 'C:\Dropbox\Projects\dreamer_v3\examples\checkpoints\mspacman_world_model_170'
+    from_checkpoint = "/Users/sven/Dropbox/Projects/dreamer_v3/examples/checkpoints/mspacman_all_wrappers_world_model_60"
     world_model = tf.keras.models.load_model(from_checkpoint)
     # TODO: ugly hack (resulting from the insane fact that you cannot know
     #  an env's spaces prior to actually constructing an instance of it) :(
