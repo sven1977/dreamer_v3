@@ -34,7 +34,7 @@ class SequenceModel(tf.keras.Model):
             num_gru_units,
             return_sequences=False,
             return_state=False,
-            # Note: Changing these is most likely a bad idea!
+            # Note: Changing these activations is most likely a bad idea!
             # In experiments, setting one of both of them to silu deteriorated
             # performance significantly.
             #activation=tf.nn.silu,

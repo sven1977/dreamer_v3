@@ -4,10 +4,12 @@ D. Hafner, J. Pasukonis, J. Ba, T. Lillicrap
 https://arxiv.org/pdf/2301.04104v1.pdf
 """
 import gymnasium as gym
+import numpy as np
 import tensorflow as tf
 
 from models.components.actor_network import ActorNetwork
 from models.components.reward_predictor import RewardPredictor
+from utils.symlog import inverse_symlog
 
 
 class DreamerModel(tf.keras.Model):
@@ -45,8 +47,10 @@ class DreamerModel(tf.keras.Model):
 
         self.world_model = world_model
 
+        self.action_space = action_space
+
         self.actor = ActorNetwork(
-            action_space=action_space,
+            action_space=self.action_space,
             model_dimension=model_dimension,
         )
         self.critic = RewardPredictor(
@@ -95,7 +99,7 @@ class DreamerModel(tf.keras.Model):
                 initial_h=h,
             )
 
-        h_states = []
+        h_states = [h]
         z_dreamed = []
         a_dreamed = []
         r_dreamed = []
@@ -103,11 +107,19 @@ class DreamerModel(tf.keras.Model):
             # Compute z using the dynamics model.
             z = self.world_model.dynamics_predictor(h=h)
             z_dreamed.append(z)
-            # Compute a using actor network.
-            a = self.actor(h=h, z=z)
-            a_dreamed.append(a)
+
             # Compute r using reward predictor.
-            r_dreamed.append(self.world_model.reward_predictor(h=h, z=z))
+            r = self.world_model.reward_predictor(h=h, z=z)
+            r_dreamed.append(inverse_symlog(r))
+
+            # Compute `a` using actor network.
+            #a = self.actor(h=h, z=z)
+            #TODO: compute actor-produced actions, instead of random actions
+            a = tf.random.uniform(tf.shape(r), 0, self.action_space.n, tf.int32)
+            #TODO: END: random actions
+
+            a_dreamed.append(a)
+
             # Compute next h using sequence model.
             h_tp1 = self.world_model.sequence_model(
                 # actions and z must have a T dimension.
@@ -119,13 +131,68 @@ class DreamerModel(tf.keras.Model):
 
             h = h_tp1
 
-        return {
+        # Stack along T axis.
+        ret = {
             "h_states": tf.stack(h_states, axis=1),
             "z_dreamed": tf.stack(z_dreamed, axis=1),
             "actions_dreamed": tf.stack(a_dreamed, axis=1),
             "rewards_dreamed": tf.stack(r_dreamed, axis=1),
         }
 
+        return ret
+
 
 if __name__ == "__main__":
-    pass#world_model =
+    from models.world_model_atari import WorldModelAtari
+
+    B = 1
+    T = 16
+    burn_in_T = 4
+
+    world_model = WorldModelAtari(
+        model_dimension="XS",
+        action_space=gym.spaces.Discrete(2),
+        batch_length_T=T,
+    )
+    dreamer_model = DreamerModel(
+        model_dimension="XS",
+        action_space=gym.spaces.Discrete(2),
+        batch_length_T=T,
+        world_model=world_model,
+    )
+    obs = np.random.random(size=(B, burn_in_T, 64, 64, 3)).astype(np.float32)
+    actions = np.random.randint(0, 2, size=(B, burn_in_T), dtype=np.uint8)
+    initial_h = np.random.random(size=(B, 256)).astype(np.float32)
+    dreamed_trajectory = dreamer_model.dream_trajectory(
+        obs, actions, initial_h, timesteps=16
+    )
+    print(dreamed_trajectory)
+
+    # Compute observations using h and z and the decoder net.
+    # Note that the last h-state is NOT
+    images = world_model.cnn_transpose_atari(
+        h=tf.reshape(dreamed_trajectory["h_states"][:,:-1], (B * T, -1)),
+        z=tf.reshape(dreamed_trajectory["z_dreamed"], (B * T) + dreamed_trajectory["z_dreamed"].shape[2:]),
+    )
+    images = tf.reshape(
+        tf.cast(
+            tf.clip_by_value(
+                inverse_symlog(images), 0.0, 255.0
+            ),
+            tf.uint8,
+        ),
+        shape=(B, T, 64, 64, 3),
+    ).numpy()
+
+    # save it as a gif
+    from moviepy.editor import ImageSequenceClip
+    clip = ImageSequenceClip(list(images[0]), fps=20)
+    clip.write_gif('test.gif', fps=20)
+    from IPython.display import display, Image
+    Image('test.gif')
+
+    #from matplotlib import pyplot as plt
+    #for i in range(T):
+    #    plt.imshow(images[0][i], interpolation='nearest')
+    #    plt.show()
+

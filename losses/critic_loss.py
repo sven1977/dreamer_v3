@@ -7,24 +7,22 @@ import tensorflow as tf
 def critic_loss(
         dreamed_observations,
         dreamed_rewards,
-        terminateds,
-        truncateds,
+        dreamed_continues,
         forward_train_outs,
+        gamma,
+        lambda_,
 ):
-    pass # TODO
+    value_targets = compute_value_targets(
+        rewards=dreamed_rewards,
+        continues=dreamed_continues,
+        value_predictions=forward_train_outs["value_predictions"],
+        last_r=forward_train_outs["last_value_predictions"],
+        gamma=gamma,
+        lambda_=lambda_,
+    )
 
 
-def gae(rewards, value_predictions, last_r, gamma, lambda_):
-    value_predictions = np.concatenate([value_predictions, np.array([last_r])])
-    delta_t = rewards + gamma * value_predictions[1:] - value_predictions[:-1]
-    # This formula for the advantage comes from:
-    # "Generalized Advantage Estimation": https://arxiv.org/abs/1506.02438
-    advantages = discounted_return_to_go(delta_t, gamma * lambda_)
-    targets = (advantages + value_predictions[:-1]).astype(np.float32)
-    return targets
-
-
-def my_gae(rewards, continues, value_predictions, last_r, gamma, lambda_):
+def compute_value_targets(rewards, continues, value_predictions, last_r, gamma, lambda_):
     value_predictions = np.concatenate([value_predictions, np.array([last_r])])
     Rs = [last_r]
     for i in reversed(range(len(rewards))):
@@ -33,7 +31,17 @@ def my_gae(rewards, continues, value_predictions, last_r, gamma, lambda_):
     return np.flip(np.stack(Rs[1:]), axis=0)
 
 
-def discounted_return_to_go(rewards: np.ndarray, gamma: float) -> np.ndarray:
+def _rllib_gae(rewards, value_predictions, last_r, gamma, lambda_):
+    value_predictions = np.concatenate([value_predictions, np.array([last_r])])
+    delta_t = rewards + gamma * value_predictions[1:] - value_predictions[:-1]
+    # This formula for the advantage comes from:
+    # "Generalized Advantage Estimation": https://arxiv.org/abs/1506.02438
+    advantages = _rllib_discounted_return_to_go(delta_t, gamma * lambda_)
+    targets = (advantages + value_predictions[:-1]).astype(np.float32)
+    return targets
+
+
+def _rllib_discounted_return_to_go(rewards: np.ndarray, gamma: float) -> np.ndarray:
     """Calculates the discounted returns to go over a reward sequence.
 
     Moving from the end backwards in time until the beginning of the reward
@@ -69,7 +77,7 @@ if __name__ == "__main__":
     ])
     print("expected:", expected)
     print("actual:")
-    print(discounted_return_to_go(
+    print(_rllib_discounted_return_to_go(
         np.array([0.0, 1.0, 2.0, 3.0]),
         0.9,
     ))
@@ -82,6 +90,6 @@ if __name__ == "__main__":
     lambda_ = 0.7
 
     # my GAE:
-    print(my_gae(r, c, vf, last_r, gamma, lambda_))
+    print(compute_value_targets(r, c, vf, last_r, gamma, lambda_))
     # RLlib GAE
-    print(gae(r, vf, last_r, gamma, lambda_))
+    print(_rllib_gae(r, vf, last_r, gamma, lambda_))

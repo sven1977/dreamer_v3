@@ -28,20 +28,24 @@ def world_model_prediction_losses(
     # Reshape and mask out invalid timesteps (episode terminated/truncated).
     decoder_loss = tf.reshape(decoder_loss, (B, T)) * mask
 
-    # Probabilities of the individual reward value buckets computed by our reward
-    # predictor.
+    # The FiniteDiscrete reward bucket distribution computed by our reward predictor.
     # [B x num_buckets].
     reward_distr = forward_train_outs["reward_distribution"]
     # Learn to produce symlog'd reward predictions.
+    rewards = symlog(rewards)
     # Fold time dim.
     rewards = tf.reshape(rewards, shape=[-1])
-    # Symlog + two-hot encode.
-    #two_hot_rewards = two_hot(symlog(rewards))
+
+    # A) Two-hot encode.
+    two_hot_rewards = two_hot(rewards)
     # two_hot_rewards=[B*T, num_buckets]
-    #predicted_reward_log_probs = tf.math.log(reward_distr.probs)
+    predicted_reward_log_probs = tf.math.log(reward_distr.probs)
+    reward_loss = - tf.reduce_sum(tf.multiply(two_hot_rewards, predicted_reward_log_probs), axis=-1)
     # predicted_reward_log_probs=[B*T, num_buckets]
-    reward_loss = - reward_distr.log_prob(symlog(rewards))
-    #reward_loss = - tf.reduce_sum(tf.multiply(two_hot_rewards, predicted_reward_log_probs), axis=-1)
+
+    # B) Simple neg log(p) on distribution, NOT using two-hot.
+    #reward_loss = - reward_distr.log_prob(rewards)
+
     # Reshape and mask out invalid timesteps (episode terminated/truncated).
     reward_loss = tf.reshape(reward_loss, (B, T)) * mask
 
