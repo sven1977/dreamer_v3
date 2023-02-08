@@ -40,14 +40,15 @@ def world_model_prediction_losses(
     two_hot_rewards = two_hot(rewards)
     # two_hot_rewards=[B*T, num_buckets]
     predicted_reward_log_probs = tf.math.log(reward_distr.probs)
-    reward_loss = - tf.reduce_sum(tf.multiply(two_hot_rewards, predicted_reward_log_probs), axis=-1)
     # predicted_reward_log_probs=[B*T, num_buckets]
+    reward_loss = - tf.reduce_sum(tf.multiply(two_hot_rewards, predicted_reward_log_probs), axis=-1)
+    # Reshape and mask out invalid timesteps (episode terminated/truncated).
+    reward_loss = tf.reshape(reward_loss, (B, T)) * mask
 
     # B) Simple neg log(p) on distribution, NOT using two-hot.
     reward_loss_logp = - reward_distr.log_prob(rewards)
-
     # Reshape and mask out invalid timesteps (episode terminated/truncated).
-    reward_loss = tf.reshape(reward_loss, (B, T)) * mask
+    reward_loss_logp = tf.reshape(reward_loss_logp, (B, T)) * mask
 
     # Continue predictor loss.
     continues = tf.logical_not(tf.logical_or(terminateds, truncateds))
