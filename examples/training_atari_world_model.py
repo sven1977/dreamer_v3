@@ -36,7 +36,8 @@ batch_length_T = 64
 # EnvRunner config (an RLlib algorithm config).
 config = (
     AlgorithmConfig()
-    .environment("ALE/MontezumaRevenge-v5", env_config={
+    #.environment("ALE/MontezumaRevenge-v5", env_config={
+    .environment("ALE/MsPacman-v5", env_config={
         # DreamerV3 paper does not specify, whether Atari100k is run
         # w/ or w/o sticky actions, just that frameskip=4.
         "frameskip": 4,
