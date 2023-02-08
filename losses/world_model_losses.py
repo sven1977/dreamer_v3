@@ -44,7 +44,7 @@ def world_model_prediction_losses(
     # predicted_reward_log_probs=[B*T, num_buckets]
 
     # B) Simple neg log(p) on distribution, NOT using two-hot.
-    #reward_loss = - reward_distr.log_prob(rewards)
+    reward_loss_logp = - reward_distr.log_prob(rewards)
 
     # Reshape and mask out invalid timesteps (episode terminated/truncated).
     reward_loss = tf.reshape(reward_loss, (B, T)) * mask
@@ -64,6 +64,7 @@ def world_model_prediction_losses(
     return {
         "decoder_loss": decoder_loss,
         "reward_loss": reward_loss,
+        "reward_loss_logp": reward_loss_logp,
         "continue_loss": continue_loss,
         "total_loss": decoder_loss + reward_loss + continue_loss,
     }

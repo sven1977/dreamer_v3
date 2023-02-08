@@ -137,6 +137,12 @@ def train_one_step(sample, step):
         L_reward = tf.reduce_mean(tf.reduce_sum(L_reward_BxT, axis=-1))
         tf.summary.histogram("L_reward_BxT", L_reward_BxT, step)
         tf.summary.scalar("L_reward", L_reward, step)
+        #TEST
+        L_reward_logp_BxT = prediction_losses["reward_loss_logp"]
+        L_reward_logp = tf.reduce_mean(tf.reduce_sum(L_reward_BxT, axis=-1))
+        tf.summary.histogram("L_reward_logp_BxT", L_reward_logp_BxT, step)
+        tf.summary.scalar("L_reward_logp", L_reward_logp, step)
+        #END TEST
 
         L_continue_BxT = prediction_losses["continue_loss"]
         L_continue = tf.reduce_mean(tf.reduce_sum(L_continue_BxT, axis=-1))

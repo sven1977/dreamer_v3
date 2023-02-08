@@ -143,6 +143,10 @@ class DreamerModel(tf.keras.Model):
 
 
 if __name__ == "__main__":
+    from IPython.display import display, Image
+    from moviepy.editor import ImageSequenceClip
+    import time
+
     from models.world_model_atari import WorldModelAtari
 
     B = 1
@@ -160,7 +164,7 @@ if __name__ == "__main__":
         batch_length_T=T,
         world_model=world_model,
     )
-    obs = np.random.random(size=(B, burn_in_T, 64, 64, 3)).astype(np.float32)
+    obs = np.random.randint(0, 256, size=(B, burn_in_T, 64, 64, 3), dtype=np.uint8)
     actions = np.random.randint(0, 2, size=(B, burn_in_T), dtype=np.uint8)
     initial_h = np.random.random(size=(B, 256)).astype(np.float32)
     dreamed_trajectory = dreamer_model.dream_trajectory(
@@ -170,29 +174,22 @@ if __name__ == "__main__":
 
     # Compute observations using h and z and the decoder net.
     # Note that the last h-state is NOT
-    images = world_model.cnn_transpose_atari(
+    dreamed_images = world_model.cnn_transpose_atari(
         h=tf.reshape(dreamed_trajectory["h_states"][:,:-1], (B * T, -1)),
         z=tf.reshape(dreamed_trajectory["z_dreamed"], (B * T) + dreamed_trajectory["z_dreamed"].shape[2:]),
     )
-    images = tf.reshape(
+    dreamed_images = tf.reshape(
         tf.cast(
             tf.clip_by_value(
-                inverse_symlog(images), 0.0, 255.0
+                inverse_symlog(dreamed_images), 0.0, 255.0
             ),
             tf.uint8,
         ),
         shape=(B, T, 64, 64, 3),
     ).numpy()
 
-    # save it as a gif
-    from moviepy.editor import ImageSequenceClip
-    clip = ImageSequenceClip(list(images[0]), fps=20)
-    clip.write_gif('test.gif', fps=20)
-    from IPython.display import display, Image
-    Image('test.gif')
-
-    #from matplotlib import pyplot as plt
-    #for i in range(T):
-    #    plt.imshow(images[0][i], interpolation='nearest')
-    #    plt.show()
-
+    # Save sequence a gif.
+    clip = ImageSequenceClip(list(dreamed_images[0]), fps=20)
+    clip.write_gif("test.gif", fps=20)
+    Image("test.gif")
+    time.sleep(10)
