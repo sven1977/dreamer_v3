@@ -60,7 +60,7 @@ class DreamerModel(tf.keras.Model):
         pass
 
     #@tf.function
-    def dream_trajectory(self, observations, actions, initial_h, timesteps):
+    def dream_trajectory(self, observations, actions, initial_h, timesteps, use_sampled_actions=False):
         """Dreams trajectory from N initial observations and an initial h-state.
 
         Uses all T observations and actions (B, T, ...) to get a most accurate
@@ -92,7 +92,8 @@ class DreamerModel(tf.keras.Model):
         z_dreamed = []
         a_dreamed = []
         r_dreamed = []
-        for _ in range(timesteps):
+        for j in range(timesteps):
+            i = observations.shape[1] + j
             # Compute z from h, using the dynamics model (we don't have an actual
             # observation at this timestep).
             z = self.world_model.dynamics_predictor(h=h)
@@ -102,11 +103,15 @@ class DreamerModel(tf.keras.Model):
             r = self.world_model.reward_predictor(h=h, z=z)
             r_dreamed.append(inverse_symlog(r))
 
+            # Use the actions given to us.
+            if use_sampled_actions:
+                a = actions[:, i]
             # Compute `a` using actor network.
-            #a = self.actor(h=h, z=z)
-            #TODO: compute actor-produced actions, instead of random actions
-            a = tf.random.uniform(tf.shape(r), 0, self.action_space.n, tf.int64)
-            #TODO: END: random actions
+            else:
+                #a = self.actor(h=h, z=z)
+                #TODO: compute actor-produced actions, instead of random actions
+                a = tf.random.uniform(tf.shape(r), 0, self.action_space.n, tf.int64)
+                #TODO: END: random actions
 
             a_dreamed.append(a)
 
@@ -143,12 +148,12 @@ if __name__ == "__main__":
     from utils.env_runner import EnvRunner
 
     B = 1
-    T = 16
-    burn_in_T = 4
+    T = 64
+    burn_in_T = 5
 
     config = (
         AlgorithmConfig()
-            .environment("ALE/MontezumaRevenge-v5", env_config={
+            .environment("ALE/MsPacman-v5", env_config={
             # DreamerV3 paper does not specify, whether Atari100k is run
             # w/ or w/o sticky actions, just that frameskip=4.
             "frameskip": 4,
@@ -157,10 +162,10 @@ if __name__ == "__main__":
         .rollouts(num_envs_per_worker=1, rollout_fragment_length=burn_in_T + T)
     )
     # The vectorized gymnasium EnvRunner to collect samples of shape (B, T, ...).
-    env_runner = EnvRunner(model=None, config=config, max_seq_len=T)
+    env_runner = EnvRunner(model=None, config=config, max_seq_len=burn_in_T + T)
 
     # Our DreamerV3 world model.
-    from_checkpoint = "/Users/sven/Dropbox/Projects/dreamer_v3/examples/checkpoints/montezuma_world_model_330"
+    from_checkpoint = 'C:\Dropbox\Projects\dreamer_v3\examples\checkpoints\mspacman_world_model_170'
     world_model = tf.keras.models.load_model(from_checkpoint)
     # TODO: ugly hack (resulting from the insane fact that you cannot know
     #  an env's spaces prior to actually constructing an instance of it) :(
@@ -178,7 +183,13 @@ if __name__ == "__main__":
     sampled_obs, _, sampled_actions, _, _, _, sampled_h, _ = env_runner.sample(random_actions=True)
 
     dreamed_trajectory = dreamer_model.dream_trajectory(
-        sampled_obs[:, :burn_in_T], sampled_actions.astype(np.int64)[:, :burn_in_T], sampled_h, timesteps=T
+        sampled_obs[:, :burn_in_T],
+        sampled_actions.astype(np.int64),  # use all sampled actions, not random or actor-computed ones
+        sampled_h,
+        timesteps=T,
+        # Use same actions as in the sample such that we can 100% compare
+        # predicted vs actual observations.
+        use_sampled_actions=True,
     )
     print(dreamed_trajectory)
 
@@ -190,6 +201,7 @@ if __name__ == "__main__":
         tf.reshape(dreamed_trajectory["z_dreamed"], (B * T) + dreamed_trajectory["z_dreamed"].shape[2:]),
     )
     # Use mean() of the Gaussian, no sample!
+    #
     dreamed_images = dreamed_images_distr.mean()
     dreamed_images = tf.reshape(
         tf.cast(
@@ -201,8 +213,11 @@ if __name__ == "__main__":
         shape=(B, T, 64, 64, 3),
     ).numpy()
 
+    # Stitch dreamed_obs and sampled_obs together for better comparison.
+    images = np.concatenate([dreamed_images, sampled_obs[:, burn_in_T:]], axis=3)
+
     # Save sequence a gif.
-    clip = ImageSequenceClip(list(dreamed_images[0]), fps=20)
-    clip.write_gif("test.gif", fps=20)
+    clip = ImageSequenceClip(list(images[0]), fps=2)
+    clip.write_gif("test.gif", fps=2)
     Image("test.gif")
     time.sleep(10)

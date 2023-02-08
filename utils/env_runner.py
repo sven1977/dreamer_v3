@@ -3,9 +3,9 @@ import gymnasium as gym
 import numpy as np
 from supersuit.generic_wrappers import resize_v1
 import tensorflow as tf
-from typing import Optional
 
 from ray.rllib.algorithms.algorithm_config import AlgorithmConfig
+from ray.rllib.env.wrappers.atari_wrappers import EpisodicLifeEnv, FireResetEnv, NoopResetEnv
 from ray.rllib.policy.sample_batch import MultiAgentBatch
 
 
@@ -47,7 +47,7 @@ class EnvRunner:
             self.env = gym.vector.make(
                 "GymV26Environment-v0",
                 env_id=self.config.env,
-                wrappers=[partial(resize_v1, x_size=64, y_size=64), CountEnv],# NormalizeImageObs],# CountEnv],
+                wrappers=[EpisodicLifeEnv, NoopResetEnv, partial(resize_v1, x_size=64, y_size=64)],# NormalizeImageObs],# CountEnv],
                 num_envs=self.config.num_envs_per_worker,
                 asynchronous=self.config.remote_worker_envs,
                 make_kwargs=self.config.env_config,

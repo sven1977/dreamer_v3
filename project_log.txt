@@ -156,6 +156,10 @@ https://arxiv.org/pdf/2301.04104v1.pdf
 2023/02/07
     - Fix two-hot labels/losses for reward- and value predictors.
 
+2023/02/08
+    - Finish dream_trajectory method to produce dreamed trajectories given some pre-obs to burn in.
+
+
 OPEN PROBLEMS:
 - We are not using `two_hot` yet at all, also not for the reward predictions, how come?
 - Figure out reason of actor loss:
