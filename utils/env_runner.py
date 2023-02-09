@@ -1,4 +1,6 @@
 from functools import partial
+from typing import Optional
+
 import gymnasium as gym
 import numpy as np
 from supersuit.generic_wrappers import resize_v1
@@ -34,7 +36,13 @@ class EnvRunner:
     """An environment runner to locally collect data from vectorized gym environments.
     """
 
-    def __init__(self, model, config: AlgorithmConfig, max_seq_len: int = 100):
+    def __init__(
+        self,
+        model,
+        config: AlgorithmConfig,
+        max_seq_len: Optional[int] = None,
+        continuous_episodes: bool = False,
+    ):
         """Initializes an EnvRunner instance.
 
         Args:
@@ -43,6 +51,16 @@ class EnvRunner:
         self.model = model
         self.config = config
         self.max_seq_len = max_seq_len
+        self.continuous_episodes = continuous_episodes
+
+        # If we are using continuous episodes (no zero-masks for timesteps past
+        # end of an episode, just continue with next one), max_seq_len should be None.
+        # Each sample() call will play out exactly rollout_fragment_length timesteps
+        # per sub-environment.
+        if self.continuous_episodes:
+            assert self.max_seq_len is None
+            self.max_seq_len = self.config.rollout_fragment_length
+
         if self.config.env.startswith("ALE"):
             self.env = gym.vector.make(
                 "GymV26Environment-v0",
@@ -57,7 +75,7 @@ class EnvRunner:
                 self.config.env,
                 num_envs=self.config.num_envs_per_worker,
                 asynchronous=self.config.remote_worker_envs,
-                make_kwargs=self.config.env_config,
+                #make_kwargs=self.config.env_config,
             )
         self.needs_initial_reset = True
         self.observations = [[] for _ in range(self.env.num_envs)]
@@ -106,13 +124,14 @@ class EnvRunner:
             A MultiAgentBatch holding the collected experiences.
         """
         return_obs = []
-        return_next_obs = []
         return_actions = []
         return_rewards = []
         return_terminateds = []
         return_truncateds = []
         return_initial_h = []
-        return_masks = []
+        if not self.continuous_episodes:
+            return_next_obs = []
+            return_masks = []
 
         if force_reset or self.needs_initial_reset:
             obs, _ = self.env.reset()
@@ -176,6 +195,7 @@ class EnvRunner:
                 ts_sequences[i] += 1
                 if terminateds[i] or truncateds[i] or ts_sequences[i] == self.max_seq_len:
                     seq_len = ts_sequences[i]
+                    return_masks.append(seq_len)
                     ts_sequences[i] = 0
 
                     return_obs.append(self._process_and_pad(self.observations[i][:-1]))
@@ -184,7 +204,6 @@ class EnvRunner:
                     return_terminateds.append(self._process_and_pad(self.terminateds[i]))
                     return_truncateds.append(self._process_and_pad(self.truncateds[i]))
                     return_initial_h.append(self.current_sequence_initial_h[i].copy())
-                    return_masks.append(seq_len)
 
                     # The last entry in self.observations[i] is already the reset obs
                     # of the new episode.
@@ -216,21 +235,24 @@ class EnvRunner:
 
         # Batch all trajectories together along batch axis.
         return_obs = np.stack(return_obs, axis=0)
-        return_next_obs = np.stack(return_next_obs, axis=0)
         return_actions = np.stack(return_actions, axis=0)
         return_rewards = np.stack(return_rewards, axis=0)
         return_terminateds = np.stack(return_terminateds, axis=0)
         return_truncateds = np.stack(return_truncateds, axis=0)
         return_initial_h = np.stack(return_initial_h, axis=0)
-        return_masks = np.array(
-            [
-                [1.0 if i < m else 0.0 for i in range(self.max_seq_len)]
-                for m in return_masks
-            ],
-            dtype=np.float32,
-        )
 
-        return return_obs, return_next_obs, return_actions, return_rewards, return_terminateds, return_truncateds, return_initial_h, return_masks
+        if not self.continuous_episodes:
+            return_next_obs = np.stack(return_next_obs, axis=0)
+            return_masks = np.array(
+                [
+                    [1.0 if i < m else 0.0 for i in range(self.max_seq_len)]
+                    for m in return_masks
+                ],
+                dtype=np.float32,
+            )
+            return return_obs, return_next_obs, return_actions, return_rewards, return_terminateds, return_truncateds, return_initial_h, return_masks
+        else:
+            return return_obs, return_actions, return_rewards, return_terminateds, return_truncateds, return_initial_h
 
     def _split_by_env(self, inputs):
         return [inputs[i] for i in range(self.env.num_envs)]

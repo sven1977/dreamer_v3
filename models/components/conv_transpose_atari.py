@@ -83,7 +83,7 @@ class ConvTransposeAtari(tf.keras.Model):
             activation=None,
         )
 
-    def call(self, h, z):
+    def call(self, input_):
         """TODO
 
         Args:
@@ -92,15 +92,9 @@ class ConvTransposeAtari(tf.keras.Model):
                 observation input. Note: `z` is not used for the dynamics predictor
                 model (which predicts z from h).
         """
-        # Flatten last two dims of z.
-        assert len(z.shape) == 3
-        z_shape = tf.shape(z)
-        z = tf.reshape(tf.cast(z, tf.float32), shape=(z_shape[0], -1))
-        assert len(z.shape) == 2
-        out = tf.concat([h, z], axis=-1)
         # Feed through initial dense layer to get the right number of input nodes
         # for the first conv2dtranspose layer.
-        out = self.dense_layer(out)
+        out = self.dense_layer(input_)
         # Reshape to image format.
         out = tf.reshape(out, shape=(-1,) + self.input_dims)
 
@@ -120,6 +114,9 @@ class ConvTransposeAtari(tf.keras.Model):
         loc = tf.reshape(out, shape=(out_shape[0], -1))
         distribution = tfp.distributions.MultivariateNormalDiag(
             loc=loc,
+            # Scale == 1.0.
+            # [2]: "Distributions The image predictor outputs the mean of a diagonal
+            # Gaussian likelihood with **unit variance** ..."
             scale_diag=tf.ones_like(loc),
         )
         pred_obs = distribution.sample()

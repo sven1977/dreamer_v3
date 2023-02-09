@@ -104,7 +104,9 @@ def world_model_dynamics_and_representation_loss(forward_train_outs, mask, B, T)
             axis=-1,
         ),
     )
+    # Reshape and mask out invalid timesteps (episode terminated/truncated).
     L_dyn = tf.reshape(L_dyn, (B, T)) * mask
+
     L_rep = tf.math.maximum(
         1.0,
         # Sum KL over all `num_categoricals` as these are independent.
@@ -117,4 +119,5 @@ def world_model_dynamics_and_representation_loss(forward_train_outs, mask, B, T)
     )
     # Reshape and mask out invalid timesteps (episode terminated/truncated).
     L_rep = tf.reshape(L_rep, (B, T)) * mask
+
     return L_dyn, L_rep

@@ -14,8 +14,8 @@ from losses.world_model_losses import (
     world_model_dynamics_and_representation_loss,
     world_model_prediction_losses,
 )
-from models.components.cnn_atari import CNNAtari
-from models.components.conv_transpose_atari import ConvTransposeAtari
+from models.components.mlp import MLP
+from models.components.vector_decoder import VectorDecoder
 from models.world_model import WorldModel
 from utils.env_runner import EnvRunner
 from utils.replay_buffer import ReplayBuffer
@@ -38,14 +38,7 @@ batch_length_T = 64
 # EnvRunner config (an RLlib algorithm config).
 config = (
     AlgorithmConfig()
-    #.environment("ALE/MontezumaRevenge-v5", env_config={
-    .environment("ALE/MsPacman-v5", env_config={
-        # DreamerV3 paper does not specify, whether Atari100k is run
-        # w/ or w/o sticky actions, just that frameskip=4.
-        "frameskip": 4,
-        "repeat_action_probability": 0.0,
-        "full_action_space": False,
-    })
+    .environment("CartPole-v1")
     .rollouts(num_envs_per_worker=1, rollout_fragment_length=64)
 )
 # The vectorized gymnasium EnvRunner to collect samples of shape (B, T, ...).
@@ -58,13 +51,16 @@ from_checkpoint = None
 if from_checkpoint is not None:
     world_model = tf.keras.models.load_model(from_checkpoint)
 else:
-    model_dimension = "S"
+    model_dimension = "micro"
     world_model = WorldModel(
         model_dimension=model_dimension,
         action_space=env_runner.env.single_action_space,
         batch_length_T=batch_length_T,
-        encoder=CNNAtari(model_dimension=model_dimension),
-        decoder=ConvTransposeAtari(model_dimension=model_dimension)
+        encoder=MLP(model_dimension=model_dimension),
+        decoder=VectorDecoder(
+            model_dimension=model_dimension,
+            observation_space=env_runner.env.single_observation_space,
+        )
     )
 # TODO: ugly hack (resulting from the insane fact that you cannot know
 #  an env's spaces prior to actually constructing an instance of it) :(
@@ -97,20 +93,14 @@ def train_one_step(sample, step):
             actions=sample["actions"],
             initial_h=sample["h_states"],
         )
-        predicted_images_b0 = tf.reshape(
-            tf.cast(
-                tf.clip_by_value(inverse_symlog(
-                    forward_train_outs["obs_distribution"].loc[0:batch_length_T]
-                ), 0.0, 255.0),
-                dtype=tf.uint8,
-            ),
-            shape=(-1, 64, 64, 3),
+        predicted_obs = inverse_symlog(
+            forward_train_outs["obs_distribution"].loc[0:batch_length_T]
         )
         # Concat sampled and predicted images along the height axis (2) such that
         # real images show on top of respective predicted ones.
         # (B, w, h, C)
-        sampled_vs_predicted_images = tf.concat([predicted_images_b0, sample["obs"][0]], axis=1)
-        tf.summary.image("sampled_vs_predicted_images[0]", sampled_vs_predicted_images, step)
+        sampled_vs_predicted_obs = tf.concat([predicted_obs, sample["obs"][0]], axis=1)
+        tf.summary.histogram("sampled_vs_predicted_obs[0]", sampled_vs_predicted_obs, step)
         tf.summary.histogram(
             "predicted_rewards",
             tf.reshape(

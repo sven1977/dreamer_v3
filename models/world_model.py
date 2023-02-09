@@ -7,9 +7,7 @@ import gymnasium as gym
 import tensorflow as tf
 import tensorflow_probability as tfp
 
-from models.components.cnn_atari import CNNAtari
 from models.components.continue_predictor import ContinuePredictor
-from models.components.conv_transpose_atari import ConvTransposeAtari
 from models.components.dynamics_predictor import DynamicsPredictor
 from models.components.representation_layer import RepresentationLayer
 from models.components.reward_predictor import RewardPredictor
@@ -17,7 +15,7 @@ from models.components.sequence_model import SequenceModel
 from utils.symlog import symlog
 
 
-class WorldModelAtari(tf.keras.Model):
+class WorldModel(tf.keras.Model):
     """TODO
     """
     def __init__(
@@ -26,6 +24,8 @@ class WorldModelAtari(tf.keras.Model):
             model_dimension: str = "XS",
             action_space: gym.Space,
             batch_length_T: int = 64,
+            encoder: tf.keras.Model,
+            decoder: tf.keras.Model,
     ):
         """TODO
 
@@ -41,17 +41,21 @@ class WorldModelAtari(tf.keras.Model):
                 contains continuous time-step data from one episode. Should an
                 episode have ended inside a sequence, the reset of that sequence will be
                 filled with zero-data.
+            encoder: The encoder Model taking symlogged observations as input and
+                outputting a 1D vector that will beused as input into the
+                z-representation generating layer (either together with an h-state
+                (sequence model) or not (dynamics network)).
+            decoder: The decoder Model taking h- and z- states as input and generating
+                a (symlogged) predicted observation.
         """
         super().__init__()
 
-        assert model_dimension in [None, "XS", "S", "M", "L", "XL"]
         self.model_dimension = model_dimension
-
         self.batch_length_T = batch_length_T
 
         # RSSM (Recurrent State-Space Model)
         # Encoder + z-generator (x, h -> z).
-        self.cnn_atari = CNNAtari(model_dimension=self.model_dimension)
+        self.encoder = encoder
         self.representation_layer = RepresentationLayer()
         # Dynamics predictor (h -> z^).
         self.dynamics_predictor = DynamicsPredictor(
@@ -71,9 +75,7 @@ class WorldModelAtari(tf.keras.Model):
         )
 
         # Decoder (h, z -> x^).
-        self.cnn_transpose_atari = ConvTransposeAtari(
-            model_dimension=self.model_dimension
-        )
+        self.decoder = decoder
 
     def call(self, inputs, *args, **kwargs):
         return self.forward_train(inputs, *args, **kwargs)
@@ -102,7 +104,7 @@ class WorldModelAtari(tf.keras.Model):
         # Compute bare encoder outs (not z; this done later with involvement of the
         # sequence model).
         # encoder_outs=[B, ...]
-        encoder_out = self.cnn_atari(symlog(observations))
+        encoder_out = self.encoder(symlog(observations))
         repr_input = tf.concat([encoder_out, initial_h], axis=-1)
         # Draw one z-sample (no need to return the distribution here).
         z_t = self.representation_layer(repr_input, return_z_probs=False)
@@ -155,7 +157,7 @@ class WorldModelAtari(tf.keras.Model):
         # Fold time dimension for CNN pass.
         B, T = observations.shape[0], observations.shape[1]
         observations = tf.reshape(observations, shape=[-1] + observations.shape.as_list()[2:])
-        encoder_out = self.cnn_atari(symlog(observations))
+        encoder_out = self.encoder(symlog(observations))
         # Unfold time dimension.
         encoder_out = tf.reshape(encoder_out, shape=[-1, T] + encoder_out.shape.as_list()[1:])
         # encoder_out=[B, T, ...]
@@ -220,12 +222,13 @@ class WorldModelAtari(tf.keras.Model):
         hs = tf.reshape(hs, shape=[-1] + hs.shape.as_list()[2:])
         zs = tf.reshape(zs, shape=[-1] + zs.shape.as_list()[2:])
 
-        # Compute predicted symlog'd observations from h and z using the decoder.
-        _, obs_distribution = self.cnn_transpose_atari(h=hs, z=zs)
+        _, obs_distribution = self.decoder(h=hs, z=zs)
+
         # Compute (predicted) reward distributions.
         _, reward_distribution = self.reward_predictor(
             h=hs, z=zs, return_distribution=True
         )
+
         # Compute (predicted) continue distributions.
         _, continue_distribution = self.continue_predictor(
             h=hs, z=zs, return_distribution=True

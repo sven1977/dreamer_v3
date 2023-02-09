@@ -215,7 +215,7 @@ if __name__ == "__main__":
     ).numpy()
 
     # Stitch dreamed_obs and sampled_obs together for better comparison.
-    images = np.concatenate([dreamed_images, sampled_obs[:, burn_in_T:]], axis=3)
+    images = np.concatenate([dreamed_images, sampled_obs[:, burn_in_T:]], axis=2)
 
     # Save sequence a gif.
     clip = ImageSequenceClip(list(images[0]), fps=2)

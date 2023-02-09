@@ -16,9 +16,9 @@ def get_cnn_multiplier(model_dimension, default):
 
 def get_dense_hidden_units(model_dimension, default):
     # Determine size of this model.
-    assert model_dimension in [None, "XS", "S", "M", "L", "XL"]
+    assert model_dimension in [None, "micro", "XS", "S", "M", "L", "XL"]
     dense_units = {
-        "XS": 256, "S": 512, "M": 640, "L": 768, "XL": 1024
+        "micro": 16, "XS": 256, "S": 512, "M": 640, "L": 768, "XL": 1024
     }
     dense_units = (
         dense_units[model_dimension]
@@ -30,9 +30,9 @@ def get_dense_hidden_units(model_dimension, default):
 
 def get_gru_units(model_dimension, default):
     # Determine size of this model.
-    assert model_dimension in [None, "XS", "S", "M", "L", "XL"]
+    assert model_dimension in [None, "micro", "XS", "S", "M", "L", "XL"]
     gru_units = {
-        "XS": 256, "S": 512, "M": 1024, "L": 2048, "XL": 4096
+        "micro": 32, "XS": 256, "S": 512, "M": 1024, "L": 2048, "XL": 4096
     }
     gru_units = (
         gru_units[model_dimension]
@@ -44,9 +44,9 @@ def get_gru_units(model_dimension, default):
 
 def get_num_dense_layers(model_dimension, default):
     # Determine size of this model.
-    assert model_dimension in [None, "XS", "S", "M", "L", "XL"]
+    assert model_dimension in [None, "micro", "XS", "S", "M", "L", "XL"]
     num_dense_layers = {
-        "XS": 1, "S": 2, "M": 3, "L": 4, "XL": 5
+        "micro": 1, "XS": 1, "S": 2, "M": 3, "L": 4, "XL": 5
     }
     num_dense_layers = (
         num_dense_layers[model_dimension]

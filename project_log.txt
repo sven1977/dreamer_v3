@@ -158,6 +158,25 @@ https://arxiv.org/pdf/2301.04104v1.pdf
 
 2023/02/08
     - Finish dream_trajectory method to produce dreamed trajectories given some pre-obs to burn in.
+    - Noticed that current world model seems to have trouble predicting dynamics properly
+        - Possible bug in h-generating GRU net OR in "z-dreaming" dynamics net.
+        - Solutions:
+            - Need to downsize experiment to CartPole for faster turnaround.
+            -
+
+2023/02/09
+    - Downsized experiment to CartPole for faster experiment turnaround times.
+    - WIP: Fix buffer to store continuous timesteps, even across episode boundaries as
+      described in the paper. The `continue` flag in the value function loss should
+      take care of these "crossings" properly. This will enable us to scrap the
+      zero-masking that we currently still have in the EnvRunner and loss functions.
+    - TODO: Fill new buffer with single CartPole episode, then debug world-model
+       dynamics learning. Should have no problem memorizing the episode and "re-dreaming" it.
+       Add a quick euclidian distance TB summary after each training update to compare
+       actually sampled observations vs dreamed ones (do same for rewards). Note that
+       "dreamed" is NOT the same as "predicted" b/c dreamed values are done using the
+       dynamics network's z-states, whereas predictions are done using the encoder
+       produced z-states.
 
 
 OPEN PROBLEMS:
