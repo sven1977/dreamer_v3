@@ -27,7 +27,7 @@ class ConvTransposeAtari(tf.keras.Model):
     ):
         super().__init__()
 
-        cnn_multiplier = get_cnn_multiplier(model_dimension, default=cnn_multiplier)
+        cnn_multiplier = get_cnn_multiplier(model_dimension, override=cnn_multiplier)
 
         # The shape going into the first Conv2DTranspose layer.
         self.input_dims = (4, 4, 8 * cnn_multiplier)

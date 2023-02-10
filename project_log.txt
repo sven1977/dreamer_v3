@@ -197,8 +197,13 @@ https://arxiv.org/pdf/2010.02193.pdf
           buffer always at the end of a returned batch_length_T chunk (as described in [2]).
     - Important bug fix: continue predictor did sigmoid twice. Before Bernoulli,
       then passed the sigmoid probs as **`logits`** (not `probs`) into Bernoulli causing yet another sigmoid.
+    - Added evaluation step after every n training updates that would dream those
+      trajectories initialized by the first N timesteps of the samples from the buffer,
+      then comparing the dreamed results with the actual samples (using the same sampled actions
+      in the dream, not the actor net).
 
-
+    - Ran simplified experiment with CartPole, using a single 64ts sample in the buffer and
+      repeatedly sampling that sample and learning (memorizing) it.
 
 OPEN PROBLEMS:
 - Now that we are using the continuous episode buffer, if an episode is truncated AND the truncated

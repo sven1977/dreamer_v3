@@ -32,15 +32,17 @@ class MLP(tf.keras.Model):
         super().__init__()
 
         num_dense_layers = get_num_dense_layers(
-            model_dimension, default=num_dense_layers
+            model_dimension, override=num_dense_layers
         )
         dense_hidden_units = get_dense_hidden_units(
-            model_dimension, default=dense_hidden_units
+            model_dimension, override=dense_hidden_units
         )
 
         self.dense_layers = []
         for _ in range(num_dense_layers):
-            self.dense_layers.append(tf.keras.layers.Dense(dense_hidden_units, activation=tf.nn.silu))
+            self.dense_layers.append(
+                tf.keras.layers.Dense(dense_hidden_units, activation=tf.nn.silu)
+            )
 
         self.layer_normalizations = []
         for _ in range(len(self.dense_layers)):

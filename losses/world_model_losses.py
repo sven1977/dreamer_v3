@@ -40,9 +40,9 @@ def world_model_prediction_losses(
     # two_hot_rewards=[B*T, num_buckets]
     predicted_reward_log_probs = tf.math.log(reward_distr.probs)
     # predicted_reward_log_probs=[B*T, num_buckets]
-    reward_loss = - tf.reduce_sum(tf.multiply(two_hot_rewards, predicted_reward_log_probs), axis=-1)
+    reward_loss_two_hot = - tf.reduce_sum(tf.multiply(two_hot_rewards, predicted_reward_log_probs), axis=-1)
     # Unfold time rank back in.
-    reward_loss = tf.reshape(reward_loss, (B, T))
+    reward_loss_two_hot = tf.reshape(reward_loss_two_hot, (B, T))
 
     # B) Simple neg log(p) on distribution, NOT using two-hot.
     reward_loss_logp = - reward_distr.log_prob(rewards)
@@ -63,10 +63,10 @@ def world_model_prediction_losses(
 
     return {
         "decoder_loss": decoder_loss,
-        "reward_loss": reward_loss,
+        "reward_loss_two_hot": reward_loss_two_hot,
         "reward_loss_logp": reward_loss_logp,
         "continue_loss": continue_loss,
-        "total_loss": decoder_loss + reward_loss + continue_loss,
+        "total_loss": decoder_loss + reward_loss_two_hot + continue_loss,
     }
 
 

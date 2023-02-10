@@ -27,7 +27,7 @@ class SequenceModel(tf.keras.Model):
     ):
         super().__init__()
 
-        num_gru_units = get_gru_units(model_dimension, default=num_gru_units)
+        num_gru_units = get_gru_units(model_dimension, override=num_gru_units)
 
         self.action_space = action_space
         self.gru_unit = tf.keras.layers.GRU(
@@ -66,8 +66,9 @@ class SequenceModel(tf.keras.Model):
         out = tf.concat([z, a], axis=-1)
         # Pass through GRU.
         out = self.gru_unit(out, initial_state=h)
-        # Pass through LayerNorm.
+        # Pass through LayerNorm and return both non-normed and normed h-states.
         return self.layer_norm(out)
+        #return out, self.layer_norm(out)
 
 
 if __name__ == "__main__":
@@ -76,10 +77,14 @@ if __name__ == "__main__":
     T = 3
     h_dim = 32
     num_categoricals = num_classes = 8
-    h_tm1 = tf.convert_to_tensor(np.random.random(size=(B, 32)), dtype=tf.float32)
+
+    h_tm1 = tf.convert_to_tensor(np.random.random(size=(B, h_dim)), dtype=tf.float32)
     z_seq = np.random.random(size=(B, T, num_categoricals, num_classes))
     a_space = gym.spaces.Discrete(4)
     a_seq = np.array([[a_space.sample() for t in range(T)] for b in range(B)])
+
     model = SequenceModel(action_space=a_space, num_gru_units=h_dim)
-    h, last_h = model(z=z_seq, a=a_seq, h=h_tm1)
+
+    #h, layer_normed_h = model(z=z_seq, a=a_seq, h=h_tm1)
+    h = model(z=z_seq, a=a_seq, h=h_tm1)
     print(h.shape)

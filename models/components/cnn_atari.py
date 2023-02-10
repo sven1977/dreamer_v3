@@ -21,7 +21,7 @@ class CNNAtari(tf.keras.Model):
     ):
         super().__init__()
 
-        cnn_multiplier = get_cnn_multiplier(model_dimension, default=cnn_multiplier)
+        cnn_multiplier = get_cnn_multiplier(model_dimension, override=cnn_multiplier)
 
         # See appendix C in [1]:
         # "We use a similar network architecture but employ layer normalization and

@@ -104,7 +104,8 @@ training_ratio = 1024
 
 #@tf.function
 def train_one_step(sample, step):
-    tf.summary.histogram("sampled_rewards", sample["rewards"], step)
+    #TEST float32 cast: sampled_rewards looks fishy in TB (too distributed around 1.0; should just be clean 1.0 always)
+    tf.summary.histogram("sampled_rewards", tf.cast(sample["rewards"], tf.float32), step)
 
     # Compute losses.
     with tf.GradientTape() as tape:
@@ -115,23 +116,23 @@ def train_one_step(sample, step):
             initial_h=sample["h_states"],
         )
         predicted_obs = inverse_symlog(
-            forward_train_outs["obs_distribution"].loc[0:batch_length_T]
+            forward_train_outs["obs_distribution"].loc
         )
-        # Concat sampled and predicted observations to compare.
-        #sampled_vs_predicted_obs = tf.concat([predicted_obs, sample["obs"][0]], axis=1)
-        #tf.summary.histogram("sampled_vs_predicted_obs[0]", sampled_vs_predicted_obs, step)
+        predicted_obs = tf.reshape(predicted_obs, shape=(batch_size_B, batch_length_T) + predicted_obs.shape[1:])
+        mse_sampled_vs_predicted_obs = tf.losses.mse(predicted_obs, sample["obs"])
         # MSE difference between predicted and sampled observations: This must go to 0.
-        diff_sampled_vs_predicted_obs = tf.reduce_sum(tf.losses.mse(predicted_obs, sample["obs"][0]))
-        tf.summary.scalar("mse_sampled_vs_predicted_obs[0]", diff_sampled_vs_predicted_obs, step)
+        diff_sampled_vs_predicted_obs = tf.reduce_mean(tf.reduce_sum(mse_sampled_vs_predicted_obs, axis=-1))
+        tf.summary.scalar("MEAN(SUM(mse,T),B)_sampled_vs_predicted(posterior)_obs", diff_sampled_vs_predicted_obs, step)
 
-        tf.summary.histogram(
-            "predicted_rewards",
-            tf.reshape(
-                inverse_symlog(forward_train_outs["reward_distribution"].mean()),
-                shape=(batch_size_B, batch_length_T),
-            ),
-            step,
+        predicted_rewards = tf.reshape(
+            inverse_symlog(forward_train_outs["reward_distribution"].mean()),
+            shape=(batch_size_B, batch_length_T),
         )
+        tf.summary.histogram("predicted_rewards", predicted_rewards, step)
+        mse_sampled_vs_predicted_rewards = tf.losses.mse(predicted_rewards, sample["rewards"])
+        # MSE difference between predicted and sampled rewards: This must go to 0.
+        mse_sampled_vs_predicted_rewards = tf.reduce_mean(tf.reduce_sum(mse_sampled_vs_predicted_rewards, axis=-1))
+        tf.summary.scalar("MEAN(SUM(mse,T),B)_sampled_vs_predicted(posterior)_rewards", mse_sampled_vs_predicted_rewards, step)
 
         prediction_losses = world_model_prediction_losses(
             observations=sample["obs"],
@@ -152,10 +153,10 @@ def train_one_step(sample, step):
         tf.summary.histogram("L_decoder_BxT", L_decoder_BxT, step)
         tf.summary.scalar("L_decoder", L_decoder, step)
 
-        L_reward_BxT = prediction_losses["reward_loss"]
-        L_reward = tf.reduce_mean(tf.reduce_sum(L_reward_BxT, axis=-1))
-        tf.summary.histogram("L_reward_BxT", L_reward_BxT, step)
-        tf.summary.scalar("L_reward", L_reward, step)
+        L_reward_two_hot_BxT = prediction_losses["reward_loss_two_hot"]
+        L_reward_two_hot = tf.reduce_mean(tf.reduce_sum(L_reward_two_hot_BxT, axis=-1))
+        tf.summary.histogram("L_reward_two_hot_BxT", L_reward_two_hot_BxT, step)
+        tf.summary.scalar("L_reward_two_hot", L_reward_two_hot, step)
         #TEST
         L_reward_logp_BxT = prediction_losses["reward_loss_logp"]
         L_reward_logp = tf.reduce_mean(tf.reduce_sum(L_reward_logp_BxT, axis=-1))
@@ -181,6 +182,7 @@ def train_one_step(sample, step):
         tf.summary.histogram("L_rep_BxT", L_rep_BxT, step)
         tf.summary.scalar("L_rep", L_rep, step)
 
+        # Compute the actual total loss using fixed weights described in [1] eq. 4.
         L_total_BxT = 1.0 * L_pred_BxT + 0.5 * L_dyn_BxT + 0.1 * L_rep_BxT
         tf.summary.histogram("L_total_BxT", L_total_BxT, step)
 
@@ -299,7 +301,7 @@ for iteration in range(1000):
                     sample["obs"][:,burn_in_T:],
                 )
                 mse_sampled_vs_dreamed_obs = tf.reduce_mean(tf.reduce_sum(mse_sampled_vs_dreamed_obs, axis=1))
-                tf.summary.scalar("mse_sampled_vs_dreamed_obs", mse_sampled_vs_dreamed_obs, step=total_train_steps_tensor)
+                tf.summary.scalar("MEAN(SUM(mse,T),B)_sampled_vs_dreamed(prior)_obs", mse_sampled_vs_dreamed_obs, step=total_train_steps_tensor)
 
                 # Reward MSE.
                 mse_sampled_vs_dreamed_rewards = tf.losses.mse(
@@ -307,14 +309,14 @@ for iteration in range(1000):
                     tf.expand_dims(sample["rewards"][:,burn_in_T:], axis=-1),
                 )
                 mse_sampled_vs_dreamed_rewards = tf.reduce_mean(tf.reduce_sum(mse_sampled_vs_dreamed_rewards, axis=1))
-                tf.summary.scalar("mse_sampled_vs_dreamed_rewards", mse_sampled_vs_dreamed_rewards, step=total_train_steps_tensor)
+                tf.summary.scalar("MEAN(SUM(mse,T),B)_sampled_vs_dreamed(prior)_rewards", mse_sampled_vs_dreamed_rewards, step=total_train_steps_tensor)
                 # Continue MSE.
                 mse_sampled_vs_dreamed_continues = tf.losses.mse(
                     tf.expand_dims(tf.cast(dream_data["continues_dreamed"], tf.float32), axis=-1),
                     tf.expand_dims(tf.cast(tf.logical_not(tf.logical_or(sample["terminateds"][:,burn_in_T:], sample["truncateds"][:,burn_in_T:])), tf.float32), axis=-1),
                 )
                 mse_sampled_vs_dreamed_continues = tf.reduce_mean(tf.reduce_sum(mse_sampled_vs_dreamed_continues, axis=1))
-                tf.summary.scalar("mse_sampled_vs_dreamed_continues", mse_sampled_vs_dreamed_continues, step=total_train_steps_tensor)
+                tf.summary.scalar("MEAN(SUM(mse,T),B)_sampled_vs_dreamed(prior)_continues", mse_sampled_vs_dreamed_continues, step=total_train_steps_tensor)
 
         else:
             L_total, L_pred, L_dyn, L_rep = train_one_step(sample, total_train_steps_tensor)
