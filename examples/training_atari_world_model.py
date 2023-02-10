@@ -313,6 +313,7 @@ for iteration in range(1000):
                     timesteps=dreamed_T,  # dream for T-burn_in_T timesteps
                     use_sampled_actions=True,  # use all actions from 0 to T (no actor)
                 )
+
                 # Obs MSE.
                 # Compute observations using h and z and the decoder net.
                 # Note that the last h-state is NOT used here as it's already part of
@@ -323,13 +324,25 @@ for iteration in range(1000):
                                (batch_size_B * dreamed_T) + dream_data["z_dreamed"].shape[2:]),
                 )
                 # Use mean() of the Gaussian, no sample!
-                dreamed_obs = tf.reshape(dreamed_obs_distr.mean(), (batch_size_B, dreamed_T) + sample["obs"].shape[2:]).numpy()
+                dreamed_obs = tf.clip_by_value(inverse_symlog(dreamed_obs_distr.loc), 0.0, 255.0)
+                dreamed_images = tf.cast(tf.reshape(dreamed_obs, (batch_size_B, dreamed_T) + sample["obs"].shape[2:]), tf.uint8)
                 mse_sampled_vs_dreamed_obs = tf.losses.mse(
-                    dreamed_obs,
-                    tf.cast(sample["obs"][:,burn_in_T:], tf.float32),
+                    tf.reshape(dreamed_obs, (batch_size_B, dreamed_T, -1)),
+                    tf.reshape(tf.cast(sample["obs"][:,burn_in_T:], tf.float32), (batch_size_B, dreamed_T, -1)),
                 )
                 mse_sampled_vs_dreamed_obs = tf.reduce_mean(tf.reduce_sum(mse_sampled_vs_dreamed_obs, axis=1))
                 tf.summary.scalar("MEAN(SUM(mse,T),B)_sampled_vs_dreamed(prior)_obs", mse_sampled_vs_dreamed_obs, step=total_train_steps_tensor)
+                # Concat sampled and dreamed images along the height axis (2) such that
+                # real images show on top of respective predicted ones.
+                # (B, w, h, C)
+                sampled_vs_dreamed_images = tf.concat(
+                    [dreamed_images[0], sample["obs"][0][burn_in_T:]], axis=1)
+                tf.summary.image(
+                    "sampled_vs_dreamed(prior)_images[0]",
+                    tf.expand_dims(sampled_vs_dreamed_images, -1),
+                    step=total_train_steps_tensor,
+                    max_outputs=20,
+                )
 
                 # Reward MSE.
                 mse_sampled_vs_dreamed_rewards = tf.losses.mse(
