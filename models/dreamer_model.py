@@ -62,7 +62,7 @@ class DreamerModel(tf.keras.Model):
     def _get_initial_h(self, batch_size: int = 0):
         return self.world_model._get_initial_h(batch_size=batch_size)
 
-    #@tf.function
+    @tf.function
     def dream_trajectory(self, observations, actions, initial_h, timesteps, use_sampled_actions=False):
         """Dreams trajectory from N initial observations and an initial h-state.
 

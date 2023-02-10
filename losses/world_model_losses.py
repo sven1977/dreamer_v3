@@ -6,7 +6,7 @@ from utils.symlog import symlog
 from utils.two_hot import two_hot
 
 
-#@tf.function
+@tf.function
 def world_model_prediction_losses(
         observations,
         rewards,

@@ -33,7 +33,7 @@ summary_frequency = 50
 model_save_frequency = 10
 
 # Set batch size and -length according to [1]:
-batch_size_B = 1
+batch_size_B = 16
 batch_length_T = 64
 # The number of timesteps we use to "initialize" (burn-in) a dream_trajectory run.
 # For this many timesteps, the posterior (actual observation data) will be used
@@ -102,10 +102,9 @@ grad_clip = 1000.0
 training_ratio = 1024
 
 
-#@tf.function
+@tf.function
 def train_one_step(sample, step):
-    #TEST float32 cast: sampled_rewards looks fishy in TB (too distributed around 1.0; should just be clean 1.0 always)
-    tf.summary.histogram("sampled_rewards", tf.cast(sample["rewards"], tf.float32), step)
+    tf.summary.histogram("sampled_rewards", sample["rewards"], step)
 
     # Compute losses.
     with tf.GradientTape() as tape:
@@ -153,16 +152,18 @@ def train_one_step(sample, step):
         tf.summary.histogram("L_decoder_BxT", L_decoder_BxT, step)
         tf.summary.scalar("L_decoder", L_decoder, step)
 
+        # Two-hot reward loss.
         L_reward_two_hot_BxT = prediction_losses["reward_loss_two_hot"]
         L_reward_two_hot = tf.reduce_mean(tf.reduce_sum(L_reward_two_hot_BxT, axis=-1))
         tf.summary.histogram("L_reward_two_hot_BxT", L_reward_two_hot_BxT, step)
         tf.summary.scalar("L_reward_two_hot", L_reward_two_hot, step)
-        #TEST
+        # TEST: Out of interest, compare with simplge -log(p) loss for individual
+        # rewards using the FiniteDiscrete distribution. This should be very close
+        # to the two-hot reward loss.
         L_reward_logp_BxT = prediction_losses["reward_loss_logp"]
         L_reward_logp = tf.reduce_mean(tf.reduce_sum(L_reward_logp_BxT, axis=-1))
         tf.summary.histogram("L_reward_logp_BxT", L_reward_logp_BxT, step)
         tf.summary.scalar("L_reward_logp", L_reward_logp, step)
-        #END TEST
 
         L_continue_BxT = prediction_losses["continue_loss"]
         L_continue = tf.reduce_mean(tf.reduce_sum(L_continue_BxT, axis=-1))
@@ -211,10 +212,10 @@ for iteration in range(1000):
     # Push enough samples into buffer initially before we start training.
     env_steps = env_steps_last_sample = 0
     #TEST: Put only a single row in the buffer and try to memorize it.
-    env_steps_last_sample = 64
-    while iteration == 0:
+    #env_steps_last_sample = 64
+    #while iteration == 0:
     #END TEST
-    #while True:
+    while True:
         # Sample one round.
         # TODO: random_actions=False; right now, we act randomly, but perform a
         #  world-model forward pass using the random actions (in order to compute
