@@ -9,6 +9,7 @@ import tensorflow_probability as tfp
 
 from models.components.continue_predictor import ContinuePredictor
 from models.components.dynamics_predictor import DynamicsPredictor
+from models.components.mlp import MLP
 from models.components.representation_layer import RepresentationLayer
 from models.components.reward_predictor import RewardPredictor
 from models.components.sequence_model import SequenceModel
@@ -56,8 +57,15 @@ class WorldModel(tf.keras.Model):
         # RSSM (Recurrent State-Space Model)
         # Encoder + z-generator (x, h -> z).
         self.encoder = encoder
-        self.representation_layer = RepresentationLayer()
-        # Dynamics predictor (h -> z^).
+
+        # Posterior predictor: [h, encoder-out] -> z
+        self.posterior_mlp = MLP(
+            model_dimension=self.model_dimension,
+            output_layer_size=None,
+        )
+        self.posterior_representation_layer = RepresentationLayer()
+
+        # Dynamics (prior) predictor: h -> z^
         self.dynamics_predictor = DynamicsPredictor(
             model_dimension=self.model_dimension
         )
@@ -105,9 +113,10 @@ class WorldModel(tf.keras.Model):
         # sequence model).
         # encoder_outs=[B, ...]
         encoder_out = self.encoder(symlog(observations))
-        repr_input = tf.concat([encoder_out, initial_h], axis=-1)
+        posterior_mlp_input = tf.concat([encoder_out, initial_h], axis=-1)
+        repr_input = self.posterior_mlp(posterior_mlp_input)
         # Draw one z-sample (no need to return the distribution here).
-        z_t = self.representation_layer(repr_input, return_z_probs=False)
+        z_t = self.posterior_representation_layer(repr_input, return_z_probs=False)
         # Compute next h using action and state.
         h_tp1 = self.sequence_model(
             # actions and z must have a T dimension.
@@ -173,10 +182,14 @@ class WorldModel(tf.keras.Model):
         h_tp1 = hs[-1]
         for t in range(self.batch_length_T):
             h_t = hs[-1]
-            repr_input = tf.concat([encoder_out[:, t], h_t], axis=-1)
+            posterior_mlp_input = tf.concat([encoder_out[:, t], h_t], axis=-1)
+            repr_input = self.posterior_mlp(posterior_mlp_input)
             # Draw one z-sample (z(t)) and also get the z-distribution for dynamics and
             # representation loss computations.
-            z_t, z_probs = self.representation_layer(repr_input, return_z_probs=True)
+            z_t, z_probs = self.posterior_representation_layer(
+                repr_input,
+                return_z_probs=True,
+            )
             # z_t=[B, ]
             z_probs_encoder.append(z_probs)
             # Flatten z to [B, num_categoricals x num_classes]:

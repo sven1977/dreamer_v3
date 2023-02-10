@@ -6,13 +6,12 @@ from utils.symlog import symlog
 from utils.two_hot import two_hot
 
 
-@tf.function
+#@tf.function
 def world_model_prediction_losses(
         observations,
         rewards,
         terminateds,
         truncateds,
-        mask,
         B,
         T,
         forward_train_outs,
@@ -25,8 +24,8 @@ def world_model_prediction_losses(
     decoder_loss /= observations.shape.as_list()[1]
     #TODO: try MSE (instead of -log(p))
     #decoder_loss = tf.losses.mse(symlog(observations), obs_distr.loc)
-    # Reshape and mask out invalid timesteps (episode terminated/truncated).
-    decoder_loss = tf.reshape(decoder_loss, (B, T)) * mask
+    # Unfold time rank back in.
+    decoder_loss = tf.reshape(decoder_loss, (B, T))
 
     # The FiniteDiscrete reward bucket distribution computed by our reward predictor.
     # [B x num_buckets].
@@ -42,13 +41,13 @@ def world_model_prediction_losses(
     predicted_reward_log_probs = tf.math.log(reward_distr.probs)
     # predicted_reward_log_probs=[B*T, num_buckets]
     reward_loss = - tf.reduce_sum(tf.multiply(two_hot_rewards, predicted_reward_log_probs), axis=-1)
-    # Reshape and mask out invalid timesteps (episode terminated/truncated).
-    reward_loss = tf.reshape(reward_loss, (B, T)) * mask
+    # Unfold time rank back in.
+    reward_loss = tf.reshape(reward_loss, (B, T))
 
     # B) Simple neg log(p) on distribution, NOT using two-hot.
     reward_loss_logp = - reward_distr.log_prob(rewards)
-    # Reshape and mask out invalid timesteps (episode terminated/truncated).
-    reward_loss_logp = tf.reshape(reward_loss_logp, (B, T)) * mask
+    # Unfold time rank back in.
+    reward_loss_logp = tf.reshape(reward_loss_logp, (B, T))
 
     # Continue predictor loss.
     continues = tf.logical_not(tf.logical_or(terminateds, truncateds))
@@ -59,8 +58,8 @@ def world_model_prediction_losses(
     # Fold time dim.
     continues = tf.reshape(continues, shape=[-1])
     continue_loss = - continue_distr.log_prob(continues)
-    # Reshape and mask out invalid timesteps (episode terminated/truncated).
-    continue_loss = tf.reshape(continue_loss, (B, T)) * mask
+    # Unfold time rank back in.
+    continue_loss = tf.reshape(continue_loss, (B, T))
 
     return {
         "decoder_loss": decoder_loss,
@@ -72,7 +71,7 @@ def world_model_prediction_losses(
 
 
 @tf.function
-def world_model_dynamics_and_representation_loss(forward_train_outs, mask, B, T):
+def world_model_dynamics_and_representation_loss(forward_train_outs, B, T):
     # Actual distribution over stochastic internal states (z) produced by the encoder.
     z_distr_encoder = forward_train_outs["z_distribution_encoder"]
     # Actual distribution over stochastic internal states (z) produced by the
@@ -104,8 +103,8 @@ def world_model_dynamics_and_representation_loss(forward_train_outs, mask, B, T)
             axis=-1,
         ),
     )
-    # Reshape and mask out invalid timesteps (episode terminated/truncated).
-    L_dyn = tf.reshape(L_dyn, (B, T)) * mask
+    # Unfold time rank back in.
+    L_dyn = tf.reshape(L_dyn, (B, T))
 
     L_rep = tf.math.maximum(
         1.0,
@@ -117,7 +116,7 @@ def world_model_dynamics_and_representation_loss(forward_train_outs, mask, B, T)
             axis=-1,
         ),
     )
-    # Reshape and mask out invalid timesteps (episode terminated/truncated).
-    L_rep = tf.reshape(L_rep, (B, T)) * mask
+    # Unfold time rank back in.
+    L_rep = tf.reshape(L_rep, (B, T))
 
     return L_dyn, L_rep

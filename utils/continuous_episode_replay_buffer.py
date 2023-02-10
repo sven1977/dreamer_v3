@@ -27,7 +27,6 @@ class ContinuousEpisodeReplayBuffer:
             "rewards",
             "terminateds",
             "truncateds",
-            "mask",
             "h_states",
         ]:
             self.buffers[key] = self._make_buffer()
@@ -43,7 +42,7 @@ class ContinuousEpisodeReplayBuffer:
     def sample(self, num_items: int = 1):
         assert num_items % self.batch_size_B == 0
         max_idx = len(self) // self.batch_size_B
-        indices = [np.random.randint(0, max_idx - 1, size=num_items // self.batch_size_B) for _ in range(self.batch_size_B)]
+        indices = [np.random.randint(0, max_idx, size=num_items // self.batch_size_B) for _ in range(self.batch_size_B)]
         sample = {}
         for key, bufs in self.buffers.items():
             sample[key] = np.stack([bufs[buf_idx][i] for buf_idx in range(self.batch_size_B) for i in indices[buf_idx]], axis=0)
@@ -82,7 +81,6 @@ if __name__ == "__main__":
             "rewards": np.random.random(size=(B, T)),
             "terminateds": np.random.random(size=(B, T)),
             "truncateds": np.random.random(size=(B, T)),
-            "mask": np.random.random(size=(B, T)),
             "h_states": np.random.random(size=(B, 256)),
         }
 

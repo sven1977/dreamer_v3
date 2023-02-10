@@ -31,7 +31,6 @@ class DreamerModel(tf.keras.Model):
         """
         super().__init__()
 
-        assert model_dimension in [None, "XS", "S", "M", "L", "XL"]
         self.model_dimension = model_dimension
 
         self.world_model = world_model
@@ -40,10 +39,10 @@ class DreamerModel(tf.keras.Model):
 
         self.actor = ActorNetwork(
             action_space=self.action_space,
-            model_dimension=model_dimension,
+            model_dimension=self.model_dimension,
         )
         self.critic = RewardPredictor(
-            model_dimension=model_dimension,
+            model_dimension=self.model_dimension,
         )
 
     def call(self, inputs, *args, **kwargs):
@@ -52,12 +51,16 @@ class DreamerModel(tf.keras.Model):
     @tf.function
     def forward_inference(self, observations, actions, initial_h):
         """TODO"""
-        pass
+        return self.world_model.forward_inference(observations, actions, initial_h)
 
     @tf.function
     def forward_train(self, observations, actions, initial_h, training=None):
         """TODO"""
-        pass
+        return self.world_model.forward_train(observations, actions, initial_h)
+
+    @tf.function
+    def _get_initial_h(self, batch_size: int = 0):
+        return self.world_model._get_initial_h(batch_size=batch_size)
 
     #@tf.function
     def dream_trajectory(self, observations, actions, initial_h, timesteps, use_sampled_actions=False):
@@ -78,7 +81,23 @@ class DreamerModel(tf.keras.Model):
                 used in combination with the first observation (o(t)) to yield
                 z(t) and then - in combination with the first action (a(t)) and z(t)
                 to yield the next h-state (h(t+1)) via the RSSM.
+            use_sampled_actions: Whether to use `actions` for the dreamed predictions
+                (rather than the actor network). If True, make sure that your
+                `actions` arg contains as many timesteps as `observations` plus
+                `timesteps` (b/c actions needs to cover both the burn-in phase
+                as well as the actual dreaming phase).
         """
+        if use_sampled_actions:
+            assert actions.shape[1] == observations.shape[1] + timesteps, (
+                "Action timesteps provided ({actions.shape[1]}) seem wrong! Need "
+                f"exactly {observations.shape[1] + timesteps}."
+            )
+        else:
+            assert actions.shape[1] == observations.shape[1], (
+                "Action timesteps provided ({actions.shape[1]}) seem wrong! Need "
+                f"exactly {observations.shape[1]}."
+            )
+
         # Produce initial N internal states (burn-in):
         h = initial_h
         for i in range(observations.shape[1]):
@@ -92,8 +111,9 @@ class DreamerModel(tf.keras.Model):
         z_dreamed = []
         a_dreamed = []
         r_dreamed = []
+        c_dreamed = []
         for j in range(timesteps):
-            i = observations.shape[1] + j
+            actions_index = observations.shape[1] + j
             # Compute z from h, using the dynamics model (we don't have an actual
             # observation at this timestep).
             z = self.world_model.dynamics_predictor(h=h)
@@ -103,9 +123,13 @@ class DreamerModel(tf.keras.Model):
             r = self.world_model.reward_predictor(h=h, z=z)
             r_dreamed.append(inverse_symlog(r))
 
+            # Compute continues using continue predictor.
+            c = self.world_model.continue_predictor(h=h, z=z)
+            c_dreamed.append(c)
+
             # Use the actions given to us.
             if use_sampled_actions:
-                a = actions[:, i]
+                a = actions[:, actions_index]
             # Compute `a` using actor network.
             else:
                 #a = self.actor(h=h, z=z)
@@ -132,6 +156,7 @@ class DreamerModel(tf.keras.Model):
             "z_dreamed": tf.stack(z_dreamed, axis=1),
             "actions_dreamed": tf.stack(a_dreamed, axis=1),
             "rewards_dreamed": tf.stack(r_dreamed, axis=1),
+            "continues_dreamed": tf.stack(c_dreamed, axis=1)
         }
 
         return ret

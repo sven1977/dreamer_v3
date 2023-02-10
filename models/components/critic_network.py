@@ -25,7 +25,9 @@ class CriticNetwork(tf.keras.Model):
     ):
         super().__init__()
 
-        self.mlp = MLP(model_dimension=model_dimension, output_layer_size=None)
+        self.model_dimension = model_dimension
+
+        self.mlp = MLP(model_dimension=self.model_dimension, output_layer_size=None)
         self.return_layer = RewardPredictorLayer(
             num_buckets=num_buckets,
             lower_bound=lower_bound,

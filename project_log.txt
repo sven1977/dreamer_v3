@@ -2,6 +2,10 @@
 D. Hafner, J. Pasukonis, J. Ba, T. Lillicrap
 https://arxiv.org/pdf/2301.04104v1.pdf
 
+[2] Mastering Atari with Discrete World Models - 2021
+D. Hafner, T. Lillicrap, M. Norouzi, J. Ba
+https://arxiv.org/pdf/2010.02193.pdf
+
 
 2023/01/29:
     - Implemented Symlog function and inverse symlog function. Nice to do the math ourselves:
@@ -178,11 +182,59 @@ https://arxiv.org/pdf/2301.04104v1.pdf
        dynamics network's z-states, whereas predictions are done using the encoder
        produced z-states.
 
+2023/02/10
+    - Found some new information in the papers [1] and [2]:
+        - Use sticky actions (action_repeat_prob=0.25), frameskip=4, no framestacking (b/c GRU),
+          grayscale(!), no Atari lifes-informtion, max-time-limit==108000, max-pooling pixel values
+          over last two (skipped) frames.
+        - [2] talks about an additional MLP right behind the encoder (instead of only a single
+          z-producing layer). Added this additional MLP to the world-model. So the new cascade is:
+          image -> encoder -> [some "image embedding"] -> [embedding] cat [h] -> [new MLP] -> [z-producing layer]
+    - Finished Buffer for storing continuous episodes.
+    - Enhanced EnvRunner to produce continous-episode samples, where no masks are needed anymore.
+        - Introduces a new problem for truncated episodes (see "open issues" below).
+          Truncated timesteps should ideally be sampled from the
+          buffer always at the end of a returned batch_length_T chunk (as described in [2]).
+    - Important bug fix: continue predictor did sigmoid twice. Before Bernoulli,
+      then passed the sigmoid probs as **`logits`** (not `probs`) into Bernoulli causing yet another sigmoid.
+
+
 
 OPEN PROBLEMS:
+- Now that we are using the continuous episode buffer, if an episode is truncated AND the truncated
+  ts is in the middle of some batch_length_T sized chunk, we would NOT have the next_obs information
+  that we need to compute a proper value at the truncation. Instead the obs(t+1) would alredy
+  be the first observation of the next episode. To fix this, our buffer could simply
+  auto-shift the chunk leftwards until the truncated timestep is exactly at the very end of the returned
+  trajectory. Then the `next_obs` field can be used for vf estimation. This is similarly described
+  already in [2] albeit due to a different reason: "To observe enough episode end during training, we sample
+  the start index of each training sequence uniformly within the episode and then clip it to not exceed the
+  episode length minus the training sequence length."
+- We are currently LayerNorm'ing the GRU output (the next h-state). Adding this provided
+  a big L_total reduction, however, wouldn't this mess with the GRU learning how to manipulate
+  its internal state vector properly?
+  Instead: Only layer-norm the input the the next NN (after the GRU), e.g. reward predictor, actor, vf, etc..
+  BUT leave the actual h-states as-is (as the next GRU h-inputs).
+  [2] states (w/o specifying, where exactly the LayerNorm would go:
+    before the GRU? -> makes no sense as it would normalize one-hot z- and a-vectors
+    after the GRU? on top of the h-states, OR as suggested above, h-states ontouched, but everything that uses h-states for further predictions gets normalized h-states
+  ):
+  "Figure J.1: Comparison of DreamerV2 to a version without layer norm in the GRU ....
+    We find that the benefit of layer norm depends on the task at hand, increasing
+    and decreasing performance on a roughly equal number of tasks"
+
 - We are not using `two_hot` yet at all, also not for the reward predictions, how come?
-- Figure out reason of actor loss:
+    - As soon as I switch on two-hot for reward predictions, the total loss seems to increase
+      and not go down that much over time anymore (compared to when we use simple neg log p loss for
+      rewards). Must figure out why this is!
+- Figure out reason of weird actor loss in the paper.
 - Implement unimix categoricals for actor network (for discrete actions?)
-- For now, I have been training deterministic Atari only:
+    - Done already for the z-generator.
+
+- [DONE] We are NOT using an extra MLP after the encoder stack (just a single dense RepresentationLayer to
+  translate from flatten(4x4xC) -> (32x32)z OR from [flatten(4x4xC)+h_state] -> (32x32)z).
+  In [2] it says: "Neural networks: The representation model is implemented as a Convolutional Neural Network
+    (CNN; LeCun et al., 1989) followed by a Multi-Layer Perceptron (MLP) that receives the image
+    embedding and the deterministic recurrent state"
+- [DONE: information found in [2]] For now, I have been training deterministic Atari only:
   no sticky actions (action_repeat_probability=0.0), and frameskip=4
--

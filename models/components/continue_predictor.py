@@ -36,10 +36,9 @@ class ContinuePredictor(tf.keras.Model):
         # Remove the extra [B, 1] dimension at the end to get a proper Bernoulli
         # distribution. Otherwise, tfp will think that the batch dims are [B, 1]
         # where they should be just [B].
-        out= tf.squeeze(out, axis=-1)
-        # Transform to a single prob value for a Bernoulli distribution.
-        prob = tf.nn.sigmoid(out)
-        bernoulli = tfp.distributions.Bernoulli(prob)
+        logits = tf.squeeze(out, axis=-1)
+        # Create the Bernoulli distribution object.
+        bernoulli = tfp.distributions.Bernoulli(logits=logits)
         # Draw a sample.
         continue_ = bernoulli.sample()
 

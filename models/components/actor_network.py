@@ -22,13 +22,12 @@ class ActorNetwork(tf.keras.Model):
     ):
         super().__init__()
 
-        assert model_dimension in [None, "XS", "S", "M", "L", "XL"]
         self.model_dimension = model_dimension
 
         # TODO: For now, limit to discrete actions.
         assert isinstance(action_space, gym.spaces.Discrete)
         self.mlp = MLP(
-            model_dimension=model_dimension,
+            model_dimension=self.model_dimension,
             output_layer_size=action_space.n,
         )
 
