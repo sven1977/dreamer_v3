@@ -66,6 +66,9 @@ class CNNAtari(tf.keras.Model):
         self.flatten_layer = tf.keras.layers.Flatten(data_format="channels_last")
 
     def call(self, inputs):
+        # [B, h, w] -> grayscale.
+        if len(inputs.shape) == 3:
+            inputs = tf.expand_dims(inputs, -1)
         out = inputs
         for conv_2d, layer_norm in zip(self.conv_layers, self.layer_normalizations):
             out = layer_norm(inputs=conv_2d(out))

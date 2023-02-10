@@ -24,6 +24,7 @@ class ConvTransposeAtari(tf.keras.Model):
         *,
         model_dimension: Optional[str] = "XS",
         cnn_multiplier: Optional[int] = None,
+        gray_scaled: bool = True,
     ):
         super().__init__()
 
@@ -31,6 +32,8 @@ class ConvTransposeAtari(tf.keras.Model):
 
         # The shape going into the first Conv2DTranspose layer.
         self.input_dims = (4, 4, 8 * cnn_multiplier)
+
+        self.gray_scaled = gray_scaled
 
         # See appendix B in [1]:
         # "The decoder starts with a dense layer, followed by reshaping
@@ -76,14 +79,14 @@ class ConvTransposeAtari(tf.keras.Model):
         # This distribution then outputs symlog'd images, which need to be
         # inverse-symlog'd to become actual RGB-images.
         self.output_conv2d_transpose = tf.keras.layers.Conv2DTranspose(
-            filters=3,
+            filters=1 if self.gray_scaled else 3,
             kernel_size=3,
             strides=(2, 2),
             padding="same",
             activation=None,
         )
 
-    def call(self, input_):
+    def call(self, h, z):
         """TODO
 
         Args:
@@ -92,6 +95,13 @@ class ConvTransposeAtari(tf.keras.Model):
                 observation input. Note: `z` is not used for the dynamics predictor
                 model (which predicts z from h).
         """
+        # Flatten last two dims of z.
+        assert len(z.shape) == 3
+        z_shape = tf.shape(z)
+        z = tf.reshape(tf.cast(z, tf.float32), shape=(z_shape[0], -1))
+        assert len(z.shape) == 2
+        input_ = tf.concat([h, z], axis=-1)
+
         # Feed through initial dense layer to get the right number of input nodes
         # for the first conv2dtranspose layer.
         out = self.dense_layer(input_)

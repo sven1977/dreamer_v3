@@ -344,13 +344,16 @@ if __name__ == "__main__":
     config = (
         AlgorithmConfig()
         .environment("ALE/MsPacman-v5", env_config={
-            # TODO: For now, do deterministic only.
-            #  According to SimplE paper, stochastic envs should NOT be a problem, though.
-            "frameskip": 4,
-            # DreamerV3 paper does not specify, whether Atari100k is run
-            # w/ or w/o sticky actions, just that frameskip=4.
-            "repeat_action_probability": 0.25,
-            "full_action_space": True,
+            # [2]: "We follow the evaluation protocol of Machado et al. (2018) with 200M
+            # environment steps, action repeat of 4, a time limit of 108,000 steps per
+            # episode that correspond to 30 minutes of game play, no access to life
+            # information, full action space, and sticky actions. Because the world model
+            # integrates information over time, DreamerV2 does not use frame stacking.
+            # The experiments use a single-task setup where a separate agent is trained
+            # for each game. Moreover, each agent uses only a single environment instance.
+            # already done by MaxAndSkip wrapper "frameskip": 4,  # "action repeat" (frameskip) == 4
+            "repeat_action_probability": 0.25,  # "sticky actions"
+            "full_action_space": True,  # "full action space"
         })
         .rollouts(num_envs_per_worker=2, rollout_fragment_length=64)
     )

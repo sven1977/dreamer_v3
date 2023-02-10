@@ -203,7 +203,8 @@ https://arxiv.org/pdf/2010.02193.pdf
       in the dream, not the actor net).
 
     - Ran simplified experiment with CartPole, using a single 64ts sample in the buffer and
-      repeatedly sampling that sample and learning (memorizing) it.
+      repeatedly sampling that sample and learning (memorizing) it. Seems to learn how to dream the single trajectory well.
+    - Ran regular CartPole experiment with normal sampling enabled. Seems to work similarly well.
 
 OPEN PROBLEMS:
 - Now that we are using the continuous episode buffer, if an episode is truncated AND the truncated
