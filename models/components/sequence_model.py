@@ -41,7 +41,7 @@ class SequenceModel(tf.keras.Model):
             #recurrent_activation=tf.nn.silu,
         )
         # Add layer norm after the GRU output.
-        self.layer_norm = tf.keras.layers.LayerNormalization()
+        #self.layer_norm = tf.keras.layers.LayerNormalization()
 
     def call(self, z, a, h=None):
         """
@@ -67,7 +67,7 @@ class SequenceModel(tf.keras.Model):
         # Pass through GRU.
         out = self.gru_unit(out, initial_state=h)
         # Pass through LayerNorm and return both non-normed and normed h-states.
-        return self.layer_norm(out)
+        return out #self.layer_norm(out)
         #return out, self.layer_norm(out)
 
 
