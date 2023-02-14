@@ -197,7 +197,7 @@ def _summarize_obs(*, computed_float_obs_B_T_dims, sampled_obs_B_T_dims, B, T, d
         tf.reduce_sum(mse_sampled_vs_dreamed_obs, axis=1)
     )
     tf.summary.scalar(
-        f"MEAN(SUM(mse,T),B)_sampled_vs_{descr}_obs",
+        f"MEAN(SUM(mse,T={T}),B={B})_sampled_vs_{descr}_obs",
         mse_sampled_vs_dreamed_obs,
     )
 
@@ -205,12 +205,8 @@ def _summarize_obs(*, computed_float_obs_B_T_dims, sampled_obs_B_T_dims, B, T, d
     # Note: We only use images here from the first (0-index) batch item.
     if len(sampled_obs_B_T_dims.shape) in [2+2, 2+3]:
         dreamed_images = tf.cast(
-            tf.clip_by_value(computed_obs_B_T_dims, 0.0, 255.0), tf.uint8
+            tf.clip_by_value(computed_float_obs_B_T_dims, 0.0, 255.0), tf.uint8
         )
-        #dreamed_images = tf.reshape(
-        #    dreamed_images,
-        #    shape=(batch_size_B, dreamed_T) + sampled_obs_B_T_dims.shape[2:],
-        #)
         # Concat sampled and dreamed images along the height axis (2) such that
         # real images show on top of respective predicted ones.
         # (B, w, h, C)
@@ -237,7 +233,7 @@ def _summarize_rewards(*, computed_rewards_B_T, sampled_rewards_B_T, B, T, descr
         tf.reduce_sum(mse_sampled_vs_computed_rewards, axis=1)
     )
     tf.summary.scalar(
-        f"MEAN(SUM(mse,T),B)_sampled_vs_{descr}_rewards",
+        f"MEAN(SUM(mse,T={T}),B={B})_sampled_vs_{descr}_rewards",
         mse_sampled_vs_computed_rewards,
     )
 
@@ -268,7 +264,7 @@ def _summarize_continues(
         tf.reduce_sum(mse_sampled_vs_computed_continues, axis=1)
     )
     tf.summary.scalar(
-        f"MEAN(SUM(mse,T),B)_sampled_vs_{descr}_continues",
+        f"MEAN(SUM(mse,T={T}),B={B})_sampled_vs_{descr}_continues",
         mse_sampled_vs_computed_continues,
     )
 
