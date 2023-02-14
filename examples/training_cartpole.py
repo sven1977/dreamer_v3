@@ -14,15 +14,20 @@ import tensorflow as tf
 
 from ray.rllib.algorithms.algorithm_config import AlgorithmConfig
 
-from models.components.cnn_atari import CNNAtari
-from models.components.conv_transpose_atari import ConvTransposeAtari
+from models.components.mlp import MLP
+from models.components.vector_decoder import VectorDecoder
 from models.dreamer_model import DreamerModel
 from models.world_model import WorldModel
-from training.train_one_step import train_one_step
+from training.train_one_step import (
+    train_actor_and_critic_one_step,
+    train_world_model_one_step,
+)
 from utils.env_runner import EnvRunner
 from utils.continuous_episode_replay_buffer import ContinuousEpisodeReplayBuffer
 from utils.tensorboard import (
     summarize_dreamed_trajectory_vs_samples,
+    summarize_forward_train_outs_vs_samples,
+    summarize_world_model_losses,
 )
 
 # Create the checkpoint path, if it doesn't exist yet.
@@ -31,7 +36,7 @@ os.makedirs("checkpoints", exist_ok=True)
 os.makedirs("tensorboard", exist_ok=True)
 tb_writer = tf.summary.create_file_writer("tensorboard")
 # Every how many training steps do we write data to TB?
-summary_frequency = 50
+summary_frequency = 5
 # Every how many (main) iterations (sample + N train steps) do we save our model?
 model_save_frequency = 10
 
@@ -42,23 +47,16 @@ batch_length_T = 64
 # For this many timesteps, the posterior (actual observation data) will be used
 # to compute z, after that, only the prior (dynamics network) will be used.
 burn_in_T = 5
+horizon_H = 15
+
+# Actor/critic Hyperparameters.
+discount_gamma = 0.997
+gae_lambda = 0.95
 
 # EnvRunner config (an RLlib algorithm config).
 config = (
     AlgorithmConfig()
-    #.environment("ALE/MontezumaRevenge-v5", env_config={
-    .environment("ALE/MsPacman-v5", env_config={
-        # [2]: "We follow the evaluation protocol of Machado et al. (2018) with 200M
-        # environment steps, action repeat of 4, a time limit of 108,000 steps per
-        # episode that correspond to 30 minutes of game play, no access to life
-        # information, full action space, and sticky actions. Because the world model
-        # integrates information over time, DreamerV2 does not use frame stacking.
-        # The experiments use a single-task setup where a separate agent is trained
-        # for each game. Moreover, each agent uses only a single environment instance.
-        # already done by MaxAndSkip wrapper "frameskip": 4,  # "action repeat" (frameskip) == 4
-        "repeat_action_probability": 0.25,  # "sticky actions"
-        "full_action_space": True,  # "full action space"
-    })
+    .environment("CartPole-v1")
     .rollouts(
         num_envs_per_worker=1,
         rollout_fragment_length=batch_length_T,
@@ -72,6 +70,8 @@ env_runner = EnvRunner(
     continuous_episodes=True,
 )
 
+# Whether to o nly train the world model (not the critic and actor networks).
+train_world_model_only = False
 # Our DreamerV3 world model.
 from_checkpoint = None
 # Uncomment this next line to load from a saved model.
@@ -79,15 +79,15 @@ from_checkpoint = None
 if from_checkpoint is not None:
     dreamer_model = tf.keras.models.load_model(from_checkpoint)
 else:
-    model_dimension = "S"
+    model_dimension = "micro"
     world_model = WorldModel(
         model_dimension=model_dimension,
         action_space=env_runner.env.single_action_space,
         batch_length_T=batch_length_T,
-        encoder=CNNAtari(model_dimension=model_dimension),
-        decoder=ConvTransposeAtari(
+        encoder=MLP(model_dimension=model_dimension),
+        decoder=VectorDecoder(
             model_dimension=model_dimension,
-            gray_scaled=True,
+            observation_space=env_runner.env.single_observation_space,
         )
     )
     dreamer_model = DreamerModel(
@@ -102,16 +102,23 @@ env_runner.model = dreamer_model
 # The replay buffer for storing actual env samples.
 buffer = ContinuousEpisodeReplayBuffer(
     capacity=int(1e6 / batch_length_T),
+    # Only add (B=1, T=...)-style data at a time.
     num_data_tracks=1,
 )
 # Timesteps to put into the buffer before the first learning step.
 warm_up_timesteps = 0
 
 # Use an Adam optimizer.
-optimizer = tf.keras.optimizers.Adam(learning_rate=1e-4, epsilon=1e-8)
+world_model_optimizer = tf.keras.optimizers.Adam(learning_rate=1e-4, epsilon=1e-8)
+critic_optimizer = tf.keras.optimizers.Adam(learning_rate=3e-5, epsilon=1e-5)
+actor_optimizer = tf.keras.optimizers.Adam(learning_rate=3e-5, epsilon=1e-5)
 
-# World model grad clipping according to [1].
-grad_clip = 1000.0
+# World model grad clipping according to [1] Appendix W.
+world_model_grad_clip = 1000.0
+# Critic grad clipping according to [1] Appendix W.
+critic_grad_clip = 100.0
+# Actor grad clipping according to [1] Appendix W.
+actor_grad_clip = 100.0
 
 # Training ratio: Ratio of replayed steps over env steps.
 training_ratio = 1024
@@ -178,48 +185,105 @@ for iteration in range(1000):
 
         # Convert samples (numpy) to tensors.
         sample = tree.map_structure(lambda v: tf.convert_to_tensor(v), sample)
-        total_train_steps_tensor = tf.convert_to_tensor(
-            total_train_steps, dtype=tf.int64
-        )
 
-        # Perform one training step.
+        # Enable TB summaries this step?
+        tb_ctx = None
         if total_train_steps % summary_frequency == 0:
-            with tb_writer.as_default():
-                L_total, L_pred, L_dyn, L_rep = train_one_step(
-                    sample, total_train_steps_tensor
-                )
+            tb_ctx = tb_writer.as_default(step=total_train_steps)
+            tb_ctx.__enter__()
 
-                # EVALUATION:
-                # Dream a trajectory using the samples from the buffer and compare obs,
-                # rewards, continues to the actually observed trajectory.
-                dreamed_T = batch_length_T - burn_in_T
-                dream_data = dreamer_model.dream_trajectory(
-                    observations=sample["obs"][:, :burn_in_T],  # use only first burn_in_T obs
-                    actions=sample["actions"],  # use all actions from 0 to T (no actor)
-                    initial_h=sample["h_states"],
-                    timesteps=dreamed_T,  # dream for T-burn_in_T timesteps
-                    use_sampled_actions=True,  # use all actions from 0 to T (no actor)
-                )
-
-                summarize_dreamed_trajectory_vs_samples(
-                    dream_data,
-                    sample,
-                    batch_size_B=batch_size_B,
-                    burn_in_T=burn_in_T,
-                    dreamed_T=dreamed_T,
-                    dreamer_model=dreamer_model,
-                    step=total_train_steps_tensor,
-                )
-
-        else:
-            L_total, L_pred, L_dyn, L_rep = train_one_step(sample, total_train_steps_tensor)
+        # Perform one world-model training step.
+        world_model_train_results = train_world_model_one_step(
+            sample=sample,
+            batch_size_B=batch_size_B,
+            batch_length_T=batch_length_T,
+            grad_clip=world_model_grad_clip,
+            dreamer_model=dreamer_model,
+            optimizer=world_model_optimizer,
+        )
+        summarize_forward_train_outs_vs_samples(
+            forward_train_outs=world_model_train_results["forward_train_outs"],
+            sample=sample,
+            batch_size_B=batch_size_B,
+            batch_length_T=batch_length_T,
+        )
+        summarize_world_model_losses(world_model_train_results)
 
         print(
-            f"Iter {iteration}/{sub_iter}) L_total={L_total.numpy()} "
-            f"(L_pred={L_pred.numpy()}; L_dyn={L_dyn.numpy()}; L_rep={L_rep.numpy()})"
+            f"Iter {iteration}/{sub_iter}) "
+            f"L_world_model_total={world_model_train_results['L_total'].numpy()} "
+            f"(L_pred={world_model_train_results['L_pred'].numpy()}; "
+            f"L_dyn={world_model_train_results['L_dyn'].numpy()}; "
+            f"L_rep={world_model_train_results['L_rep'].numpy()})"
         )
+
+        # Train critic and actor.
+        if not train_world_model_only:
+            forward_train_outs = world_model_train_results["forward_train_outs"]
+
+            # Build critic model first, so we can initialize EMA weights.
+            if not dreamer_model.critic.trainable_variables:
+                # Forward pass for fast critic.
+                dreamer_model.critic(
+                    h=forward_train_outs["h_states"],
+                    z=forward_train_outs["z_states"],
+                    return_distribution=True,
+                )
+                # Forward pass for EMA-weights critic.
+                dreamer_model.critic(
+                    h=forward_train_outs["h_states"],
+                    z=forward_train_outs["z_states"],
+                    return_distribution=False,
+                    use_ema=True,
+                )
+                dreamer_model.critic.init_ema()
+
+            actor_critic_train_results = train_actor_and_critic_one_step(
+                forward_train_outs=forward_train_outs,
+                horizon_H=horizon_H,
+                gamma=discount_gamma,
+                lambda_=gae_lambda,
+                actor_grad_clip=actor_grad_clip,
+                critic_grad_clip=critic_grad_clip,
+                dreamer_model=dreamer_model,
+                actor_optimizer=actor_optimizer,
+                critic_optimizer=critic_optimizer,
+            )
+            # Summarize critic loss stats.
+            L_critic = actor_critic_train_results["L_critic"]
+            tf.summary.scalar("L_critic", L_critic)
+
+            print(
+                f"\tL_critic={L_critic.numpy()} L_actor=TODO"
+            )
+
+        # EVALUATION:
+        if total_train_steps % summary_frequency == 0:
+            # Dream a trajectory using the samples from the buffer and compare obs,
+            # rewards, continues to the actually observed trajectory.
+            dreamed_T = horizon_H
+            dream_data = dreamer_model.dream_trajectory_with_burn_in(
+                observations=sample["obs"][:, :burn_in_T],  # use only first burn_in_T obs
+                actions=sample["actions"][:, :burn_in_T + horizon_H],  # use all actions from 0 to T (no actor)
+                initial_h=sample["h_states"],
+                timesteps=dreamed_T,  # dream for n timesteps
+                use_sampled_actions=True,  # use sampled actions,not the actor
+            )
+
+            summarize_dreamed_trajectory_vs_samples(
+                dream_data,
+                sample,
+                batch_size_B=batch_size_B,
+                burn_in_T=burn_in_T,
+                dreamed_T=dreamed_T,
+                dreamer_model=dreamer_model,
+            )
+
         sub_iter += 1
         total_train_steps += 1
+
+        if tb_ctx is not None:
+            tb_ctx.__exit__(None, None, None)
 
     # Save the model every N iterations (but not after the very first).
     if iteration != 0 and iteration % model_save_frequency == 0:

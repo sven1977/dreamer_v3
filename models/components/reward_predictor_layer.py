@@ -2,6 +2,10 @@
 [1] Mastering Diverse Domains through World Models - 2023
 D. Hafner, J. Pasukonis, J. Ba, T. Lillicrap
 https://arxiv.org/pdf/2301.04104v1.pdf
+
+[2] Mastering Atari with Discrete World Models - 2021
+D. Hafner, T. Lillicrap, M. Norouzi, J. Ba
+https://arxiv.org/pdf/2010.02193.pdf
 """
 import numpy as np
 import tensorflow as tf
@@ -17,6 +21,7 @@ class RewardPredictorLayer(tf.keras.layers.Layer):
         num_buckets: int = 255,
         lower_bound: float = -20.0,
         upper_bound: float = 20.0,
+        trainable: bool = True,
     ):
         """TODO:
 
@@ -52,6 +57,7 @@ class RewardPredictorLayer(tf.keras.layers.Layer):
             # alleviates the problem and accelerates early learning."
             kernel_initializer="zeros",
             bias_initializer="zeros",  # default anyways
+            trainable=trainable,
         )
         # Size of each reward bucket.
         self.bucket_delta = (
@@ -72,29 +78,37 @@ class RewardPredictorLayer(tf.keras.layers.Layer):
         # Compute the `num_buckets` weights.
         assert len(inputs_.shape) == 2
         out = self.reward_buckets_layer(inputs_)
-        # Return the expected reward using softmax
         # out=[B, `num_buckets`]
+
+        # Compute the expected(!) reward using [softmax vectordot possible_outcomes].
+        # [2]: "The mean of the reward predictor pφ(ˆrt | zˆt) is used as reward
+        # sequence rˆ1:H."
         probs = tf.nn.softmax(out)
-        # weights=[B, `num_buckets`]
+        possible_outcomes = tf.linspace(
+            self.lower_bound,
+            self.upper_bound,
+            self.num_buckets + 1,
+        )
+        # probs=possible_outcomes=[B, `num_buckets`]
+
+        # Simple vector dot product (over last dim).
+        expected_rewards = tf.reduce_sum(probs * possible_outcomes, axis=-1)
+        # expected_rewards=[B]
+
         distr = tfp.distributions.FiniteDiscrete(
-            outcomes=tf.linspace(
-                self.lower_bound,
-                self.upper_bound,
-                self.num_buckets + 1,
-            ),
+            outcomes=possible_outcomes,
             probs=probs,
             # Make the tolerance exactly half of the bucket delta.
             # This way, we should be able to compute the log_prob of any arbitrary
             # continuous value, even if it's not exactly an `outcomes` value.
             atol=self.bucket_delta / 2.0,
         )
-        r_sample = distr.sample()
         # Note: In order to get the actually expected value, just do this with the
         # returned distribution:
         # `distr.mean()` OR `tf.reduce_sum(distr.probs * distr.outcomes)`
         if return_distribution:
-            return r_sample, distr
-        return r_sample
+            return expected_rewards, distr
+        return expected_rewards
 
 
 if __name__ == "__main__":

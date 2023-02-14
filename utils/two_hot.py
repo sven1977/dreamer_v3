@@ -36,6 +36,8 @@ def two_hot(
         -> [0.0, 0.0, 0.8, 0.2, 0.0]
         -> [-1  -0.5   0   0.5   1] (0.2*0.5 + 0.8*0=0.1)
     """
+    # First make sure, values are clipped.
+    value = tf.clip_by_value(value, lower_bound, upper_bound)
     # Tensor of batch indices: [0, B=batch size).
     batch_indices = tf.range(0, value.shape[0], dtype=tf.float32)
     # Calculate the step deltas (how much space between each bucket's central value?).
@@ -46,6 +48,7 @@ def two_hot(
     k = tf.math.floor(idx)
     # k+1
     kp1 = tf.math.ceil(idx)
+    kp1 = tf.where(k == kp1, kp1 + 1.0, kp1)
     # The actual values found at k and k+1 inside the set of buckets.
     values_k = lower_bound + k * bucket_delta
     values_kp1 = lower_bound + kp1 * bucket_delta
@@ -69,6 +72,14 @@ def two_hot(
 
 
 if __name__ == "__main__":
+    # Test value that's exactly on one of the bucket boundaries. This used to return
+    # a two-hot vector with a NaN in it as k == kp1 at that boundary.
+    print(two_hot(tf.convert_to_tensor([0.0]), 10, -5.0, 5.0))
+
+    # Test violating the boundaries (upper and lower).
+    print(two_hot(tf.convert_to_tensor([-20.5, 50.0, 150.0, -20.00001])))
+
+    # Test other cases.
     print(two_hot(tf.convert_to_tensor([2.5, 0.1]), 10, -5.0, 5.0))
     print(two_hot(tf.convert_to_tensor([0.1]), 4, -1.0, 1.0))
     print(two_hot(tf.convert_to_tensor([-0.5, -1.2]), 9, -6.0, 3.0))

@@ -21,6 +21,7 @@ class MLP(tf.keras.Model):
         num_dense_layers: Optional[int] = None,
         dense_hidden_units: Optional[int] = None,
         output_layer_size=None,
+        trainable: bool = True,
     ):
         """TODO:
 
@@ -41,17 +42,23 @@ class MLP(tf.keras.Model):
         self.dense_layers = []
         for _ in range(num_dense_layers):
             self.dense_layers.append(
-                tf.keras.layers.Dense(dense_hidden_units, activation=tf.nn.silu)
+                tf.keras.layers.Dense(
+                    dense_hidden_units,
+                    activation=tf.nn.silu,
+                    trainable=trainable,
+                )
             )
 
         self.layer_normalizations = []
         for _ in range(len(self.dense_layers)):
-            self.layer_normalizations.append(tf.keras.layers.LayerNormalization())
+            self.layer_normalizations.append(
+                tf.keras.layers.LayerNormalization(trainable=trainable)
+            )
 
         self.output_layer = None
         if output_layer_size:
             self.output_layer = tf.keras.layers.Dense(
-                output_layer_size, activation=None,
+                output_layer_size, activation=None, trainable=trainable
             )
 
     def call(self, input_):

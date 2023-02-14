@@ -10,14 +10,14 @@ class ContinuousEpisodeReplayBuffer:
 
     sample()
     """
-    def __init__(self, capacity: int = 10000, batch_size_B: int = 1):
+    def __init__(self, capacity: int = 10000, num_data_tracks: int = 1):
         self.capacity = capacity
-        self.batch_size_B = batch_size_B
+        self.num_data_tracks = num_data_tracks
 
         # Max length of each batch-track. Episodes and episode fragments coming
         # in through `add()` are added to either one of these tracks, depending on
         # their batch index in the incoming data.
-        self.batch_track_size = self.capacity // self.batch_size_B
+        self.data_track_size = self.capacity // self.num_data_tracks
 
         self.buffers = {}
         for key in [
@@ -33,19 +33,19 @@ class ContinuousEpisodeReplayBuffer:
 
     def add(self, data: dict):
         for key, value in data.items():
-            assert len(value) % self.batch_size_B == 0
+            assert len(value) % self.num_data_tracks == 0
             # Split along batch axis.
             for i in range(len(value)):
-                buf_idx = i % self.batch_size_B
+                buf_idx = i % self.num_data_tracks
                 self.buffers[key][buf_idx].append(value[i])
 
     def sample(self, num_items: int = 1):
-        assert num_items % self.batch_size_B == 0
-        max_idx = len(self) // self.batch_size_B
-        indices = [np.random.randint(0, max_idx, size=num_items // self.batch_size_B) for _ in range(self.batch_size_B)]
+        assert num_items % self.num_data_tracks == 0
+        max_idx = len(self) // self.num_data_tracks
+        indices = [np.random.randint(0, max_idx, size=num_items // self.num_data_tracks) for _ in range(self.num_data_tracks)]
         sample = {}
         for key, bufs in self.buffers.items():
-            sample[key] = np.stack([bufs[buf_idx][i] for buf_idx in range(self.batch_size_B) for i in indices[buf_idx]], axis=0)
+            sample[key] = np.stack([bufs[buf_idx][i] for buf_idx in range(self.num_data_tracks) for i in indices[buf_idx]], axis=0)
         return sample
 
     def save(self):
@@ -62,14 +62,14 @@ class ContinuousEpisodeReplayBuffer:
                 self.buffers[key].append(row)
 
     def __len__(self):
-        return len(self.buffers["obs"][0]) * self.batch_size_B
+        return len(self.buffers["obs"][0]) * self.num_data_tracks
 
     def _make_buffer(self):
-        return [deque(maxlen=self.batch_track_size) for _ in range(self.batch_size_B)]
+        return [deque(maxlen=self.data_track_size) for _ in range(self.num_data_tracks)]
 
 
 if __name__ == "__main__":
-    buffer = ContinuousEpisodeReplayBuffer(capacity=100, batch_size_B=2)
+    buffer = ContinuousEpisodeReplayBuffer(capacity=100, num_data_tracks=2)
     B = 10
     T = 4
 

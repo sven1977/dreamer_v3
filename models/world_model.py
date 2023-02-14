@@ -20,13 +20,13 @@ class WorldModel(tf.keras.Model):
     """TODO
     """
     def __init__(
-            self,
-            *,
-            model_dimension: str = "XS",
-            action_space: gym.Space,
-            batch_length_T: int = 64,
-            encoder: tf.keras.Model,
-            decoder: tf.keras.Model,
+        self,
+        *,
+        model_dimension: str = "XS",
+        action_space: gym.Space,
+        batch_length_T: int = 64,
+        encoder: tf.keras.Model,
+        decoder: tf.keras.Model,
     ):
         """TODO
 
@@ -255,7 +255,11 @@ class WorldModel(tf.keras.Model):
             "continue_distribution": continue_distribution,
             "z_distribution_encoder": z_distribution_encoder,
             "z_distribution_dynamics": z_distribution_dynamics,
-            # Next deterministic internal states (h).
+            # Deterministic, continuous h-states (t1 to T).
+            "h_states": hs,
+            # Sampled, discrete z-states (t1 to T).
+            "z_states": zs,
+            # Next deterministic, continuous h-state (h(T+1)).
             "h_tp1": h_tp1,
         }
 

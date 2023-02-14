@@ -207,6 +207,8 @@ https://arxiv.org/pdf/2010.02193.pdf
     - Ran regular CartPole experiment with normal sampling enabled. Seems to work similarly well.
 
 OPEN PROBLEMS:
+- For dreaming: Should we sample from the Bernoulli distribution (for `continue` flags) or use greedy?
+  We do use the deterministic mean for the dreamed rewards. Should probably do the same for `continues`.
 - Now that we are using the continuous episode buffer, if an episode is truncated AND the truncated
   ts is in the middle of some batch_length_T sized chunk, we would NOT have the next_obs information
   that we need to compute a proper value at the truncation. Instead the obs(t+1) would alredy
@@ -219,7 +221,7 @@ OPEN PROBLEMS:
 - We are currently LayerNorm'ing the GRU output (the next h-state). Adding this provided
   a big L_total reduction, however, wouldn't this mess with the GRU learning how to manipulate
   its internal state vector properly?
-  Instead: Only layer-norm the input the the next NN (after the GRU), e.g. reward predictor, actor, vf, etc..
+  Instead: Only layer-norm the input to the next NN (after the GRU), e.g. reward predictor, actor, vf, etc..
   BUT leave the actual h-states as-is (as the next GRU h-inputs).
   [2] states (w/o specifying, where exactly the LayerNorm would go:
     before the GRU? -> makes no sense as it would normalize one-hot z- and a-vectors

@@ -8,6 +8,7 @@ import numpy as np
 import tensorflow as tf
 
 from models.components.actor_network import ActorNetwork
+from models.components.critic_network import CriticNetwork
 from models.components.reward_predictor import RewardPredictor
 from utils.symlog import inverse_symlog
 
@@ -41,7 +42,7 @@ class DreamerModel(tf.keras.Model):
             action_space=self.action_space,
             model_dimension=self.model_dimension,
         )
-        self.critic = RewardPredictor(
+        self.critic = CriticNetwork(
             model_dimension=self.model_dimension,
         )
 
@@ -63,7 +64,120 @@ class DreamerModel(tf.keras.Model):
         return self.world_model._get_initial_h(batch_size=batch_size)
 
     @tf.function
-    def dream_trajectory(self, observations, actions, initial_h, timesteps, use_sampled_actions=False):
+    def dream_trajectory(self, h, z, timesteps):#, actions=None, use_sampled_actions=False):
+        """Dreams trajectory from batch of h- and z-states (and possibly actions).
+
+        Args:
+            h: The h-states (B, ...) as computed by a train forward pass. From
+                each individual h-state in the given batch, we will branch off
+                a dreamed trajectory of len `timesteps`.
+            z: The posterior z-states (B, num_categoricals, num_classes) as computed
+                by a train forward pass. From each individual z-state in the given
+                batch,, we will branch off a dreamed trajectory of len `timesteps`.
+            timesteps: The number of timesteps to dream for.
+            #actions: Optional actions batch in case `use_sampled_actions` is True.
+            #use_sampled_actions: Whether to use `actions` for the dreamed predictions
+            #    (rather than the actor network). If True, make sure that your
+            #    `actions` arg contains as many items as the `h` and `z` inputs.
+        """
+        assert h.shape[0] == z.shape[0], (
+            "h- and z-shapes (batch size; 0th dim) must be the same!"
+        )
+
+        # Dreamed actions.
+        a_dreamed_t1_to_H = []
+        # Dreamed rewards.
+        r_dreamed_t1_to_H = []
+        r_symlog_dreamed_t1_to_H = []
+        # Dreamed continue flags.
+        c_dreamed_t1_to_H = []
+        # Dreamed values.
+        v_dreamed_t1_to_Hp1 = []
+        v_distributions_t1_to_Hp1 = []
+        v_dreamed_ema_t1_to_Hp1 = []
+        # GRU outputs.
+        h_states_t1_to_Hp1 = [h]
+        # Dynamics model outputs.
+        z_states_prior_t1_to_H = []
+
+        for i in range(timesteps):
+            # Compute `a` using actor network.
+            #a = self.actor(h=h, z=z)
+            #TODO: compute actor-produced actions, instead of random actions
+            a = tf.random.uniform(tf.shape(h)[0:1], 0, self.action_space.n, tf.int64)
+            #TODO: END: random actions
+            a_dreamed_t1_to_H.append(a)
+
+            # Compute the value estimates.
+            v, v_distr = self.critic(h=h, z=z, return_distribution=True)
+            v_dreamed_t1_to_Hp1.append(v)
+            v_distributions_t1_to_Hp1.append(v_distr)
+            v_ema = self.critic(h=h, z=z, return_distribution=False, use_ema=True)
+            v_dreamed_ema_t1_to_Hp1.append(v_ema)
+
+            # Compute next h using sequence model.
+            h_tp1 = self.world_model.sequence_model(
+                # actions and z must have a T dimension.
+                z=tf.expand_dims(z, axis=1),
+                a=tf.expand_dims(a, axis=1),
+                h=h,  # Initial state must NOT have a T dimension.
+            )
+            h_states_t1_to_Hp1.append(h_tp1)
+
+            h = h_tp1
+
+            # Compute z from h, using the dynamics model.
+            z = self.world_model.dynamics_predictor(h=h)
+            z_states_prior_t1_to_H.append(z)
+
+            # Compute r using reward predictor.
+            r = self.world_model.reward_predictor(h=h, z=z)
+            r_symlog_dreamed_t1_to_H.append(r)
+            r_dreamed_t1_to_H.append(inverse_symlog(r))
+
+            # Compute continues using continue predictor.
+            c = self.world_model.continue_predictor(h=h, z=z)
+            c_dreamed_t1_to_H.append(c)
+
+        # Predict the last value (for GAE computations).
+        v, v_distr = self.critic(h=h, z=z, return_distribution=True)
+        v_dreamed_t1_to_Hp1.append(v)
+        v_distributions_t1_to_Hp1.append(v_distr)
+        v_ema = self.critic(h=h, z=z, return_distribution=False, use_ema=True)
+        v_dreamed_ema_t1_to_Hp1.append(v_ema)
+
+        # Stack along T (horizon=H) axis.
+        ret = {
+            # Stop-gradient everything, except for the critic and action outputs.
+            "h_states_t1_to_H+1": tf.stop_gradient(
+                tf.stack(h_states_t1_to_Hp1, axis=1)
+            ),
+            "z_states_prior_t1_to_H": tf.stop_gradient(
+                tf.stack(z_states_prior_t1_to_H, axis=1)
+            ),
+            "rewards_dreamed_t1_to_H": tf.stop_gradient(
+                tf.stack(r_dreamed_t1_to_H, axis=1)
+            ),
+            "rewards_symlog_dreamed_t1_to_H": tf.stop_gradient(
+                tf.stack(r_symlog_dreamed_t1_to_H, axis=1)
+            ),
+            "continues_dreamed_t1_to_H": tf.stop_gradient(
+                tf.stack(c_dreamed_t1_to_H, axis=1)
+            ),
+            "values_dreamed_ema_t1_to_Hp1": tf.stop_gradient(
+                tf.stack(v_dreamed_ema_t1_to_Hp1, axis=1)
+            ),
+
+            # Critic and action outputs are not grad-stopped for critic/actor learning.
+            "actions_dreamed_t1_to_H": tf.stack(a_dreamed_t1_to_H, axis=1),
+            "values_dreamed_t1_to_Hp1": tf.stack(v_dreamed_t1_to_Hp1, axis=1),
+            "values_dreamed_distributions_t1_to_Hp1": v_distributions_t1_to_Hp1,
+        }
+
+        return ret
+
+    @tf.function
+    def dream_trajectory_with_burn_in(self, observations, actions, initial_h, timesteps, use_sampled_actions=False):
         """Dreams trajectory from N initial observations and an initial h-state.
 
         Uses all T observations and actions (B, T, ...) to get a most accurate
@@ -81,6 +195,7 @@ class DreamerModel(tf.keras.Model):
                 used in combination with the first observation (o(t)) to yield
                 z(t) and then - in combination with the first action (a(t)) and z(t)
                 to yield the next h-state (h(t+1)) via the RSSM.
+            timesteps: The number of timesteps to dream for.
             use_sampled_actions: Whether to use `actions` for the dreamed predictions
                 (rather than the actor network). If True, make sure that your
                 `actions` arg contains as many timesteps as `observations` plus
@@ -107,25 +222,27 @@ class DreamerModel(tf.keras.Model):
                 initial_h=h,
             )
 
-        h_states = [h]
-        z_dreamed = []
-        a_dreamed = []
-        r_dreamed = []
-        c_dreamed = []
+        h_states_t1_to_Tp1 = [h]
+        z_states_prior_t1_to_T = []
+        a_dreamed_t1_to_T = []
+        r_dreamed_t1_to_T = []
+        r_symlog_dreamed_t1_to_T = []
+        c_dreamed_t1_to_T = []
         for j in range(timesteps):
             actions_index = observations.shape[1] + j
             # Compute z from h, using the dynamics model (we don't have an actual
             # observation at this timestep).
             z = self.world_model.dynamics_predictor(h=h)
-            z_dreamed.append(z)
+            z_states_prior_t1_to_T.append(z)
 
             # Compute r using reward predictor.
             r = self.world_model.reward_predictor(h=h, z=z)
-            r_dreamed.append(inverse_symlog(r))
+            r_symlog_dreamed_t1_to_T.append(r)
+            r_dreamed_t1_to_T.append(inverse_symlog(r))
 
             # Compute continues using continue predictor.
             c = self.world_model.continue_predictor(h=h, z=z)
-            c_dreamed.append(c)
+            c_dreamed_t1_to_T.append(c)
 
             # Use the actions given to us.
             if use_sampled_actions:
@@ -137,7 +254,7 @@ class DreamerModel(tf.keras.Model):
                 a = tf.random.uniform(tf.shape(r), 0, self.action_space.n, tf.int64)
                 #TODO: END: random actions
 
-            a_dreamed.append(a)
+            a_dreamed_t1_to_T.append(a)
 
             # Compute next h using sequence model.
             h_tp1 = self.world_model.sequence_model(
@@ -146,30 +263,36 @@ class DreamerModel(tf.keras.Model):
                 a=tf.expand_dims(a, axis=1),
                 h=h,  # Initial state must NOT have a T dimension.
             )
-            h_states.append(h_tp1)
+            h_states_t1_to_Tp1.append(h_tp1)
 
             h = h_tp1
 
         # Stack along T axis.
         ret = {
-            "h_states": tf.stack(h_states, axis=1),
-            "z_dreamed": tf.stack(z_dreamed, axis=1),
-            "actions_dreamed": tf.stack(a_dreamed, axis=1),
-            "rewards_dreamed": tf.stack(r_dreamed, axis=1),
-            "continues_dreamed": tf.stack(c_dreamed, axis=1)
+            # Note that h-states has one more entry as it includes the next h-state
+            # ("reaching into" the next chunk). This very last h-state can be used
+            # to start a new (dreamed) trajectory.
+            "h_states_t1_to_T+1": tf.stack(h_states_t1_to_Tp1, axis=1),
+            "z_states_prior_t1_to_T": tf.stack(z_states_prior_t1_to_T, axis=1),
+            "actions_dreamed_t1_to_T": tf.stack(a_dreamed_t1_to_T, axis=1),
+            "rewards_dreamed_t1_to_T": tf.stack(r_dreamed_t1_to_T, axis=1),
+            "rewards_symlog_dreamed_t1_to_T": tf.stack(
+                r_symlog_dreamed_t1_to_T, axis=1
+            ),
+            "continues_dreamed_t1_to_T": tf.stack(c_dreamed_t1_to_T, axis=1)
         }
 
         return ret
 
 
 if __name__ == "__main__":
+
     from IPython.display import display, Image
     from moviepy.editor import ImageSequenceClip
     import time
 
     from ray.rllib.algorithms.algorithm_config import AlgorithmConfig
 
-    from models.world_model_atari import WorldModelAtari
     from utils.env_runner import EnvRunner
 
     B = 1
@@ -190,29 +313,25 @@ if __name__ == "__main__":
             "repeat_action_probability": 0.25,  # "sticky actions"
             "full_action_space": True,  # "full action space"
         })
-        .rollouts(num_envs_per_worker=1, rollout_fragment_length=burn_in_T + T)
+        .rollouts(num_envs_per_worker=16, rollout_fragment_length=burn_in_T + T)
     )
     # The vectorized gymnasium EnvRunner to collect samples of shape (B, T, ...).
-    env_runner = EnvRunner(model=None, config=config, max_seq_len=burn_in_T + T)
+    env_runner = EnvRunner(model=None, config=config, max_seq_len=None, continuous_episodes=True)
 
     # Our DreamerV3 world model.
     #from_checkpoint = 'C:\Dropbox\Projects\dreamer_v3\examples\checkpoints\mspacman_world_model_170'
-    from_checkpoint = "/Users/sven/Dropbox/Projects/dreamer_v3/examples/checkpoints/mspacman_all_wrappers_world_model_60"
-    world_model = tf.keras.models.load_model(from_checkpoint)
+    from_checkpoint = "/Users/sven/Dropbox/Projects/dreamer_v3/examples/checkpoints/mspacman_dreamer_model_60"
+    dreamer_model = tf.keras.models.load_model(from_checkpoint)
+    world_model = dreamer_model.world_model
     # TODO: ugly hack (resulting from the insane fact that you cannot know
     #  an env's spaces prior to actually constructing an instance of it) :(
     env_runner.model = world_model
 
-    dreamer_model = DreamerModel(
-        model_dimension="S",
-        action_space=env_runner.env.single_action_space,
-        world_model=world_model,
-    )
     #obs = np.random.randint(0, 256, size=(B, burn_in_T, 64, 64, 3), dtype=np.uint8)
     #actions = np.random.randint(0, 2, size=(B, burn_in_T), dtype=np.uint8)
     #initial_h = np.random.random(size=(B, 256)).astype(np.float32)
 
-    sampled_obs, _, sampled_actions, _, _, _, sampled_h, _ = env_runner.sample(random_actions=True)
+    sampled_obs, _, sampled_actions, _, _, _, sampled_h = env_runner.sample(random_actions=True)
 
     dreamed_trajectory = dreamer_model.dream_trajectory(
         sampled_obs[:, :burn_in_T],

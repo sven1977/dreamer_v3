@@ -38,9 +38,12 @@ class ContinuePredictor(tf.keras.Model):
         # where they should be just [B].
         logits = tf.squeeze(out, axis=-1)
         # Create the Bernoulli distribution object.
-        bernoulli = tfp.distributions.Bernoulli(logits=logits)
-        # Draw a sample.
-        continue_ = bernoulli.sample()
+        bernoulli = tfp.distributions.Bernoulli(logits=logits, dtype=tf.float32)
+
+        #TODO: Draw a sample?
+        #continue_ = bernoulli.sample()
+        # OR: Take the mode (greedy, deterministic "sample").
+        continue_ = bernoulli.mode()
 
         # Return Bernoulli sample (whether to continue) OR (continue?, Bernoulli prob).
         if return_distribution:
