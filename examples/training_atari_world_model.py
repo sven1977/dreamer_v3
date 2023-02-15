@@ -129,10 +129,6 @@ for iteration in range(1000):
     #END TEST
     while True:
         # Sample one round.
-        # TODO: random_actions=False; right now, we act randomly, but perform a
-        #  world-model forward pass using the random actions (in order to compute
-        #  the h-states). Note that a world-model forward pass does NOT compute any
-        #  new actions. This is covered by the Actor network.
         (
             obs,
             next_obs,
@@ -141,7 +137,7 @@ for iteration in range(1000):
             terminateds,
             truncateds,
             h_states,
-        ) = env_runner.sample(random_actions=True)
+        ) = env_runner.sample(random_actions=False)
 
         # We took B x T env steps.
         env_steps_last_sample = rewards.shape[0] * rewards.shape[1]
@@ -212,10 +208,10 @@ for iteration in range(1000):
                 )
 
         else:
-            L_total, L_pred, L_dyn, L_rep = train_one_step(sample, total_train_steps_tensor)
+            L_world_model_total, L_pred, L_dyn, L_rep = train_one_step(sample, total_train_steps_tensor)
 
         print(
-            f"Iter {iteration}/{sub_iter}) L_total={L_total.numpy()} "
+            f"Iter {iteration}/{sub_iter}) L_world_model_total={L_world_model_total.numpy()} "
             f"(L_pred={L_pred.numpy()}; L_dyn={L_dyn.numpy()}; L_rep={L_rep.numpy()})"
         )
         sub_iter += 1

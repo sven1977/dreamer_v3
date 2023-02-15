@@ -108,14 +108,23 @@ class EnvRunner:
                 asynchronous=self.config.remote_worker_envs,
                 #make_kwargs=self.config.env_config,
             )
+        self.num_envs = self.env.num_envs
+        assert self.num_envs == self.config.num_envs_per_worker
+
         self.needs_initial_reset = True
-        self.observations = [[] for _ in range(self.env.num_envs)]
-        self.actions = [[] for _ in range(self.env.num_envs)]
-        self.rewards = [[] for _ in range(self.env.num_envs)]
-        self.terminateds = [[] for _ in range(self.env.num_envs)]
-        self.truncateds = [[] for _ in range(self.env.num_envs)]
+        self.observations = [[] for _ in range(self.num_envs)]
+        self.actions = [[] for _ in range(self.num_envs)]
+        self.rewards = [[] for _ in range(self.num_envs)]
+        self.terminateds = [[] for _ in range(self.num_envs)]
+        self.truncateds = [[] for _ in range(self.num_envs)]
         self.next_h_states = None
         self.current_sequence_initial_h = None
+
+        # The currently ongoing episodes' returns (sum of rewards).
+        self.episode_returns = [0.0 for _ in range(self.num_envs)]
+        # The returns of already finished episodes, ready to be collected by a call
+        # to `get_metrics()`.
+        self.episode_returns_to_collect = []
 
     def sample(self, explore: bool = True, random_actions: bool = False):
         if self.config.batch_mode == "complete_episodes":
@@ -124,7 +133,7 @@ class EnvRunner:
             return self.sample_timesteps(
                 num_timesteps=(
                     self.config.rollout_fragment_length
-                    * self.config.num_envs_per_worker
+                    * self.num_envs
                 ),
                 explore=explore,
                 random_actions=random_actions,
@@ -168,10 +177,10 @@ class EnvRunner:
             obs, _ = self.env.reset()
             if self.model is not None:
                 self.next_h_states = self.model._get_initial_h(
-                    batch_size=self.config.num_envs_per_worker
+                    batch_size=self.num_envs
                 ).numpy()
             else:
-                self.next_h_states = np.array([0.0] * self.config.num_envs_per_worker)
+                self.next_h_states = np.array([0.0] * self.num_envs)
             self.current_sequence_initial_h = self.next_h_states.copy()
             self.needs_initial_reset = False
             for i, o in enumerate(self._split_by_env(obs)):
@@ -180,7 +189,7 @@ class EnvRunner:
             obs = np.stack([o[-1] for o in self.observations])
 
         ts = 0
-        ts_sequences = [len(self.observations[i]) - 1 for i in range(self.env.num_envs)]
+        ts_sequences = [len(self.observations[i]) - 1 for i in range(self.num_envs)]
 
         while True:
             if random_actions:
@@ -190,18 +199,27 @@ class EnvRunner:
                 #print(f"took action {actions}")
                 if self.model is not None:
                     self.next_h_states = (
-                        self.model.forward_inference(obs, actions, tf.convert_to_tensor(self.next_h_states))
+                        self.model.world_model.forward_inference(
+                            obs,
+                            actions,
+                            tf.convert_to_tensor(self.next_h_states),
+                        )
                     ).numpy()
                 else:
                     self.next_h_states = np.array(ts_sequences)
             else:
-                action_logits = self.model(obs)
                 # Sample.
                 if explore:
-                    actions = tf.random.categorical(action_logits, num_samples=1)
+                    a, h = self.model(
+                        obs,
+                        initial_h=tf.convert_to_tensor(self.next_h_states),
+                    )
+                    actions = a.numpy()
+                    self.next_h_states = h.numpy()
                 # Greedy.
                 else:
-                    actions = np.argmax(action_logits, axis=-1)
+                    raise NotImplementedError
+                    #actions = np.argmax(action_logits, axis=-1)
 
             obs, rewards, terminateds, truncateds, infos = self.env.step(actions)
 
@@ -215,14 +233,18 @@ class EnvRunner:
                 self.observations[i].append(o)
                 self.actions[i].append(a)
                 self.rewards[i].append(r)
+                self.episode_returns[i] += r
+                if term or trunc:
+                    self.episode_returns_to_collect.append(self.episode_returns[i])
+                    self.episode_returns[i] = 0.0
                 self.terminateds[i].append(term)
                 self.truncateds[i].append(trunc)
             # Make sure we always have one more obs stored than rewards (and actions)
             # due to the reset and last-obs logic of an MDP.
             assert(len(self.observations[0]) == len(self.rewards[0]) + 1)
 
-            ts += self.env.num_envs
-            for i in range(self.env.num_envs):
+            ts += self.num_envs
+            for i in range(self.num_envs):
                 ts_sequences[i] += 1
 
                 if self.continuous_episodes:
@@ -323,8 +345,144 @@ class EnvRunner:
         else:
             return return_obs, return_next_obs, return_actions, return_rewards, return_terminateds, return_truncateds, return_initial_h
 
+    def sample_episodes(
+        self,
+        num_episodes: int,
+        explore: bool = True,
+        random_actions: bool = False,
+    ) -> MultiAgentBatch:
+        """Runs n episodes (reset first) on the environment(s) and returns experiences.
+
+        Episodes are counted in total (across all vectorized sub-environments). For
+        example, if self.num_envs=2 and num_episodes=10, each sub-environment
+        will run 5 episodes.
+
+        Args:
+            num_episodes: The number of episodes to sample from the environment(s).
+            explore: Indicates whether to utilize exploration when picking actions.
+            force_reset: Whether to reset the environment(s) before starting to sample.
+                If False, will still reset the environment(s) if they were left in
+                a terminated or truncated state during previous sample calls.
+        """
+        return_obs = []
+        return_actions = []
+        return_rewards = []
+        return_terminateds = []
+        return_truncateds = []
+        return_next_obs = []
+
+        observations = [[] for _ in range(self.num_envs)]
+        actions = [[] for _ in range(self.num_envs)]
+        rewards = [[] for _ in range(self.num_envs)]
+        terminateds = [[] for _ in range(self.num_envs)]
+        truncateds = [[] for _ in range(self.num_envs)]
+
+        obs, _ = self.env.reset()
+        if self.model is not None:
+            next_h_states = self.model._get_initial_h(
+                batch_size=self.num_envs
+            ).numpy()
+        else:
+            next_h_states = np.array([0.0] * self.num_envs)
+
+        for i, o in enumerate(self._split_by_env(obs)):
+            observations[i].append(o)
+
+        eps = 0
+
+        while True:
+            if random_actions:
+                # TODO: hack; right now, our model (a world model) does not have an
+                #  actor head yet. Still perform a forward pass to get the next h-states.
+                act = self.env.action_space.sample()
+                #print(f"took action {actions}")
+                if self.model is not None:
+                    next_h_states = (
+                        self.model.world_model.forward_inference(
+                            obs,
+                            act,
+                            tf.convert_to_tensor(next_h_states),
+                        )
+                    ).numpy()
+                else:
+                    next_h_states = np.array([1.0 for _ in range(self.num_envs)])
+            else:
+                # Sample.
+                if explore:
+                    a, h = self.model(
+                        obs,
+                        initial_h=tf.convert_to_tensor(next_h_states),
+                    )
+                    act = a.numpy()
+                    next_h_states = h.numpy()
+                # Greedy.
+                else:
+                    raise NotImplementedError
+                    #act = np.argmax(action_logits, axis=-1)
+
+            obs, rew, term, trunc, infos = self.env.step(act)
+
+            for i, (o, a, r, t, tr) in enumerate(zip(
+                    self._split_by_env(obs),
+                    self._split_by_env(act),
+                    self._split_by_env(rew),
+                    self._split_by_env(term),
+                    self._split_by_env(trunc),
+            )):
+                observations[i].append(o)
+                actions[i].append(a)
+                rewards[i].append(r)
+                terminateds[i].append(t)
+                truncateds[i].append(tr)
+            # Make sure we always have one more obs stored than rewards (and actions)
+            # due to the reset and last-obs logic of an MDP.
+            assert(len(observations[0]) == len(rewards[0]) + 1)
+
+            for i in range(self.num_envs):
+                if term[i] or trunc[i]:
+                    eps += 1
+                    # observations[i][-1] is the reset obs of the next episode.
+                    return_obs.append(np.stack(observations[i][:-1], axis=0))
+                    return_actions.append(np.stack(actions[i], axis=0))
+                    return_rewards.append(np.stack(rewards[i], axis=0))
+                    return_terminateds.append(np.stack(terminateds[i], axis=0))
+                    return_truncateds.append(np.stack(truncateds[i], axis=0))
+
+                    # The last entry in self.observations[i] is already the reset
+                    # obs of the new episode.
+                    return_next_obs.append(infos["final_observation"][i])
+                    # Reset h-states to all zeros b/c we are starting a new episode.
+                    if self.model is not None:
+                        next_h_states[i] = self.model._get_initial_h(
+                            batch_size=0).numpy()
+                    else:
+                        next_h_states[i] = 0.0
+
+                    # observations[i][-1] is the reset obs of the next episode.
+                    observations[i] = [observations[i][-1]]
+                    actions[i] = []
+                    rewards[i] = []
+                    terminateds[i] = []
+                    truncateds[i] = []
+
+            # Make sure we always have one more obs stored than rewards (and actions)
+            # due to the reset and last-obs logic of an MDP.
+            assert(len(observations[0]) == len(rewards[0]) + 1)
+
+            if eps >= num_episodes:
+                break
+
+        return return_obs, return_next_obs, return_actions, return_rewards, return_terminateds, return_truncateds
+
+    def get_metrics(self):
+        metrics = {
+            "episode_returns": self.episode_returns_to_collect[:],
+        }
+        self.episode_returns_to_collect.clear()
+        return metrics
+
     def _split_by_env(self, inputs):
-        return [inputs[i] for i in range(self.env.num_envs)]
+        return [inputs[i] for i in range(self.num_envs)]
 
     def _process_and_pad(self, inputs):
         # inputs=T x [dim]
@@ -364,7 +522,7 @@ if __name__ == "__main__":
         continuous_episodes=True,
         _debug_count_env=True,
     )
-    for _ in range(100):
+    for _ in range(10):
         obs, next_obs, actions, rewards, terminateds, truncateds, initial_h = (
             env_runner.sample(random_actions=True)
         )
@@ -374,3 +532,10 @@ if __name__ == "__main__":
         print("terminateds=", terminateds)
         print("initial_h=", initial_h)
         print()
+
+    obs, next_obs, actions, rewards, terminateds, truncateds = (
+        env_runner.sample_episodes(num_episodes=10, random_actions=True)
+    )
+    mean_episode_return = np.mean([np.sum(rets) for rets in rewards])
+    print(len(obs))
+    print(f"mean(R)={mean_episode_return}")

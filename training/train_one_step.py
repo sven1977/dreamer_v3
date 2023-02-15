@@ -1,4 +1,10 @@
+"""
+[1] Mastering Diverse Domains through World Models - 2023
+D. Hafner, J. Pasukonis, J. Ba, T. Lillicrap
+https://arxiv.org/pdf/2301.04104v1.pdf
+"""
 import tensorflow as tf
+from losses.actor_loss import actor_loss
 from losses.critic_loss import critic_loss
 from losses.world_model_losses import (
     world_model_dynamics_and_representation_loss,
@@ -13,14 +19,14 @@ def train_world_model_one_step(
     batch_size_B,
     batch_length_T,
     grad_clip,
-    dreamer_model,
+    world_model,
     optimizer,
 ):
     # Compute losses.
     with tf.GradientTape() as tape:
         # Compute forward (train) data.
-        forward_train_outs = dreamer_model(
-            inputs=sample["obs"],
+        forward_train_outs = world_model.forward_train(
+            observations=sample["obs"],
             actions=sample["actions"],
             initial_h=sample["h_states"],
         )
@@ -61,19 +67,19 @@ def train_world_model_one_step(
         L_rep = tf.reduce_mean(tf.reduce_sum(L_rep_BxT, axis=-1))
 
         # Compute the actual total loss using fixed weights described in [1] eq. 4.
-        L_total_BxT = 1.0 * L_pred_BxT + 0.5 * L_dyn_BxT + 0.1 * L_rep_BxT
+        L_world_model_total_BxT = 1.0 * L_pred_BxT + 0.5 * L_dyn_BxT + 0.1 * L_rep_BxT
 
         # Sum up timesteps, and average over batch (see eq. 4 in [1]).
-        L_total = tf.reduce_mean(tf.reduce_sum(L_total_BxT, axis=-1))
+        L_world_model_total = tf.reduce_mean(tf.reduce_sum(L_world_model_total_BxT, axis=-1))
 
     # Get the gradients from the tape.
-    gradients = tape.gradient(L_total, dreamer_model.trainable_variables)
+    gradients = tape.gradient(L_world_model_total, world_model.trainable_variables)
     # Clip all gradients.
     clipped_gradients = []
     for grad in gradients:
         clipped_gradients.append(tf.clip_by_value(grad, -grad_clip, grad_clip))
     # Apply gradients to our model.
-    optimizer.apply_gradients(zip(clipped_gradients, dreamer_model.trainable_variables))
+    optimizer.apply_gradients(zip(clipped_gradients, world_model.trainable_variables))
 
     return {
         # Forward train results.
@@ -105,8 +111,8 @@ def train_world_model_one_step(
         "L_rep": L_rep,
 
         # Total loss.
-        "L_total_BxT": L_total_BxT,
-        "L_total": L_total,
+        "L_world_model_total_BxT": L_world_model_total_BxT,
+        "L_world_model_total": L_world_model_total,
     }
 
 
@@ -122,9 +128,11 @@ def train_actor_and_critic_one_step(
     dreamer_model,
     actor_optimizer,
     critic_optimizer,
+    entropy_scale,
+    return_normalization_decay,
 ):
     # Compute losses.
-    with tf.GradientTape() as tape:
+    with tf.GradientTape(persistent=True) as tape:
         # Dream trajectories starting in all internal states (h+z) that were
         # computed during world model training.
         dream_data = dreamer_model.dream_trajectory(
@@ -133,25 +141,50 @@ def train_actor_and_critic_one_step(
             timesteps=horizon_H,
         )
         critic_loss_results = critic_loss(dream_data, gamma=gamma, lambda_=lambda_)
+        actor_loss_results = actor_loss(
+            dream_data=dream_data,
+            critic_loss_results=critic_loss_results,
+            actor=dreamer_model.actor,
+            entropy_scale=entropy_scale,
+            return_normalization_decay=return_normalization_decay
+        )
 
+    L_actor = actor_loss_results["L_actor"]
     L_critic = critic_loss_results["L_critic"]
 
     # Get the gradients from the tape.
-    gradients = tape.gradient(L_critic, dreamer_model.critic.trainable_variables)
+    actor_gradients = tape.gradient(
+        L_actor,
+        dreamer_model.actor.trainable_variables,
+    )
+    critic_gradients = tape.gradient(
+        L_critic,
+        dreamer_model.critic.trainable_variables,
+    )
+
     # Clip all gradients.
-    clipped_gradients = []
-    for grad in gradients:
-        clipped_gradients.append(
-            tf.clip_by_value(grad, -critic_grad_clip, critic_grad_clip))
-    # Apply gradients to our model.
+    clipped_actor_gradients = []
+    for grad in actor_gradients:
+        clipped_actor_gradients.append(
+            tf.clip_by_value(grad, -actor_grad_clip, actor_grad_clip)
+        )
+    clipped_critic_gradients = []
+    for grad in critic_gradients:
+        clipped_critic_gradients.append(
+            tf.clip_by_value(grad, -critic_grad_clip, critic_grad_clip)
+        )
+    # Apply gradients to our models.
+    actor_optimizer.apply_gradients(
+        zip(clipped_actor_gradients, dreamer_model.actor.trainable_variables)
+    )
     critic_optimizer.apply_gradients(
-        zip(clipped_gradients, dreamer_model.critic.trainable_variables)
+        zip(clipped_critic_gradients, dreamer_model.critic.trainable_variables)
     )
 
     # Update EMA weights of the critic.
     dreamer_model.critic.update_ema()
 
-    # TODO: actor learning
-    #L_actor = 0.0
-
-    return dict(critic_loss_results, **{"critic_gradients": gradients})
+    loss_results = dict(actor_loss_results, **critic_loss_results)
+    loss_results["actor_gradients"] = actor_gradients
+    loss_results["critic_gradients"] = critic_gradients
+    return loss_results

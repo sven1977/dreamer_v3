@@ -9,6 +9,8 @@ https://arxiv.org/pdf/2010.02193.pdf
 """
 
 import os
+
+import numpy as np
 import tree  # pip install dm_tree
 import tensorflow as tf
 
@@ -36,9 +38,12 @@ os.makedirs("checkpoints", exist_ok=True)
 os.makedirs("tensorboard", exist_ok=True)
 tb_writer = tf.summary.create_file_writer("tensorboard")
 # Every how many training steps do we write data to TB?
-summary_frequency = 5
+summary_frequency_train_steps = 5
+# Every how many main iterations do we evaluate?
+evaluation_frequency_main_iters = 1
+evaluation_num_episodes = 10
 # Every how many (main) iterations (sample + N train steps) do we save our model?
-model_save_frequency = 10
+model_save_frequency_main_iters = 10000
 
 # Set batch size and -length according to [1]:
 batch_size_B = 16
@@ -49,9 +54,12 @@ batch_length_T = 64
 burn_in_T = 5
 horizon_H = 15
 
-# Actor/critic Hyperparameters.
-discount_gamma = 0.997
-gae_lambda = 0.95
+# Actor/critic hyperparameters.
+discount_gamma = 0.997  # [1] eq. 7.
+gae_lambda = 0.95  # [1] eq. 7.
+entropy_scale = 3e-4  # [1] eq. 11.
+return_normalization_decay = 0.99  # [1] eq. 11 and 12.
+
 
 # EnvRunner config (an RLlib algorithm config).
 config = (
@@ -69,6 +77,12 @@ env_runner = EnvRunner(
     max_seq_len=None,
     continuous_episodes=True,
 )
+env_runner_evaluation = EnvRunner(
+    model=None,
+    config=config,
+    max_seq_len=None,
+    continuous_episodes=True,
+)
 
 # Whether to o nly train the world model (not the critic and actor networks).
 train_world_model_only = False
@@ -79,7 +93,7 @@ from_checkpoint = None
 if from_checkpoint is not None:
     dreamer_model = tf.keras.models.load_model(from_checkpoint)
 else:
-    model_dimension = "micro"
+    model_dimension = "XS"
     world_model = WorldModel(
         model_dimension=model_dimension,
         action_space=env_runner.env.single_action_space,
@@ -98,6 +112,7 @@ else:
 # TODO: ugly hack (resulting from the insane fact that you cannot know
 #  an env's spaces prior to actually constructing an instance of it) :(
 env_runner.model = dreamer_model
+env_runner_evaluation.model = dreamer_model
 
 # The replay buffer for storing actual env samples.
 buffer = ContinuousEpisodeReplayBuffer(
@@ -136,10 +151,6 @@ for iteration in range(1000):
     #END TEST
     while True:
         # Sample one round.
-        # TODO: random_actions=False; right now, we act randomly, but perform a
-        #  world-model forward pass using the random actions (in order to compute
-        #  the h-states). Note that a world-model forward pass does NOT compute any
-        #  new actions. This is covered by the Actor network.
         (
             obs,
             next_obs,
@@ -148,7 +159,7 @@ for iteration in range(1000):
             terminateds,
             truncateds,
             h_states,
-        ) = env_runner.sample(random_actions=True)
+        ) = env_runner.sample(random_actions=False)
 
         # We took B x T env steps.
         env_steps_last_sample = rewards.shape[0] * rewards.shape[1]
@@ -173,12 +184,31 @@ for iteration in range(1000):
         ):
             break
 
+    # Summarize actual environment interaction data.
+    metrics = env_runner.get_metrics()
+    with tb_writer.as_default(step=total_train_steps):
+        # Summarize buffer length.
+        tf.summary.scalar("buffer_size_num_trajectories", len(buffer))
+        tf.summary.scalar("buffer_size_timesteps", len(buffer) * batch_length_T)
+        # Summarize episode returns.
+        if metrics["episode_returns"]:
+            episode_return_mean = np.mean(metrics["episode_returns"])
+            tf.summary.scalar("ENV_episode_return_mean", episode_return_mean)
+        # Summarize actions taken.
+        tf.summary.histogram("ENV_actions_taken", actions)
+
     total_env_steps += env_steps
 
     replayed_steps = 0
 
     sub_iter = 0
     while replayed_steps / env_steps_last_sample < training_ratio:
+        # Enable TB summaries this step?
+        tb_ctx = None
+        if total_train_steps % summary_frequency_train_steps == 0:
+            tb_ctx = tb_writer.as_default(step=total_train_steps)
+            tb_ctx.__enter__()
+
         # Draw a sample from the replay buffer.
         sample = buffer.sample(num_items=batch_size_B)
         replayed_steps += batch_size_B * batch_length_T
@@ -186,19 +216,13 @@ for iteration in range(1000):
         # Convert samples (numpy) to tensors.
         sample = tree.map_structure(lambda v: tf.convert_to_tensor(v), sample)
 
-        # Enable TB summaries this step?
-        tb_ctx = None
-        if total_train_steps % summary_frequency == 0:
-            tb_ctx = tb_writer.as_default(step=total_train_steps)
-            tb_ctx.__enter__()
-
         # Perform one world-model training step.
         world_model_train_results = train_world_model_one_step(
             sample=sample,
             batch_size_B=batch_size_B,
             batch_length_T=batch_length_T,
             grad_clip=world_model_grad_clip,
-            dreamer_model=dreamer_model,
+            world_model=world_model,
             optimizer=world_model_optimizer,
         )
         summarize_forward_train_outs_vs_samples(
@@ -209,12 +233,12 @@ for iteration in range(1000):
         )
         summarize_world_model_losses(world_model_train_results)
 
+        print(f"Iter {iteration}/{sub_iter})")
         print(
-            f"Iter {iteration}/{sub_iter}) "
-            f"L_world_model_total={world_model_train_results['L_total'].numpy()} "
-            f"(L_pred={world_model_train_results['L_pred'].numpy()}; "
-            f"L_dyn={world_model_train_results['L_dyn'].numpy()}; "
-            f"L_rep={world_model_train_results['L_rep'].numpy()})"
+            f"\tL_world_model_total={world_model_train_results['L_world_model_total'].numpy():.5f} ("
+            f"L_pred={world_model_train_results['L_pred'].numpy():.5f}; "
+            f"L_dyn={world_model_train_results['L_dyn'].numpy():.5f}; "
+            f"L_rep={world_model_train_results['L_rep'].numpy():.5f})"
         )
 
         # Train critic and actor.
@@ -248,35 +272,20 @@ for iteration in range(1000):
                 dreamer_model=dreamer_model,
                 actor_optimizer=actor_optimizer,
                 critic_optimizer=critic_optimizer,
+                entropy_scale=entropy_scale,
+                return_normalization_decay=return_normalization_decay,
             )
-            # Summarize critic loss stats.
+            # Summarize actor-critic loss stats.
             L_critic = actor_critic_train_results["L_critic"]
             tf.summary.scalar("L_critic", L_critic)
+            L_actor = actor_critic_train_results["L_actor"]
+            tf.summary.scalar("L_actor", L_actor)
+            tf.summary.scalar("L_actor_action_entropy", actor_critic_train_results["action_entropy"])
+            tf.summary.histogram("L_actor_scaled_value_targets_B_H", actor_critic_train_results["scaled_value_targets_B_H"])
+            tf.summary.histogram("L_actor_logp_loss_B_H", actor_critic_train_results["logp_loss_B_H"])
 
             print(
-                f"\tL_critic={L_critic.numpy()} L_actor=TODO"
-            )
-
-        # EVALUATION:
-        if total_train_steps % summary_frequency == 0:
-            # Dream a trajectory using the samples from the buffer and compare obs,
-            # rewards, continues to the actually observed trajectory.
-            dreamed_T = horizon_H
-            dream_data = dreamer_model.dream_trajectory_with_burn_in(
-                observations=sample["obs"][:, :burn_in_T],  # use only first burn_in_T obs
-                actions=sample["actions"][:, :burn_in_T + horizon_H],  # use all actions from 0 to T (no actor)
-                initial_h=sample["h_states"],
-                timesteps=dreamed_T,  # dream for n timesteps
-                use_sampled_actions=True,  # use sampled actions,not the actor
-            )
-
-            summarize_dreamed_trajectory_vs_samples(
-                dream_data,
-                sample,
-                batch_size_B=batch_size_B,
-                burn_in_T=burn_in_T,
-                dreamed_T=dreamed_T,
-                dreamer_model=dreamer_model,
+                f"\tL_actor={L_actor.numpy():.5f} L_critic={L_critic.numpy():.5f}"
             )
 
         sub_iter += 1
@@ -285,8 +294,42 @@ for iteration in range(1000):
         if tb_ctx is not None:
             tb_ctx.__exit__(None, None, None)
 
+    # EVALUATION.
+    if total_train_steps % evaluation_frequency_main_iters == 0:
+        print("\nEVALUATION:")
+        with tb_writer.as_default(step=total_train_steps):
+            # Dream a trajectory using the samples from the buffer and compare obs,
+            # rewards, continues to the actually observed trajectory.
+            dreamed_T = horizon_H
+            print(f"Dreaming trajectories (H={dreamed_T}) from all 1st timesteps drawn from buffer ...")
+            dream_data = dreamer_model.dream_trajectory_with_burn_in(
+                observations=sample["obs"][:, :burn_in_T],  # use only first burn_in_T obs
+                actions=sample["actions"][:, :burn_in_T + dreamed_T],  # use all actions from 0 to T (no actor)
+                initial_h=sample["h_states"],
+                timesteps=dreamed_T,  # dream for n timesteps
+                use_sampled_actions=True,  # use sampled actions, not the actor
+            )
+            mse_sampled_vs_dreamed_obs = summarize_dreamed_trajectory_vs_samples(
+                dream_data,
+                sample,
+                batch_size_B=batch_size_B,
+                burn_in_T=burn_in_T,
+                dreamed_T=dreamed_T,
+                dreamer_model=dreamer_model,
+            )
+            print(f"\tMSE sampled vs dreamed obs (B={batch_size_B} T/H={dreamed_T}): {mse_sampled_vs_dreamed_obs:.6f}")
+
+            # Run n episodes in an actual env and report mean episode returns.
+            print(f"Running {evaluation_num_episodes} episodes in env for evaluation ...")
+            _, _, _, eval_rewards, _, _ = env_runner_evaluation.sample_episodes(
+                num_episodes=evaluation_num_episodes, random_actions=False
+            )
+            mean_episode_return = np.mean([np.sum(rs) for rs in eval_rewards])
+            print(f"\tMean episode return: {mean_episode_return:.4f}")
+            tf.summary.scalar("EVAL_mean_episode_return", mean_episode_return)
+
     # Save the model every N iterations (but not after the very first).
-    if iteration != 0 and iteration % model_save_frequency == 0:
+    if iteration != 0 and iteration % model_save_frequency_main_iters == 0:
         dreamer_model.save(f"checkpoints/dreamer_model_{iteration}")
 
     total_replayed_steps += replayed_steps

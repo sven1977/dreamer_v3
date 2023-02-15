@@ -19,16 +19,23 @@ class ActorNetwork(tf.keras.Model):
         *,
         action_space: gym.Space,
         model_dimension: Optional[str] = "XS",
+        return_normalization_decay: float = 0.99,
     ):
         super().__init__()
 
         self.model_dimension = model_dimension
+        # The EMA decay rate used for the [Percentile(R, 95%) - Percentile(R, 5%)]
+        # diff to scale value targets for the actor loss.
+        self.return_normalization_decay = return_normalization_decay
+        self.ema_range_95_minus_5 = tf.Variable(np.nan, dtype=tf.float32, trainable=False)
 
+        self.action_space = action_space
         # TODO: For now, limit to discrete actions.
-        assert isinstance(action_space, gym.spaces.Discrete)
+        assert isinstance(self.action_space, gym.spaces.Discrete)
+
         self.mlp = MLP(
             model_dimension=self.model_dimension,
-            output_layer_size=action_space.n,
+            output_layer_size=self.action_space.n,
         )
 
     def call(self, h, z, return_distribution=False):
@@ -47,8 +54,18 @@ class ActorNetwork(tf.keras.Model):
         out = tf.concat([h, z], axis=-1)
         # Send h-cat-z through MLP.
         action_logits = self.mlp(out)
+        action_probs = tf.nn.softmax(action_logits)
 
-        distr = tfp.distributions.Categorical(logits=action_logits)
+        # Add the unimix weighting (1% uniform) to the probs.
+        # See [1]: "Unimix categoricals: We parameterize the categorical distributions
+        # for the world model representations and dynamics, as well as for the actor
+        # network, as mixtures of 1% uniform and 99% neural network output to ensure
+        # a minimal amount of probability mass on every class and thus keep log
+        # probabilities and KL divergences well behaved."
+        action_probs = 0.99 * action_probs + 0.01 * (1.0 / self.action_space.n)
+
+        # Create the distribution object using the unimix'd probs.
+        distr = tfp.distributions.Categorical(probs=action_probs)
 
         action = distr.sample()
 

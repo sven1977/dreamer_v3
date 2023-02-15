@@ -206,6 +206,50 @@ https://arxiv.org/pdf/2010.02193.pdf
       repeatedly sampling that sample and learning (memorizing) it. Seems to learn how to dream the single trajectory well.
     - Ran regular CartPole experiment with normal sampling enabled. Seems to work similarly well.
 
+2023/02/11-2023/02/14
+    - Refactoring example code and utilities (e.g. TB summary utility functions).
+        - Make sure all tf.summary calls are outside of tf.functions, otherwise, `step`
+          is frozen to 0.
+        - Deduplicate complex computed vs sampled obs/images code so it can be used
+          by different evaluation procedures (world model's train_forward produces
+          posterior computed obs that can be compared to sampled obs; critic/actor
+          require prior (dreamed) computed obs that can be compared to sampled obs).
+    - Implemented critic and actor networks.
+    - Wrote critic loss:
+        Difficulties:
+        - Figuring out how to do the EMA-weights network:
+            - Create a copy of ("fast") critic, call it "EMA-net".
+            - Update EMA-net after each critic update, such that EMA-net is a running EMA
+              of the fast critic.
+            - Use fast critic for value target computations (not the EMA-net!)
+            - Add additional regularizer term to critic loss that makes sure that
+              value predictions produced by the fast critic are close to those made by the
+              EMA-net.
+            - Missing from the paper: How is this extra regularizer term done (square error)?
+              Has some weight coefficient?
+    - Wrote actor loss:
+        Difficulties:
+        - Figure out whether the "sg(R) / S" in the equation should actually be
+          a "sg(R / S)" <- I think this makes more sense as it resembles reinforce AND
+          would NOT require backprop through dynamics.
+        - So for discrete actions, use simple reinforce loss with the R/S term as weights
+          (instead of reinforce's R - V).
+        - For continuous actions, use "straight through" gradients through the dynamics
+          of the dreamed trajectory, including re-parameterization of the action sampling step
+          such that it can be backprop'd. Then only update the policy's weights, NOT the world-model
+          ones. DreamerV2 ([2]) describes this in more detail.
+
+2023/02/15:
+    - Switch over to using actor-produced actions, instead of random ones everywhere.
+    - Ran CartPole experiments. Learns a decent policy after about 30-40 minutes on my
+      Win GPU.
+    - This seems plausible as the world model needs to be properly trained first to really
+      improve the policy.
+    - Added "unimix" for actor network (for discrete actions Categorical).
+    - Added a simple evaluator to the example scripts that runs n episodes after each
+      main iteration.
+
+
 OPEN PROBLEMS:
 - For dreaming: Should we sample from the Bernoulli distribution (for `continue` flags) or use greedy?
   We do use the deterministic mean for the dreamed rewards. Should probably do the same for `continues`.
@@ -218,9 +262,9 @@ OPEN PROBLEMS:
   already in [2] albeit due to a different reason: "To observe enough episode end during training, we sample
   the start index of each training sequence uniformly within the episode and then clip it to not exceed the
   episode length minus the training sequence length."
-- We are currently LayerNorm'ing the GRU output (the next h-state). Adding this provided
-  a big L_total reduction, however, wouldn't this mess with the GRU learning how to manipulate
-  its internal state vector properly?
+- We are currently NOT LayerNorm'ing the GRU output (the next h-state). Adding this used to provide
+  a big L_total reduction (in Atari), however, wouldn't this mess with the GRU learning how
+  to manipulate its internal state vector properly?
   Instead: Only layer-norm the input to the next NN (after the GRU), e.g. reward predictor, actor, vf, etc..
   BUT leave the actual h-states as-is (as the next GRU h-inputs).
   [2] states (w/o specifying, where exactly the LayerNorm would go:
@@ -230,15 +274,11 @@ OPEN PROBLEMS:
   "Figure J.1: Comparison of DreamerV2 to a version without layer norm in the GRU ....
     We find that the benefit of layer norm depends on the task at hand, increasing
     and decreasing performance on a roughly equal number of tasks"
-
-- We are not using `two_hot` yet at all, also not for the reward predictions, how come?
-    - As soon as I switch on two-hot for reward predictions, the total loss seems to increase
-      and not go down that much over time anymore (compared to when we use simple neg log p loss for
-      rewards). Must figure out why this is!
 - Figure out reason of weird actor loss in the paper.
-- Implement unimix categoricals for actor network (for discrete actions?)
-    - Done already for the z-generator.
 
+- [DONE] Implement unimix categoricals for actor network (for discrete actions?)
+    - Done already for the z-generator.
+    - Now also done for the actor network (2023/02/15).
 - [DONE] We are NOT using an extra MLP after the encoder stack (just a single dense RepresentationLayer to
   translate from flatten(4x4xC) -> (32x32)z OR from [flatten(4x4xC)+h_state] -> (32x32)z).
   In [2] it says: "Neural networks: The representation model is implemented as a Convolutional Neural Network
@@ -246,3 +286,9 @@ OPEN PROBLEMS:
     embedding and the deterministic recurrent state"
 - [DONE: information found in [2]] For now, I have been training deterministic Atari only:
   no sticky actions (action_repeat_probability=0.0), and frameskip=4
+- [DONE] We are not using `two_hot` yet at all, also not for the reward predictions, how come?
+    - As soon as I switch on two-hot for reward predictions, the total loss seems to increase
+      and not go down that much over time anymore (compared to when we use simple neg log p loss for
+      rewards). Must figure out why this is!
+    Solution: We are using it now everywhere and there is no big difference between two-hot
+        losses and their simpler counterparts: -logp([single reward]).

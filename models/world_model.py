@@ -86,10 +86,10 @@ class WorldModel(tf.keras.Model):
         self.decoder = decoder
 
     def call(self, inputs, *args, **kwargs):
-        return self.forward_train(inputs, *args, **kwargs)
+        return self.forward_inference(inputs, *args, **kwargs)
 
     @tf.function
-    def forward_inference(self, observations, actions, initial_h):
+    def forward_inference(self, observations, actions, initial_h, training=None):
         """Performs a forward step for inference.
 
         Works analogous to `forward_train`, except that all inputs are provided
@@ -109,14 +109,8 @@ class WorldModel(tf.keras.Model):
         Returns:
             The next deterministic h-state (h(t+1)) as predicted by the sequence model.
         """
-        # Compute bare encoder outs (not z; this done later with involvement of the
-        # sequence model).
-        # encoder_outs=[B, ...]
-        encoder_out = self.encoder(symlog(observations))
-        posterior_mlp_input = tf.concat([encoder_out, initial_h], axis=-1)
-        repr_input = self.posterior_mlp(posterior_mlp_input)
-        # Draw one z-sample (no need to return the distribution here).
-        z_t = self.posterior_representation_layer(repr_input, return_z_probs=False)
+        z_t = self.compute_posterior_z(observations=observations, initial_h=initial_h)
+
         # Compute next h using action and state.
         h_tp1 = self.sequence_model(
             # actions and z must have a T dimension.
@@ -262,6 +256,18 @@ class WorldModel(tf.keras.Model):
             # Next deterministic, continuous h-state (h(T+1)).
             "h_tp1": h_tp1,
         }
+
+    @tf.function
+    def compute_posterior_z(self, observations, initial_h):
+        # Compute bare encoder outs (not z; this done in next step with involvement of
+        # the previous output (initial_h) of the sequence model).
+        # encoder_outs=[B, ...]
+        encoder_out = self.encoder(symlog(observations))
+        posterior_mlp_input = tf.concat([encoder_out, initial_h], axis=-1)
+        repr_input = self.posterior_mlp(posterior_mlp_input)
+        # Draw one z-sample (no need to return the distribution here).
+        z_t = self.posterior_representation_layer(repr_input, return_z_probs=False)
+        return z_t
 
     @tf.function
     def _get_initial_h(self, batch_size: int):

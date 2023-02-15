@@ -47,12 +47,24 @@ class DreamerModel(tf.keras.Model):
         )
 
     def call(self, inputs, *args, **kwargs):
-        return self.forward_train(inputs, *args, **kwargs)
+        return self.forward_inference(inputs, *args, **kwargs)
 
     @tf.function
-    def forward_inference(self, observations, actions, initial_h):
+    def forward_inference(self, observations, initial_h, training=None):
         """TODO"""
-        return self.world_model.forward_inference(observations, actions, initial_h)
+        z_t = self.world_model.compute_posterior_z(observations, initial_h)
+
+        # Compute action using our actor network.
+        actions = self.actor(h=initial_h, z=z_t)
+
+        # Compute next h using action and state.
+        h_tp1 = self.world_model.sequence_model(
+            # actions and z must have a T dimension.
+            z=tf.expand_dims(z_t, axis=1),
+            a=tf.expand_dims(actions, axis=1),
+            h=initial_h,  # Initial state must NOT have a T dimension.
+        )
+        return actions, h_tp1
 
     @tf.function
     def forward_train(self, observations, actions, initial_h, training=None):
@@ -86,6 +98,7 @@ class DreamerModel(tf.keras.Model):
 
         # Dreamed actions.
         a_dreamed_t1_to_H = []
+        a_dreamed_distributions_t1_to_H = []
         # Dreamed rewards.
         r_dreamed_t1_to_H = []
         r_symlog_dreamed_t1_to_H = []
@@ -93,8 +106,9 @@ class DreamerModel(tf.keras.Model):
         c_dreamed_t1_to_H = []
         # Dreamed values.
         v_dreamed_t1_to_Hp1 = []
-        v_distributions_t1_to_Hp1 = []
+        v_dreamed_distributions_t1_to_Hp1 = []
         v_dreamed_ema_t1_to_Hp1 = []
+
         # GRU outputs.
         h_states_t1_to_Hp1 = [h]
         # Dynamics model outputs.
@@ -102,16 +116,17 @@ class DreamerModel(tf.keras.Model):
 
         for i in range(timesteps):
             # Compute `a` using actor network.
-            #a = self.actor(h=h, z=z)
-            #TODO: compute actor-produced actions, instead of random actions
-            a = tf.random.uniform(tf.shape(h)[0:1], 0, self.action_space.n, tf.int64)
-            #TODO: END: random actions
+            a, a_dist = self.actor(h=h, z=z, return_distribution=True)
+            # TEST: compute actor-produced actions, instead of random actions
+            # a = tf.random.uniform(tf.shape(h)[0:1], 0, self.action_space.n, tf.int64)
+            # END TEST: random actions
             a_dreamed_t1_to_H.append(a)
+            a_dreamed_distributions_t1_to_H.append(a_dist)
 
             # Compute the value estimates.
             v, v_distr = self.critic(h=h, z=z, return_distribution=True)
             v_dreamed_t1_to_Hp1.append(v)
-            v_distributions_t1_to_Hp1.append(v_distr)
+            v_dreamed_distributions_t1_to_Hp1.append(v_distr)
             v_ema = self.critic(h=h, z=z, return_distribution=False, use_ema=True)
             v_dreamed_ema_t1_to_Hp1.append(v_ema)
 
@@ -142,7 +157,7 @@ class DreamerModel(tf.keras.Model):
         # Predict the last value (for GAE computations).
         v, v_distr = self.critic(h=h, z=z, return_distribution=True)
         v_dreamed_t1_to_Hp1.append(v)
-        v_distributions_t1_to_Hp1.append(v_distr)
+        v_dreamed_distributions_t1_to_Hp1.append(v_distr)
         v_ema = self.critic(h=h, z=z, return_distribution=False, use_ema=True)
         v_dreamed_ema_t1_to_Hp1.append(v_ema)
 
@@ -170,8 +185,9 @@ class DreamerModel(tf.keras.Model):
 
             # Critic and action outputs are not grad-stopped for critic/actor learning.
             "actions_dreamed_t1_to_H": tf.stack(a_dreamed_t1_to_H, axis=1),
+            "actions_dreamed_distributions_t1_to_H": a_dreamed_distributions_t1_to_H,
             "values_dreamed_t1_to_Hp1": tf.stack(v_dreamed_t1_to_Hp1, axis=1),
-            "values_dreamed_distributions_t1_to_Hp1": v_distributions_t1_to_Hp1,
+            "values_dreamed_distributions_t1_to_Hp1": v_dreamed_distributions_t1_to_Hp1,
         }
 
         return ret
@@ -325,13 +341,13 @@ if __name__ == "__main__":
     world_model = dreamer_model.world_model
     # TODO: ugly hack (resulting from the insane fact that you cannot know
     #  an env's spaces prior to actually constructing an instance of it) :(
-    env_runner.model = world_model
+    env_runner.model = dreamer_model
 
     #obs = np.random.randint(0, 256, size=(B, burn_in_T, 64, 64, 3), dtype=np.uint8)
     #actions = np.random.randint(0, 2, size=(B, burn_in_T), dtype=np.uint8)
     #initial_h = np.random.random(size=(B, 256)).astype(np.float32)
 
-    sampled_obs, _, sampled_actions, _, _, _, sampled_h = env_runner.sample(random_actions=True)
+    sampled_obs, _, sampled_actions, _, _, _, sampled_h = env_runner.sample(random_actions=False)
 
     dreamed_trajectory = dreamer_model.dream_trajectory(
         sampled_obs[:, :burn_in_T],

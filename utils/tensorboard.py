@@ -99,7 +99,7 @@ def summarize_dreamed_trajectory_vs_samples(
         shape=(batch_size_B, dreamed_T) + sample["obs"].shape[2:],
     )
     # Observation MSE and - if applicable - images comparisons.
-    _summarize_obs(
+    mse_sampled_vs_dreamed_obs = _summarize_obs(
         computed_float_obs_B_T_dims=dreamed_obs,
         sampled_obs_B_T_dims=sample["obs"][:, burn_in_T:burn_in_T + dreamed_T],
         B=batch_size_B,
@@ -129,6 +129,7 @@ def summarize_dreamed_trajectory_vs_samples(
         T=dreamed_T,
         descr="dreamed(prior)",
     )
+    return mse_sampled_vs_dreamed_obs
 
 
 def summarize_world_model_losses(world_model_train_results):
@@ -167,8 +168,8 @@ def summarize_world_model_losses(world_model_train_results):
     tf.summary.scalar("L_rep", world_model_train_results["L_rep"])
 
     # Total loss.
-    tf.summary.histogram("L_total_BxT", world_model_train_results["L_total_BxT"])
-    tf.summary.scalar("L_total", world_model_train_results["L_total"])
+    tf.summary.histogram("L_world_model_total_BxT", world_model_train_results["L_world_model_total_BxT"])
+    tf.summary.scalar("L_world_model_total", world_model_train_results["L_world_model_total"])
 
 
 def _summarize_obs(*, computed_float_obs_B_T_dims, sampled_obs_B_T_dims, B, T, descr):
@@ -189,39 +190,41 @@ def _summarize_obs(*, computed_float_obs_B_T_dims, sampled_obs_B_T_dims, B, T, d
     # MSE is the mean over all feature dimensions.
     # Images: Flatten image dimensions (w, h, C); Vectors: Mean over all items, etc..
     # Then sum over time-axis and mean over batch-axis.
-    mse_sampled_vs_dreamed_obs = tf.losses.mse(
+    mse_sampled_vs_computed_obs = tf.losses.mse(
         tf.reshape(computed_float_obs_B_T_dims, (B, T, -1)),
         tf.reshape(tf.cast(sampled_obs_B_T_dims, tf.float32), shape=(B, T, -1)),
     )
     mse_sampled_vs_dreamed_obs = tf.reduce_mean(
-        tf.reduce_sum(mse_sampled_vs_dreamed_obs, axis=1)
+        tf.reduce_sum(mse_sampled_vs_computed_obs, axis=1)
     )
     tf.summary.scalar(
         f"MEAN(SUM(mse,T={T}),B={B})_sampled_vs_{descr}_obs",
-        mse_sampled_vs_dreamed_obs,
+        mse_sampled_vs_computed_obs,
     )
 
     # Images: Create image summary, comparing dreamed images with actual sampled ones.
     # Note: We only use images here from the first (0-index) batch item.
     if len(sampled_obs_B_T_dims.shape) in [2+2, 2+3]:
-        dreamed_images = tf.cast(
+        computed_images = tf.cast(
             tf.clip_by_value(computed_float_obs_B_T_dims, 0.0, 255.0), tf.uint8
         )
         # Concat sampled and dreamed images along the height axis (2) such that
         # real images show on top of respective predicted ones.
         # (B, w, h, C)
-        sampled_vs_dreamed_images = tf.concat(
-            [dreamed_images[0], sampled_obs_B_T_dims[0]], axis=1,
+        sampled_vs_computed_images = tf.concat(
+            [computed_images[0], sampled_obs_B_T_dims[0]], axis=1,
         )
         tf.summary.image(
             f"sampled_vs_{descr}_images[0th batch item]",
             (
-                tf.expand_dims(sampled_vs_dreamed_images, -1)
+                tf.expand_dims(sampled_vs_computed_images, -1)
                 if len(sampled_obs_B_T_dims.shape) == 2+2
-                else sampled_vs_dreamed_images
+                else sampled_vs_computed_images
             ),
             max_outputs=20,
         )
+
+    return mse_sampled_vs_computed_obs
 
 
 def _summarize_rewards(*, computed_rewards_B_T, sampled_rewards_B_T, B, T, descr):

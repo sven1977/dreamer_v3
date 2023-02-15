@@ -1,3 +1,8 @@
+"""
+[1] Mastering Diverse Domains through World Models - 2023
+D. Hafner, J. Pasukonis, J. Ba, T. Lillicrap
+https://arxiv.org/pdf/2301.04104v1.pdf
+"""
 import numpy as np
 import scipy
 import tensorflow as tf
