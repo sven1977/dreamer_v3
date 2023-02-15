@@ -194,7 +194,7 @@ def _summarize_obs(*, computed_float_obs_B_T_dims, sampled_obs_B_T_dims, B, T, d
         tf.reshape(computed_float_obs_B_T_dims, (B, T, -1)),
         tf.reshape(tf.cast(sampled_obs_B_T_dims, tf.float32), shape=(B, T, -1)),
     )
-    mse_sampled_vs_dreamed_obs = tf.reduce_mean(
+    mse_sampled_vs_computed_obs = tf.reduce_mean(
         tf.reduce_sum(mse_sampled_vs_computed_obs, axis=1)
     )
     tf.summary.scalar(
@@ -202,13 +202,13 @@ def _summarize_obs(*, computed_float_obs_B_T_dims, sampled_obs_B_T_dims, B, T, d
         mse_sampled_vs_computed_obs,
     )
 
-    # Images: Create image summary, comparing dreamed images with actual sampled ones.
+    # Images: Create image summary, comparing computed images with actual sampled ones.
     # Note: We only use images here from the first (0-index) batch item.
     if len(sampled_obs_B_T_dims.shape) in [2+2, 2+3]:
         computed_images = tf.cast(
             tf.clip_by_value(computed_float_obs_B_T_dims, 0.0, 255.0), tf.uint8
         )
-        # Concat sampled and dreamed images along the height axis (2) such that
+        # Concat sampled and computed images along the height axis (2) such that
         # real images show on top of respective predicted ones.
         # (B, w, h, C)
         sampled_vs_computed_images = tf.concat(
