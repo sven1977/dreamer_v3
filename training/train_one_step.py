@@ -12,7 +12,7 @@ from losses.world_model_losses import (
 )
 
 
-@tf.function
+#@tf.function
 def train_world_model_one_step(
     *,
     sample,
@@ -30,6 +30,10 @@ def train_world_model_one_step(
             actions=sample["actions"],
             initial_h=sample["h_states"],
         )
+        # TEST: OOM
+        print("\tafter world_model.forward_train:",
+              tf.config.experimental.get_memory_info('GPU:0')['current'])
+
         prediction_losses = world_model_prediction_losses(
             observations=sample["obs"],
             rewards=sample["rewards"],
@@ -39,11 +43,19 @@ def train_world_model_one_step(
             T=tf.convert_to_tensor(batch_length_T),
             forward_train_outs=forward_train_outs,
         )
+        # TEST: OOM
+        print("\tafter world_model_prediction_losses:",
+              tf.config.experimental.get_memory_info('GPU:0')['current'])
+
         L_dyn_BxT, L_rep_BxT = world_model_dynamics_and_representation_loss(
             B=tf.convert_to_tensor(batch_size_B),
             T=tf.convert_to_tensor(batch_length_T),
             forward_train_outs=forward_train_outs,
         )
+        # TEST: OOM
+        print("\tafter world_model_dynamics_and_representation_loss:",
+              tf.config.experimental.get_memory_info('GPU:0')['current'])
+
         L_pred_BxT = prediction_losses["total_loss"]
         L_pred = tf.reduce_mean(tf.reduce_sum(L_pred_BxT, axis=-1))
 
@@ -80,6 +92,10 @@ def train_world_model_one_step(
         clipped_gradients.append(tf.clip_by_value(grad, -grad_clip, grad_clip))
     # Apply gradients to our model.
     optimizer.apply_gradients(zip(clipped_gradients, world_model.trainable_variables))
+
+    # TEST: OOM
+    print("\tafter world_model.apply_gradients:",
+          tf.config.experimental.get_memory_info('GPU:0')['current'])
 
     return {
         # Forward train results.

@@ -97,7 +97,7 @@ env_runner_evaluation = EnvRunner(
 )
 
 # Whether to o nly train the world model (not the critic and actor networks).
-train_world_model_only = False
+train_world_model_only = True
 # Our DreamerV3 world model.
 from_checkpoint = None
 # Uncomment this next line to load from a saved model.
