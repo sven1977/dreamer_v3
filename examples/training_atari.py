@@ -121,6 +121,10 @@ else:
         action_space=env_runner.env.single_action_space,
         world_model=world_model,
     )
+
+#TEST: OOM
+print("current mem:", tf.config.experimental.get_memory_info('GPU:0')['current'])
+
 # TODO: ugly hack (resulting from the insane fact that you cannot know
 #  an env's spaces prior to actually constructing an instance of it) :(
 env_runner.model = dreamer_model
@@ -237,6 +241,9 @@ for iteration in range(1000):
             world_model=world_model,
             optimizer=world_model_optimizer,
         )
+        # TEST: OOM
+        print("\tafter world-model train:", tf.config.experimental.get_memory_info('GPU:0')['current'])
+
         summarize_forward_train_outs_vs_samples(
             forward_train_outs=world_model_train_results["forward_train_outs"],
             sample=sample,
@@ -273,6 +280,9 @@ for iteration in range(1000):
                     use_ema=True,
                 )
                 dreamer_model.critic.init_ema()
+                # TEST: OOM
+                print("\tafter critic EMA-init:",
+                    tf.config.experimental.get_memory_info('GPU:0')['current'])
 
             actor_critic_train_results = train_actor_and_critic_one_step(
                 forward_train_outs=forward_train_outs,
@@ -287,6 +297,10 @@ for iteration in range(1000):
                 entropy_scale=entropy_scale,
                 return_normalization_decay=return_normalization_decay,
             )
+            # TEST: OOM
+            print("\tafter actor/critic update:",
+                  tf.config.experimental.get_memory_info('GPU:0')['current'])
+
             # Summarize actor-critic loss stats.
             L_critic = actor_critic_train_results["L_critic"]
             tf.summary.scalar("L_critic", L_critic)
@@ -321,6 +335,10 @@ for iteration in range(1000):
                 timesteps=dreamed_T,  # dream for n timesteps
                 use_sampled_actions=True,  # use sampled actions, not the actor
             )
+            # TEST: OOM
+            print("\tafter eval dream w/ burn-in:",
+                  tf.config.experimental.get_memory_info('GPU:0')['current'])
+
             mse_sampled_vs_dreamed_obs = summarize_dreamed_trajectory_vs_samples(
                 dream_data,
                 sample,
@@ -343,6 +361,8 @@ for iteration in range(1000):
     # Save the model every N iterations (but not after the very first).
     if iteration != 0 and iteration % model_save_frequency_main_iters == 0:
         dreamer_model.save(f"checkpoints/dreamer_model_{iteration}")
+        print("\tafter model save:",
+              tf.config.experimental.get_memory_info('GPU:0')['current'])
 
     total_replayed_steps += replayed_steps
     print(
