@@ -8,7 +8,9 @@ D. Hafner, T. Lillicrap, M. Norouzi, J. Ba
 https://arxiv.org/pdf/2010.02193.pdf
 """
 
+import gc
 import os
+import yaml
 
 import numpy as np
 import tree  # pip install dm_tree
@@ -18,6 +20,8 @@ from ray.rllib.algorithms.algorithm_config import AlgorithmConfig
 
 from models.components.cnn_atari import CNNAtari
 from models.components.conv_transpose_atari import ConvTransposeAtari
+from models.components.mlp import MLP
+from models.components.vector_decoder import VectorDecoder
 from models.dreamer_model import DreamerModel
 from models.world_model import WorldModel
 from training.train_one_step import (
@@ -32,18 +36,23 @@ from utils.tensorboard import (
     summarize_world_model_losses,
 )
 
+with open("atari_pong.yaml", "r") as f:
+    options = yaml.safe_load(f)
+    assert len(options) == 1
+    options = next(iter(options.values()))
+
 # Create the checkpoint path, if it doesn't exist yet.
 os.makedirs("checkpoints", exist_ok=True)
 # Create the tensorboard summary data dir.
 os.makedirs("tensorboard", exist_ok=True)
 tb_writer = tf.summary.create_file_writer("tensorboard")
 # Every how many training steps do we write data to TB?
-summary_frequency_train_steps = 5
+summary_frequency_train_steps = options["summary_frequency_train_steps"]
 # Every how many main iterations do we evaluate?
-evaluation_frequency_main_iters = 1
-evaluation_num_episodes = 10
+evaluation_frequency_main_iters = options["evaluation_frequency_main_iters"]
+evaluation_num_episodes = options["evaluation_num_episodes"]
 # Every how many (main) iterations (sample + N train steps) do we save our model?
-model_save_frequency_main_iters = 10000
+model_save_frequency_main_iters = options["model_save_frequency_main_iters"]
 
 # Set batch size and -length according to [1]:
 batch_size_B = 16
@@ -64,8 +73,7 @@ return_normalization_decay = 0.99  # [1] eq. 11 and 12.
 # EnvRunner config (an RLlib algorithm config).
 config = (
     AlgorithmConfig()
-    #.environment("ALE/MontezumaRevenge-v5", env_config={
-    .environment("ALE/Pong-v5", env_config={
+    .environment(options["env"], env_config={
         # [2]: "We follow the evaluation protocol of Machado et al. (2018) with 200M
         # environment steps, action repeat of 4, a time limit of 108,000 steps per
         # episode that correspond to 30 minutes of game play, no access to life
@@ -76,7 +84,7 @@ config = (
         # already done by MaxAndSkip wrapper "frameskip": 4,  # "action repeat" (frameskip) == 4
         "repeat_action_probability": 0.25,  # "sticky actions"
         "full_action_space": True,  # "full action space"
-    })
+    } if options["is_atari"] else {})
     .rollouts(
         num_envs_per_worker=1,
         rollout_fragment_length=batch_length_T,
@@ -97,7 +105,7 @@ env_runner_evaluation = EnvRunner(
 )
 
 # Whether to o nly train the world model (not the critic and actor networks).
-train_world_model_only = True
+train_world_model_only = options["train_world_model_only"]
 # Our DreamerV3 world model.
 from_checkpoint = None
 # Uncomment this next line to load from a saved model.
@@ -105,15 +113,18 @@ from_checkpoint = None
 if from_checkpoint is not None:
     dreamer_model = tf.keras.models.load_model(from_checkpoint)
 else:
-    model_dimension = "S"
+    model_dimension = options["model_dimension"]
     world_model = WorldModel(
         model_dimension=model_dimension,
         action_space=env_runner.env.single_action_space,
         batch_length_T=batch_length_T,
-        encoder=CNNAtari(model_dimension=model_dimension),
+        encoder=CNNAtari(model_dimension=model_dimension) if options["is_atari"] else MLP(model_dimension=model_dimension),
         decoder=ConvTransposeAtari(
             model_dimension=model_dimension,
             gray_scaled=True,
+        ) if options["is_atari"] else VectorDecoder(
+            model_dimension=model_dimension,
+            observation_space=env_runner.env.single_observation_space,
         )
     )
     dreamer_model = DreamerModel(
@@ -152,7 +163,7 @@ critic_grad_clip = 100.0
 actor_grad_clip = 100.0
 
 # Training ratio: Ratio of replayed steps over env steps.
-training_ratio = 1024
+training_ratio = options["training_ratio"]
 
 total_env_steps = 0
 total_replayed_steps = 0
@@ -217,6 +228,11 @@ for iteration in range(1000):
 
     replayed_steps = 0
 
+    #TEST: re-use same sample.
+    #sample = buffer.sample(num_items=batch_size_B)
+    #sample = tree.map_structure(lambda v: tf.convert_to_tensor(v), sample)
+    #END TEST
+
     sub_iter = 0
     while replayed_steps / env_steps_last_sample < training_ratio:
         # Enable TB summaries this step?
@@ -235,9 +251,9 @@ for iteration in range(1000):
         # Perform one world-model training step.
         world_model_train_results = train_world_model_one_step(
             sample=sample,
-            batch_size_B=batch_size_B,
-            batch_length_T=batch_length_T,
-            grad_clip=world_model_grad_clip,
+            batch_size_B=tf.convert_to_tensor(batch_size_B),
+            batch_length_T=tf.convert_to_tensor(batch_length_T),
+            grad_clip=tf.convert_to_tensor(world_model_grad_clip),
             world_model=world_model,
             optimizer=world_model_optimizer,
         )
@@ -363,6 +379,15 @@ for iteration in range(1000):
         dreamer_model.save(f"checkpoints/dreamer_model_{iteration}")
         print("\tafter model save:",
               tf.config.experimental.get_memory_info('GPU:0')['current'])
+
+    #TEST: try trick from https://medium.com/dive-into-ml-ai/dealing-with-memory-leak-issue-in-keras-model-training-e703907a6501
+    gc.collect()
+    tf.keras.backend.clear_session()
+
+    tf.summary.scalar("MEM_gpu_memory_used",
+                      tf.config.experimental.get_memory_info('GPU:0')['current'])
+    tf.summary.scalar("MEM_gpu_memory_peak",
+                      tf.config.experimental.get_memory_info('GPU:0')['peak'])
 
     total_replayed_steps += replayed_steps
     print(

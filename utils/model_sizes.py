@@ -5,9 +5,9 @@ def get_cnn_multiplier(model_dimension, override):
         return override
 
     # Determine size of this model.
-    assert model_dimension in ["XS", "S", "M", "L", "XL"]
+    assert model_dimension in ["micro", "XS", "S", "M", "L", "XL"]
     cnn_multipliers = {
-        "XS": 24, "S": 32, "M": 48, "L": 64, "XL": 96
+        "micro": 8, "XS": 24, "S": 32, "M": 48, "L": 64, "XL": 96
     }
     return cnn_multipliers[model_dimension]
 

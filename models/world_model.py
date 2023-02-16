@@ -184,9 +184,8 @@ class WorldModel(tf.keras.Model):
                 repr_input,
                 return_z_probs=True,
             )
-            # z_t=[B, ]
+            # z_t=[B, num_categoricals, num_classes]
             z_probs_encoder.append(z_probs)
-            # Flatten z to [B, num_categoricals x num_classes]:
             zs.append(z_t)
 
             # Compute the predicted z_t (z^) using the dynamics model.

@@ -12,7 +12,7 @@ from losses.world_model_losses import (
 )
 
 
-#@tf.function
+@tf.function
 def train_world_model_one_step(
     *,
     sample,
@@ -31,8 +31,8 @@ def train_world_model_one_step(
             initial_h=sample["h_states"],
         )
         # TEST: OOM
-        print("\tafter world_model.forward_train:",
-              tf.config.experimental.get_memory_info('GPU:0')['current'])
+        #print("\tafter world_model.forward_train:",
+        #      tf.config.experimental.get_memory_info('GPU:0')['current'])
 
         prediction_losses = world_model_prediction_losses(
             observations=sample["obs"],
@@ -44,8 +44,8 @@ def train_world_model_one_step(
             forward_train_outs=forward_train_outs,
         )
         # TEST: OOM
-        print("\tafter world_model_prediction_losses:",
-              tf.config.experimental.get_memory_info('GPU:0')['current'])
+        #print("\tafter world_model_prediction_losses:",
+        #      tf.config.experimental.get_memory_info('GPU:0')['current'])
 
         L_dyn_BxT, L_rep_BxT = world_model_dynamics_and_representation_loss(
             B=tf.convert_to_tensor(batch_size_B),
@@ -53,8 +53,8 @@ def train_world_model_one_step(
             forward_train_outs=forward_train_outs,
         )
         # TEST: OOM
-        print("\tafter world_model_dynamics_and_representation_loss:",
-              tf.config.experimental.get_memory_info('GPU:0')['current'])
+        #print("\tafter world_model_dynamics_and_representation_loss:",
+        #      tf.config.experimental.get_memory_info('GPU:0')['current'])
 
         L_pred_BxT = prediction_losses["total_loss"]
         L_pred = tf.reduce_mean(tf.reduce_sum(L_pred_BxT, axis=-1))
@@ -94,8 +94,8 @@ def train_world_model_one_step(
     optimizer.apply_gradients(zip(clipped_gradients, world_model.trainable_variables))
 
     # TEST: OOM
-    print("\tafter world_model.apply_gradients:",
-          tf.config.experimental.get_memory_info('GPU:0')['current'])
+    #print("\tafter world_model.apply_gradients:",
+    #      tf.config.experimental.get_memory_info('GPU:0')['current'])
 
     return {
         # Forward train results.

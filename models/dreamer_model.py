@@ -218,16 +218,16 @@ class DreamerModel(tf.keras.Model):
                 `timesteps` (b/c actions needs to cover both the burn-in phase
                 as well as the actual dreaming phase).
         """
-        if use_sampled_actions:
-            assert actions.shape[1] == observations.shape[1] + timesteps, (
-                "Action timesteps provided ({actions.shape[1]}) seem wrong! Need "
-                f"exactly {observations.shape[1] + timesteps}."
-            )
-        else:
-            assert actions.shape[1] == observations.shape[1], (
-                "Action timesteps provided ({actions.shape[1]}) seem wrong! Need "
-                f"exactly {observations.shape[1]}."
-            )
+        #if use_sampled_actions:
+        #    assert actions.shape[1] == observations.shape[1] + timesteps, (
+        #        "Action timesteps provided ({actions.shape[1]}) seem wrong! Need "
+        #        f"exactly {observations.shape[1] + timesteps}."
+        #    )
+        #else:
+        #    assert actions.shape[1] == observations.shape[1], (
+        #        "Action timesteps provided ({actions.shape[1]}) seem wrong! Need "
+        #        f"exactly {observations.shape[1]}."
+        #    )
 
         # Produce initial N internal states (burn-in):
         h = initial_h
