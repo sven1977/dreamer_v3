@@ -76,8 +76,8 @@ class DreamerModel(tf.keras.Model):
         return self.world_model._get_initial_h(batch_size=batch_size)
 
     @tf.function
-    def dream_trajectory(self, h, z, timesteps):#, actions=None, use_sampled_actions=False):
-        """Dreams trajectory from batch of h- and z-states (and possibly actions).
+    def dream_trajectory(self, h, z, timesteps):
+        """Dreams trajectory from batch of h- and z-states.
 
         Args:
             h: The h-states (B, ...) as computed by a train forward pass. From
@@ -87,10 +87,6 @@ class DreamerModel(tf.keras.Model):
                 by a train forward pass. From each individual z-state in the given
                 batch,, we will branch off a dreamed trajectory of len `timesteps`.
             timesteps: The number of timesteps to dream for.
-            #actions: Optional actions batch in case `use_sampled_actions` is True.
-            #use_sampled_actions: Whether to use `actions` for the dreamed predictions
-            #    (rather than the actor network). If True, make sure that your
-            #    `actions` arg contains as many items as the `h` and `z` inputs.
         """
         assert h.shape[0] == z.shape[0], (
             "h- and z-shapes (batch size; 0th dim) must be the same!"
