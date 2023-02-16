@@ -384,10 +384,15 @@ for iteration in range(1000):
     gc.collect()
     tf.keras.backend.clear_session()
 
-    tf.summary.scalar("MEM_gpu_memory_used",
-                      tf.config.experimental.get_memory_info('GPU:0')['current'])
-    tf.summary.scalar("MEM_gpu_memory_peak",
-                      tf.config.experimental.get_memory_info('GPU:0')['peak'])
+    with tb_writer.as_default(step=total_train_steps):
+        tf.summary.scalar(
+            "MEM_gpu_memory_used",
+            tf.config.experimental.get_memory_info('GPU:0')['current'],
+        )
+        tf.summary.scalar(
+            "MEM_gpu_memory_peak",
+            tf.config.experimental.get_memory_info('GPU:0')['peak'],
+        )
 
     total_replayed_steps += replayed_steps
     print(
