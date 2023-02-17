@@ -170,6 +170,7 @@ total_replayed_steps = 0
 total_train_steps = 0
 
 for iteration in range(1000):
+    print(f"Main iteration {iteration}")
     # Push enough samples into buffer initially before we start training.
     env_steps = env_steps_last_sample = 0
     #TEST: Put only a single row in the buffer and try to memorize it.
@@ -201,22 +202,24 @@ for iteration in range(1000):
             "truncateds": truncateds,
             "h_states": h_states,
         })
-        print(f"Sampled env-steps={env_steps}; buffer-size={len(buffer)}")
+        trajectories_in_buffer = len(buffer)
+        ts_in_buffer = trajectories_in_buffer * batch_length_T
+        print(f"\tsampled env-steps={env_steps}; buffer size (ts)={ts_in_buffer}")
 
         if (
             # Got to have more timesteps than warm up setting.
-            len(buffer) * batch_length_T > warm_up_timesteps
+            ts_in_buffer > warm_up_timesteps
             # But also at least as many trajectories as the batch size B.
-            and len(buffer) >= batch_size_B
+            and trajectories_in_buffer >= batch_size_B
         ):
             break
 
     # Summarize actual environment interaction data.
     metrics = env_runner.get_metrics()
-    with tb_writer.as_default(step=total_train_steps):
+    with tb_writer.as_default(step=total_env_steps):
         # Summarize buffer length.
-        tf.summary.scalar("buffer_size_num_trajectories", len(buffer))
-        tf.summary.scalar("buffer_size_timesteps", len(buffer) * batch_length_T)
+        tf.summary.scalar("buffer_size_num_trajectories", trajectories_in_buffer)
+        tf.summary.scalar("buffer_size_timesteps", ts_in_buffer)
         # Summarize episode returns.
         if metrics["episode_returns"]:
             episode_return_mean = np.mean(metrics["episode_returns"])
@@ -225,6 +228,11 @@ for iteration in range(1000):
         tf.summary.histogram("ENV_actions_taken", actions)
 
     total_env_steps += env_steps
+
+    print(
+        f"\treplayed-steps learned: {total_replayed_steps}; "
+        f"env-steps taken: {total_env_steps}"
+    )
 
     replayed_steps = 0
 
@@ -235,10 +243,12 @@ for iteration in range(1000):
 
     sub_iter = 0
     while replayed_steps / env_steps_last_sample < training_ratio:
+        print(f"\tSub-iteration {iteration}/{sub_iter})")
+
         # Enable TB summaries this step?
         tb_ctx = None
         if total_train_steps % summary_frequency_train_steps == 0:
-            tb_ctx = tb_writer.as_default(step=total_train_steps)
+            tb_ctx = tb_writer.as_default(step=total_env_steps)
             tb_ctx.__enter__()
 
         # Draw a sample from the replay buffer.
@@ -258,7 +268,7 @@ for iteration in range(1000):
             optimizer=world_model_optimizer,
         )
         # TEST: OOM
-        print("\tafter world-model train:", tf.config.experimental.get_memory_info('GPU:0')['current'])
+        #print("\tafter world-model train:", tf.config.experimental.get_memory_info('GPU:0')['current'])
 
         summarize_forward_train_outs_vs_samples(
             forward_train_outs=world_model_train_results["forward_train_outs"],
@@ -268,9 +278,8 @@ for iteration in range(1000):
         )
         summarize_world_model_losses(world_model_train_results)
 
-        print(f"Iter {iteration}/{sub_iter})")
         print(
-            f"\tL_world_model_total={world_model_train_results['L_world_model_total'].numpy():.5f} ("
+            f"\t\tL_world_model_total={world_model_train_results['L_world_model_total'].numpy():.5f} ("
             f"L_pred={world_model_train_results['L_pred'].numpy():.5f}; "
             f"L_dyn={world_model_train_results['L_dyn'].numpy():.5f}; "
             f"L_rep={world_model_train_results['L_rep'].numpy():.5f})"
@@ -296,9 +305,9 @@ for iteration in range(1000):
                     use_ema=True,
                 )
                 dreamer_model.critic.init_ema()
-                # TEST: OOM
-                print("\tafter critic EMA-init:",
-                    tf.config.experimental.get_memory_info('GPU:0')['current'])
+                #TEST: OOM
+                #print("\tafter critic EMA-init:",
+                #    tf.config.experimental.get_memory_info('GPU:0')['current'])
 
             actor_critic_train_results = train_actor_and_critic_one_step(
                 forward_train_outs=forward_train_outs,
@@ -314,8 +323,8 @@ for iteration in range(1000):
                 return_normalization_decay=return_normalization_decay,
             )
             # TEST: OOM
-            print("\tafter actor/critic update:",
-                  tf.config.experimental.get_memory_info('GPU:0')['current'])
+            #print("\tafter actor/critic update:",
+            #      tf.config.experimental.get_memory_info('GPU:0')['current'])
 
             # Summarize actor-critic loss stats.
             L_critic = actor_critic_train_results["L_critic"]
@@ -327,7 +336,7 @@ for iteration in range(1000):
             tf.summary.histogram("L_actor_logp_loss_B_H", actor_critic_train_results["logp_loss_B_H"])
 
             print(
-                f"\tL_actor={L_actor.numpy():.5f} L_critic={L_critic.numpy():.5f}"
+                f"\t\tL_actor={L_actor.numpy():.5f} L_critic={L_critic.numpy():.5f}"
             )
 
         sub_iter += 1
@@ -336,14 +345,16 @@ for iteration in range(1000):
         if tb_ctx is not None:
             tb_ctx.__exit__(None, None, None)
 
+    total_replayed_steps += replayed_steps
+
     # EVALUATION.
     if total_train_steps % evaluation_frequency_main_iters == 0:
         print("\nEVALUATION:")
-        with tb_writer.as_default(step=total_train_steps):
+        with tb_writer.as_default(step=total_env_steps):
             # Dream a trajectory using the samples from the buffer and compare obs,
             # rewards, continues to the actually observed trajectory.
             dreamed_T = horizon_H
-            print(f"Dreaming trajectories (H={dreamed_T}) from all 1st timesteps drawn from buffer ...")
+            print(f"\tDreaming trajectories (H={dreamed_T}) from all 1st timesteps drawn from buffer ...")
             dream_data = dreamer_model.dream_trajectory_with_burn_in(
                 observations=sample["obs"][:, :burn_in_T],  # use only first burn_in_T obs
                 actions=sample["actions"][:, :burn_in_T + dreamed_T],  # use all actions from 0 to T (no actor)
@@ -351,9 +362,9 @@ for iteration in range(1000):
                 timesteps=dreamed_T,  # dream for n timesteps
                 use_sampled_actions=True,  # use sampled actions, not the actor
             )
-            # TEST: OOM
-            print("\tafter eval dream w/ burn-in:",
-                  tf.config.experimental.get_memory_info('GPU:0')['current'])
+            #TEST: OOM
+            #print("\tafter eval dream w/ burn-in:",
+            #      tf.config.experimental.get_memory_info('GPU:0')['current'])
 
             mse_sampled_vs_dreamed_obs = summarize_dreamed_trajectory_vs_samples(
                 dream_data,
@@ -377,14 +388,18 @@ for iteration in range(1000):
     # Save the model every N iterations (but not after the very first).
     if iteration != 0 and iteration % model_save_frequency_main_iters == 0:
         dreamer_model.save(f"checkpoints/dreamer_model_{iteration}")
-        print("\tafter model save:",
-              tf.config.experimental.get_memory_info('GPU:0')['current'])
+        #TEST
+        #print("\tafter model save:",
+        #      tf.config.experimental.get_memory_info('GPU:0')['current'])
 
     #TEST: try trick from https://medium.com/dive-into-ml-ai/dealing-with-memory-leak-issue-in-keras-model-training-e703907a6501
     gc.collect()
-    tf.keras.backend.clear_session()
+    #tf.keras.backend.clear_session()
 
-    with tb_writer.as_default(step=total_train_steps):
+    gpu_memory = tf.config.experimental.get_memory_info('GPU:0')
+    print(f"\nMEM (GPU) consumption: {gpu_memory['current']}")
+
+    with tb_writer.as_default(step=total_env_steps):
         tf.summary.scalar(
             "MEM_gpu_memory_used",
             tf.config.experimental.get_memory_info('GPU:0')['current'],
@@ -394,7 +409,5 @@ for iteration in range(1000):
             tf.config.experimental.get_memory_info('GPU:0')['peak'],
         )
 
-    total_replayed_steps += replayed_steps
-    print(
-        f"\treplayed-steps: {total_replayed_steps}; env-steps: {total_env_steps}"
-    )
+    # Main iteration done.
+    print("\n")
