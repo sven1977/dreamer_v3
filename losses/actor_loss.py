@@ -33,7 +33,8 @@ def actor_loss(
     actions_dreamed_one_hot = tf.one_hot(actions_dreamed, depth=num_actions)
     # Log probs of actions actually taken in the dream.
     logp_actions_dreamed_B_H = tf.reduce_sum(
-        actions_dreamed_one_hot * tf.math.log(probs_actions_B_H), axis=-1
+        actions_dreamed_one_hot * tf.math.log(probs_actions_B_H),
+        axis=-1,
     )
     # First term of loss function.
     # [1] eq. 11.

@@ -30,7 +30,7 @@ from training.train_one_step import (
 )
 from utils.env_runner import EnvRunner
 from utils.continuous_episode_replay_buffer import ContinuousEpisodeReplayBuffer
-from utils.cartpole_debug import CartPoleDebug  # registers CartPoleDebug-v0
+from utils.cartpole_debug import CartPoleDebug  # import registers `CartPoleDebug-v0`
 from utils.symlog import inverse_symlog
 from utils.tensorboard import (
     summarize_dreamed_trajectory_vs_samples,
@@ -68,7 +68,7 @@ horizon_H = 15
 
 # Actor/critic hyperparameters.
 discount_gamma = 0.997  # [1] eq. 7.
-gae_lambda = 0.95  # [1] eq. 7.
+gae_lambda = options.get("gae_lambda", 0.95)  # [1] eq. 7.
 entropy_scale = 3e-4  # [1] eq. 11.
 return_normalization_decay = 0.99  # [1] eq. 11 and 12.
 
@@ -350,7 +350,7 @@ for iteration in range(1000):
             if total_train_steps % summary_frequency_train_steps == 0:
                 #TODO: put all of this block into tensorboard module.
                 #TODO: Make this work with any renderable env.
-                if env_runner.config.env == "CartPoleDebug-v0":
+                if env_runner.config.env in ["CartPoleDebug-v0", "CartPole-v1"]:
                     from utils.cartpole_debug import create_cartpole_dream_image
                     dream_data = actor_critic_train_results["dream_data"]
                     dreamed_obs_B_H = reconstruct_obs_from_h_and_z(
@@ -360,22 +360,20 @@ for iteration in range(1000):
                         obs_dims_shape=sample["obs"].shape[2:],
                     )
                     # Take 0th dreamed trajectory and produce series of images.
-                    dream_seq = []
                     for t in range(len(dreamed_obs_B_H[0])):
-                        dream_seq.append(create_cartpole_dream_image(
+                        img = create_cartpole_dream_image(
                             dreamed_obs=dreamed_obs_B_H[0][t],
-                            dreamed_V=inverse_symlog(dream_data["values_symlog_dreamed_t1_to_Hp1"][0][t]),
+                            dreamed_V=dream_data["values_dreamed_t1_to_Hp1"][0][t],
                             dreamed_a=dream_data["actions_dreamed_t1_to_H"][0][t],
                             dreamed_r=dream_data["rewards_dreamed_t1_to_H"][0][t],
                             dreamed_c=dream_data["continues_dreamed_t1_to_H"][0][t],
-                            value_target=inverse_symlog(actor_critic_train_results["value_targets_B_H"][0][t]),
+                            value_target=actor_critic_train_results["value_targets_B_H"][0][t],
                             as_tensor=True,
-                        ))
-                    tf.summary.image(
-                        "dreamed_trajectories_for_critic_actor_learning",
-                        tf.stack(dream_seq, axis=0),
-                        max_outputs=horizon_H,
-                    )
+                        )
+                        tf.summary.image(
+                            f"dreamed_trajectories_for_critic_actor_learning[B=0,T={t}]",
+                            tf.expand_dims(img, axis=0),
+                        )
 
                 # Summarize actor-critic loss stats.
                 tf.summary.scalar("L_critic", L_critic)

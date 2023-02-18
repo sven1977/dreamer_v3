@@ -7,6 +7,7 @@ import numpy as np
 import scipy
 import tensorflow as tf
 
+from utils.symlog import symlog
 from utils.two_hot import two_hot
 
 
@@ -18,40 +19,47 @@ def critic_loss(
 ):
     value_targets_B_H = compute_value_targets(
         # Learn critic in symlog'd space.
-        rewards=dream_data["rewards_symlog_dreamed_t1_to_H"],
+        rewards=dream_data["rewards_dreamed_t1_to_H"],
         continues=dream_data["continues_dreamed_t1_to_H"],
-        value_predictions=dream_data["values_symlog_dreamed_t1_to_Hp1"],
+        value_predictions=dream_data["values_dreamed_t1_to_Hp1"],
         gamma=gamma,
         lambda_=lambda_,
     )
+    value_symlog_targets_B_H = symlog(value_targets_B_H)
     # value_targets=(B, T)
-    value_targets_BxH = tf.reshape(value_targets_B_H, (-1,))
-    value_targets_BxH_two_hot = two_hot(value_targets_BxH)
-    value_targets_two_hot_B_H = tf.reshape(
-        value_targets_BxH_two_hot,
-        shape=value_targets_B_H.shape[:2] + value_targets_BxH_two_hot.shape[-1],
+    value_symlog_targets_BxH = tf.reshape(value_symlog_targets_B_H, (-1,))
+    value_symlog_targets_BxH_two_hot = two_hot(value_symlog_targets_BxH)
+    value_symlog_targets_two_hot_B_H = tf.reshape(
+        value_symlog_targets_BxH_two_hot,
+        shape=value_symlog_targets_B_H.shape[:2] + value_symlog_targets_BxH_two_hot.shape[-1],
     )
     # Get (B x T x probs) tensor from return distributions.
-    value_probs_B_H = tf.stack(
+    value_symlog_probs_B_H = tf.stack(
         [d.probs for d in dream_data["values_symlog_dreamed_distributions_t1_to_Hp1"][:-1]],
         axis=1,
     )
     # Vector product to reduce over return-buckets. [1] eq. 10.
-    value_logp_B_H = tf.reduce_sum(
+    value_symlog_logp_B_H = tf.reduce_sum(
         tf.multiply(
-            tf.stop_gradient(value_targets_two_hot_B_H),
-            tf.math.log(value_probs_B_H),
+            tf.stop_gradient(value_symlog_targets_two_hot_B_H),
+            tf.math.log(value_symlog_probs_B_H),
         ),
         axis=-1,
     )
+
     # Compute EMA L2-regularization loss.
-    ema_regularization_loss_B_H = 0.5 * tf.math.square(
-        dream_data["values_symlog_dreamed_t1_to_Hp1"][:, :-1] - tf.stop_gradient(
-            dream_data["values_symlog_dreamed_ema_t1_to_Hp1"][:, :-1]
-        )
+    value_symlog_ema_probs_B_H = tf.stack(
+        [d.probs for d in dream_data["v_symlog_dreamed_distributions_ema_t1_to_Hp1"][:-1]],
+        axis=1,
+    )
+    ema_regularization_loss_B_H = 0.5 * tf.reduce_sum(
+        tf.math.square(
+            value_symlog_probs_B_H - tf.stop_gradient(value_symlog_ema_probs_B_H)
+        ),
+        axis=-1,
     )
 
-    L_critic_B_H = -value_logp_B_H + ema_regularization_loss_B_H
+    L_critic_B_H = -value_symlog_logp_B_H + ema_regularization_loss_B_H
 
     # Reduce over H- (time) axis (sum) and then B-axis (mean).
     L_critic = tf.reduce_mean(tf.reduce_sum(L_critic_B_H, axis=-1))
@@ -60,14 +68,23 @@ def critic_loss(
         "L_critic": L_critic,
         "L_critic_B_H": L_critic_B_H,
         "value_targets_B_H": value_targets_B_H,
+        "value_symlog_targets_B_H": value_symlog_targets_B_H,
         #"value_probs_B_H": value_probs_B_H,
-        "value_logp_B_H": value_logp_B_H,
+        "value_symlog_logp_B_H": value_symlog_logp_B_H,
         "ema_regularization_loss_B_H": ema_regularization_loss_B_H,
     }
 
 
 def compute_value_targets(rewards, continues, value_predictions, gamma, lambda_):
-    """All args are (B, T, ...)."""
+    """All args are (B, T, ...) and in non-symlog'd (real) space.
+
+    The latter is important b/c log(a+b) != log(a) + log(b).
+    See [1] eq. 8 and 10.
+
+    Thus, targets are always returned in real (non-symlog'd space).
+    They need to be re-symlog'd before computing the critic loss from them (b/c the
+    critic does produce predictions in symlog space).
+    """
     last_Rs = value_predictions[:, -1]
     Rs = []
     # Loop through reversed timesteps (axis=1).
