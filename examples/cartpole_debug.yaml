@@ -1,0 +1,14 @@
+cartpole-debug-experiment:
+  env: CartPoleDebug-v0
+  is_atari: false
+
+  model_dimension: XS
+
+  train_world_model_only: false
+
+  training_ratio: 1024
+
+  summary_frequency_train_steps: 5
+  evaluation_frequency_main_iters:  1
+  evaluation_num_episodes: 10
+  model_save_frequency_main_iters: 1000

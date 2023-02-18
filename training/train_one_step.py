@@ -165,8 +165,12 @@ def train_actor_and_critic_one_step(
             return_normalization_decay=return_normalization_decay
         )
 
-    L_actor = actor_loss_results["L_actor"]
-    L_critic = critic_loss_results["L_critic"]
+    results = critic_loss_results.copy()
+    results.update(actor_loss_results)
+    results["dream_data"] = dream_data
+
+    L_actor = results["L_actor"]
+    L_critic = results["L_critic"]
 
     # Get the gradients from the tape.
     actor_gradients = tape.gradient(
@@ -200,7 +204,6 @@ def train_actor_and_critic_one_step(
     # Update EMA weights of the critic.
     dreamer_model.critic.update_ema()
 
-    loss_results = dict(actor_loss_results, **critic_loss_results)
-    loss_results["actor_gradients"] = actor_gradients
-    loss_results["critic_gradients"] = critic_gradients
-    return loss_results
+    results["actor_gradients"] = actor_gradients
+    results["critic_gradients"] = critic_gradients
+    return results

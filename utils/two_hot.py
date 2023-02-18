@@ -48,6 +48,8 @@ def two_hot(
     k = tf.math.floor(idx)
     # k+1
     kp1 = tf.math.ceil(idx)
+    # In case k == kp1 (idx is exactly on the bucket boundary), move kp1 up by 1.0.
+    # Otherwise, this would result in a NaN in the returned two-hot tensor.
     kp1 = tf.where(k == kp1, kp1 + 1.0, kp1)
     # The actual values found at k and k+1 inside the set of buckets.
     values_k = lower_bound + k * bucket_delta
@@ -73,7 +75,7 @@ def two_hot(
 
 if __name__ == "__main__":
     # Test value that's exactly on one of the bucket boundaries. This used to return
-    # a two-hot vector with a NaN in it as k == kp1 at that boundary.
+    # a two-hot vector with a NaN in it, as k == kp1 at that boundary.
     print(two_hot(tf.convert_to_tensor([0.0]), 10, -5.0, 5.0))
 
     # Test violating the boundaries (upper and lower).

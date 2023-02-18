@@ -20,7 +20,7 @@ def critic_loss(
         # Learn critic in symlog'd space.
         rewards=dream_data["rewards_symlog_dreamed_t1_to_H"],
         continues=dream_data["continues_dreamed_t1_to_H"],
-        value_predictions=dream_data["values_dreamed_t1_to_Hp1"],
+        value_predictions=dream_data["values_symlog_dreamed_t1_to_Hp1"],
         gamma=gamma,
         lambda_=lambda_,
     )
@@ -33,18 +33,21 @@ def critic_loss(
     )
     # Get (B x T x probs) tensor from return distributions.
     value_probs_B_H = tf.stack(
-        [d.probs for d in dream_data["values_dreamed_distributions_t1_to_Hp1"][:-1]],
+        [d.probs for d in dream_data["values_symlog_dreamed_distributions_t1_to_Hp1"][:-1]],
         axis=1,
     )
     # Vector product to reduce over return-buckets. [1] eq. 10.
     value_logp_B_H = tf.reduce_sum(
-        tf.stop_gradient(value_targets_two_hot_B_H) * value_probs_B_H,
+        tf.multiply(
+            tf.stop_gradient(value_targets_two_hot_B_H),
+            tf.math.log(value_probs_B_H),
+        ),
         axis=-1,
     )
     # Compute EMA L2-regularization loss.
     ema_regularization_loss_B_H = 0.5 * tf.math.square(
-        dream_data["values_dreamed_t1_to_Hp1"][:,:-1] - tf.stop_gradient(
-            dream_data["values_dreamed_ema_t1_to_Hp1"][:,:-1]
+        dream_data["values_symlog_dreamed_t1_to_Hp1"][:, :-1] - tf.stop_gradient(
+            dream_data["values_symlog_dreamed_ema_t1_to_Hp1"][:, :-1]
         )
     )
 
@@ -57,7 +60,7 @@ def critic_loss(
         "L_critic": L_critic,
         "L_critic_B_H": L_critic_B_H,
         "value_targets_B_H": value_targets_B_H,
-        "value_probs_B_H": value_probs_B_H,
+        #"value_probs_B_H": value_probs_B_H,
         "value_logp_B_H": value_logp_B_H,
         "ema_regularization_loss_B_H": ema_regularization_loss_B_H,
     }
@@ -68,13 +71,13 @@ def compute_value_targets(rewards, continues, value_predictions, gamma, lambda_)
     last_Rs = value_predictions[:, -1]
     Rs = []
     # Loop through reversed timesteps (axis=1).
-    for i in reversed(range(rewards.shape.as_list()[1])):
+    for i in reversed(range(rewards.shape[1])):
         Rt = rewards[:, i] + gamma * continues[:, i] * ((1.0 - lambda_) * value_predictions[:, i+1] + lambda_ * last_Rs)
         last_Rs = Rt
         Rs.append(Rt)
     # Reverse along time axis and cut the last entry (value estimate at very end cannot
     # be learnt from as it's the same as the ... well ... value estimate).
-    return tf.reverse(tf.stack(Rs, axis=1), axis=[0])
+    return tf.reverse(tf.stack(Rs, axis=1), axis=[1])
 
 
 def _rllib_gae(rewards, value_predictions, last_r, gamma, lambda_):
@@ -128,14 +131,23 @@ if __name__ == "__main__":
         0.9,
     ))
 
-    r = np.array([0.0, 1.0, 2.0, 3.0, 4.0])
-    c = np.array([1.0, 0.0, 1.0, 1.0, 1.0])
-    vf = np.array([2.0, 2.5, 3.1, -0.1, 0.3])
-    last_r = 0.5
-    gamma = 0.94
-    lambda_ = 0.7
+    r = np.array([
+        [0.0, 1.0, 2.0, 3.0, 4.0],
+        #[1.0, 1.0, 1.0, 1.0, 1.0],
+    ])
+    c = np.array([
+        [1.0, 1.0, 1.0, 1.0, 1.0],
+        #[1.0, 0.0, 1.0, 1.0, 1.0],
+    ])
+    vf = np.array([
+        [13.0, 13.0, 12.0, 10.0, 7.0, 3.0],  # naive sum of future rewards
+        #[7.0, 6.0, 5.0, 4.0, 3.0, 2.0],  # naive sum of future rewards
+    ])
+    last_r = vf[:, -1]
+    gamma = 1.0#0.99
+    lambda_ = 1.0#0.7
 
     # my GAE:
-    print(compute_value_targets(r, c, vf, last_r, gamma, lambda_))
+    print(compute_value_targets(r, c, vf, gamma, lambda_))
     # RLlib GAE
-    print(_rllib_gae(r, vf, last_r, gamma, lambda_))
+    #print(_rllib_gae(r, vf[:, -1], last_r, gamma, lambda_))

@@ -3,6 +3,34 @@ import tensorflow as tf
 from utils.symlog import inverse_symlog
 
 
+def reconstruct_obs_from_h_and_z(
+    h_t1_to_Tp1,
+    z_t1_to_T,
+    dreamer_model,
+    obs_dims_shape,
+):
+    """Returns """
+    shape = tf.shape(z_t1_to_T)
+    B = shape[0]
+    T = shape[1]
+    # Compute actual observations using h and z and the decoder net.
+    # Note that the last h-state (T+1) is NOT used here as it's already part of
+    # a new trajectory.
+    _, reconstructed_obs_distr_BxT = dreamer_model.world_model.decoder(
+        # Fold time rank.
+        h=tf.reshape(h_t1_to_Tp1[:, :-1], shape=(B * T, -1)),
+        z=tf.reshape(z_t1_to_T, shape=(B * T,) + z_t1_to_T.shape[2:]),
+    )
+    # Unfold time rank again.
+    reconstructed_obs_B_T = tf.reshape(
+        # Use mean() of the Gaussian, no sample!
+        inverse_symlog(reconstructed_obs_distr_BxT.loc),
+        shape=(B, T) + obs_dims_shape,
+    )
+    # Return inverse symlog'd (real env obs space) reconstructed observations.
+    return reconstructed_obs_B_T
+
+
 def summarize_forward_train_outs_vs_samples(
     forward_train_outs,
     sample,
@@ -39,7 +67,6 @@ def summarize_forward_train_outs_vs_samples(
         T=batch_length_T,
         descr="predicted(posterior)",
     )
-
     predicted_rewards = tf.reshape(
         inverse_symlog(forward_train_outs["reward_distribution"].mean()),
         shape=(batch_size_B, batch_length_T),
@@ -77,26 +104,11 @@ def summarize_dreamed_trajectory_vs_samples(
     dreamer_model,
 ):
     # Obs MSE.
-    # Compute actual observations using h and z and the decoder net.
-    # Note that the last h-state (T+1) is NOT used here as it's already part of
-    # a new trajectory.
-    _, dreamed_obs_distr = dreamer_model.world_model.decoder(
-        h=tf.reshape(
-            dream_data["h_states_t1_to_T+1"][:, :-1],
-            shape=(batch_size_B * dreamed_T, -1),
-        ),
-        z=tf.reshape(
-            dream_data["z_states_prior_t1_to_T"],
-            shape=(
-                (batch_size_B * dreamed_T)
-                + dream_data["z_states_prior_t1_to_T"].shape[2:]
-            ),
-        ),
-    )
-    dreamed_obs = tf.reshape(
-        # Use mean() of the Gaussian, no sample!
-        inverse_symlog(dreamed_obs_distr.loc),
-        shape=(batch_size_B, dreamed_T) + sample["obs"].shape[2:],
+    dreamed_obs = reconstruct_obs_from_h_and_z(
+        h_t1_to_Tp1=dream_data["h_states_t1_to_Tp1"],
+        z_t1_to_T=dream_data["z_states_prior_t1_to_T"],
+        dreamer_model=dreamer_model,
+        obs_dims_shape=sample["obs"].shape[2:],
     )
     # Observation MSE and - if applicable - images comparisons.
     mse_sampled_vs_dreamed_obs = _summarize_obs(
@@ -133,8 +145,6 @@ def summarize_dreamed_trajectory_vs_samples(
 
 
 def summarize_world_model_losses(world_model_train_results):
-    res = world_model_train_results
-
     tf.summary.histogram("L_pred_BxT", world_model_train_results["L_pred_BxT"])
     tf.summary.scalar("L_pred", world_model_train_results["L_pred"])
 

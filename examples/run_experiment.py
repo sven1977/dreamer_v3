@@ -30,9 +30,12 @@ from training.train_one_step import (
 )
 from utils.env_runner import EnvRunner
 from utils.continuous_episode_replay_buffer import ContinuousEpisodeReplayBuffer
+from utils.cartpole_debug import CartPoleDebug  # registers CartPoleDebug-v0
+from utils.symlog import inverse_symlog
 from utils.tensorboard import (
     summarize_dreamed_trajectory_vs_samples,
     summarize_forward_train_outs_vs_samples,
+    reconstruct_obs_from_h_and_z,
     summarize_world_model_losses,
 )
 
@@ -204,7 +207,7 @@ for iteration in range(1000):
         })
         trajectories_in_buffer = len(buffer)
         ts_in_buffer = trajectories_in_buffer * batch_length_T
-        print(f"\tsampled env-steps={env_steps}; buffer size (ts)={ts_in_buffer}")
+        print(f"\tsampled env-steps={env_steps}; buffer size (ts)={ts_in_buffer}; buffer size (trajectories)={trajectories_in_buffer}")
 
         if (
             # Got to have more timesteps than warm up setting.
@@ -241,6 +244,8 @@ for iteration in range(1000):
     #sample = tree.map_structure(lambda v: tf.convert_to_tensor(v), sample)
     #END TEST
 
+    print()
+
     sub_iter = 0
     while replayed_steps / env_steps_last_sample < training_ratio:
         print(f"\tSub-iteration {iteration}/{sub_iter})")
@@ -267,16 +272,20 @@ for iteration in range(1000):
             world_model=world_model,
             optimizer=world_model_optimizer,
         )
-        # TEST: OOM
-        #print("\tafter world-model train:", tf.config.experimental.get_memory_info('GPU:0')['current'])
+        # Summarize world model.
+        if iteration == 0 and sub_iter == 0:
+            # Dummy forward pass to be able to produce summary.
+            world_model(sample["obs"][:, 0], sample["actions"][:, 0], sample["h_states"])
+            world_model.summary()
 
-        summarize_forward_train_outs_vs_samples(
-            forward_train_outs=world_model_train_results["forward_train_outs"],
-            sample=sample,
-            batch_size_B=batch_size_B,
-            batch_length_T=batch_length_T,
-        )
-        summarize_world_model_losses(world_model_train_results)
+        if total_train_steps % summary_frequency_train_steps == 0:
+            summarize_forward_train_outs_vs_samples(
+                forward_train_outs=world_model_train_results["forward_train_outs"],
+                sample=sample,
+                batch_size_B=batch_size_B,
+                batch_length_T=batch_length_T,
+            )
+            summarize_world_model_losses(world_model_train_results)
 
         print(
             f"\t\tL_world_model_total={world_model_train_results['L_world_model_total'].numpy():.5f} ("
@@ -305,9 +314,6 @@ for iteration in range(1000):
                     use_ema=True,
                 )
                 dreamer_model.critic.init_ema()
-                #TEST: OOM
-                #print("\tafter critic EMA-init:",
-                #    tf.config.experimental.get_memory_info('GPU:0')['current'])
 
             actor_critic_train_results = train_actor_and_critic_one_step(
                 forward_train_outs=forward_train_outs,
@@ -322,18 +328,64 @@ for iteration in range(1000):
                 entropy_scale=entropy_scale,
                 return_normalization_decay=return_normalization_decay,
             )
-            # TEST: OOM
-            #print("\tafter actor/critic update:",
-            #      tf.config.experimental.get_memory_info('GPU:0')['current'])
-
-            # Summarize actor-critic loss stats.
             L_critic = actor_critic_train_results["L_critic"]
-            tf.summary.scalar("L_critic", L_critic)
             L_actor = actor_critic_train_results["L_actor"]
-            tf.summary.scalar("L_actor", L_actor)
-            tf.summary.scalar("L_actor_action_entropy", actor_critic_train_results["action_entropy"])
-            tf.summary.histogram("L_actor_scaled_value_targets_B_H", actor_critic_train_results["scaled_value_targets_B_H"])
-            tf.summary.histogram("L_actor_logp_loss_B_H", actor_critic_train_results["logp_loss_B_H"])
+
+            # Summarize actor/critic models.
+            if iteration == 0 and sub_iter == 0:
+                # Dummy forward pass to be able to produce summary.
+                dreamer_model.actor(
+                    actor_critic_train_results["dream_data"]["h_states_t1_to_Hp1"][:, 0],
+                    actor_critic_train_results["dream_data"]["z_states_prior_t1_to_H"][:, 0],
+                )
+                dreamer_model.actor.summary()
+                dreamer_model.critic(
+                    actor_critic_train_results["dream_data"]["h_states_t1_to_Hp1"][:, 0],
+                    actor_critic_train_results["dream_data"]["z_states_prior_t1_to_H"][:, 0],
+                )
+                dreamer_model.critic.summary()
+
+            # Analyze generated dream data for its suitability in training the critic
+            # and actors.
+            if total_train_steps % summary_frequency_train_steps == 0:
+                #TODO: put all of this block into tensorboard module.
+                #TODO: Make this work with any renderable env.
+                if env_runner.config.env == "CartPoleDebug-v0":
+                    from utils.cartpole_debug import create_cartpole_dream_image
+                    dream_data = actor_critic_train_results["dream_data"]
+                    dreamed_obs_B_H = reconstruct_obs_from_h_and_z(
+                        h_t1_to_Tp1=dream_data["h_states_t1_to_Hp1"],
+                        z_t1_to_T=dream_data["z_states_prior_t1_to_H"],
+                        dreamer_model=dreamer_model,
+                        obs_dims_shape=sample["obs"].shape[2:],
+                    )
+                    # Take 0th dreamed trajectory and produce series of images.
+                    dream_seq = []
+                    for t in range(len(dreamed_obs_B_H[0])):
+                        dream_seq.append(create_cartpole_dream_image(
+                            dreamed_obs=dreamed_obs_B_H[0][t],
+                            dreamed_V=inverse_symlog(dream_data["values_symlog_dreamed_t1_to_Hp1"][0][t]),
+                            dreamed_a=dream_data["actions_dreamed_t1_to_H"][0][t],
+                            dreamed_r=dream_data["rewards_dreamed_t1_to_H"][0][t],
+                            dreamed_c=dream_data["continues_dreamed_t1_to_H"][0][t],
+                            value_target=inverse_symlog(actor_critic_train_results["value_targets_B_H"][0][t]),
+                            as_tensor=True,
+                        ))
+                    tf.summary.image(
+                        "dreamed_trajectories_for_critic_actor_learning",
+                        tf.stack(dream_seq, axis=0),
+                        max_outputs=horizon_H,
+                    )
+
+                # Summarize actor-critic loss stats.
+                tf.summary.scalar("L_critic", L_critic)
+                tf.summary.histogram("L_critic_value_targets", actor_critic_train_results["value_targets_B_H"])
+                tf.summary.histogram("L_critic_ema_regularization_loss_B_H", actor_critic_train_results["ema_regularization_loss_B_H"])
+
+                tf.summary.scalar("L_actor", L_actor)
+                tf.summary.scalar("L_actor_action_entropy", actor_critic_train_results["action_entropy"])
+                tf.summary.histogram("L_actor_scaled_value_targets_B_H", actor_critic_train_results["scaled_value_targets_B_H"])
+                tf.summary.histogram("L_actor_logp_loss_B_H", actor_critic_train_results["logp_loss_B_H"])
 
             print(
                 f"\t\tL_actor={L_actor.numpy():.5f} L_critic={L_critic.numpy():.5f}"
@@ -362,9 +414,6 @@ for iteration in range(1000):
                 timesteps=dreamed_T,  # dream for n timesteps
                 use_sampled_actions=True,  # use sampled actions, not the actor
             )
-            #TEST: OOM
-            #print("\tafter eval dream w/ burn-in:",
-            #      tf.config.experimental.get_memory_info('GPU:0')['current'])
 
             mse_sampled_vs_dreamed_obs = summarize_dreamed_trajectory_vs_samples(
                 dream_data,
@@ -388,26 +437,19 @@ for iteration in range(1000):
     # Save the model every N iterations (but not after the very first).
     if iteration != 0 and iteration % model_save_frequency_main_iters == 0:
         dreamer_model.save(f"checkpoints/dreamer_model_{iteration}")
-        #TEST
-        #print("\tafter model save:",
-        #      tf.config.experimental.get_memory_info('GPU:0')['current'])
 
     #TEST: try trick from https://medium.com/dive-into-ml-ai/dealing-with-memory-leak-issue-in-keras-model-training-e703907a6501
     gc.collect()
     #tf.keras.backend.clear_session()
 
-    gpu_memory = tf.config.experimental.get_memory_info('GPU:0')
-    print(f"\nMEM (GPU) consumption: {gpu_memory['current']}")
-
-    with tb_writer.as_default(step=total_env_steps):
-        tf.summary.scalar(
-            "MEM_gpu_memory_used",
-            tf.config.experimental.get_memory_info('GPU:0')['current'],
-        )
-        tf.summary.scalar(
-            "MEM_gpu_memory_peak",
-            tf.config.experimental.get_memory_info('GPU:0')['peak'],
-        )
+    try:
+        gpu_memory = tf.config.experimental.get_memory_info('GPU:0')
+        print(f"\nMEM (GPU) consumption: {gpu_memory['current']}")
+        with tb_writer.as_default(step=total_env_steps):
+            tf.summary.scalar("MEM_gpu_memory_used", gpu_memory['current'])
+            tf.summary.scalar("MEM_gpu_memory_peak", gpu_memory['peak'])
+    except ValueError:
+        pass
 
     # Main iteration done.
     print("\n")
