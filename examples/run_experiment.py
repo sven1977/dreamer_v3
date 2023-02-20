@@ -256,7 +256,7 @@ for iteration in range(1000):
             tb_ctx = tb_writer.as_default(step=total_env_steps)
             tb_ctx.__enter__()
 
-        # Draw a sample from the replay buffer.
+        # Draw a new sample from the replay buffer.
         sample = buffer.sample(num_items=batch_size_B)
         replayed_steps += batch_size_B * batch_length_T
 

@@ -23,7 +23,7 @@ def world_model_prediction_losses(
 ):
     obs_distr = forward_train_outs["obs_distribution"]
     # Learn to produce symlog'd observation predictions.
-    # Fold time dim and flatten all other (image) dims.
+    # Fold time dim and flatten all other (image?) dims.
     observations = tf.reshape(observations, shape=[-1, int(np.prod(observations.shape.as_list()[2:]))])
     decoder_loss = - obs_distr.log_prob(symlog(observations))
     decoder_loss /= observations.shape.as_list()[1]

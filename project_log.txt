@@ -262,11 +262,18 @@ https://arxiv.org/pdf/2010.02193.pdf
 
 2023/02/18:
     - Running Pong experiment again on cluster.
-    - Bug fix: value targets used to be computed within symlog space (using symlog rewards and
-      (symlog) critic outputs. However, this is mathematically incorrect,
+    - Bug fix: value targets used to be computed within symlog space (using symlog
+      rewards and (symlog) critic outputs. However, this is mathematically incorrect,
       b/c log(a+b) [<- target] != log(a) [<- reward] + log(b) [<- value estimate at t+1];
-      Now we compute them in real space and then symlog the entire targets again when computing the critic loss.
-    - Because of the above fix, CartPole learns up to 500 episode return now, albeit still a little slow. (?)
+      Now we compute them in real space and then symlog the entire targets again when
+      computing the critic loss.
+    - Because of the above fix, CartPole learns up to 500 episode return now, albeit
+      still a little slow. (?)
+
+2023/02/20:
+    - Wrote new replay buffer and env-runner to account for the fact that
+      we would like to sample B * T style batches that include episode boundaries.
+        TODO
 
 OPEN PROBLEMS:
 - We should look into shifting the env runner sequence by one (see slack discussion)
@@ -274,7 +281,6 @@ OPEN PROBLEMS:
   also: V(t) = r(t) + gamma * V(t+1) (instead of V(t) = r(t+1) + gamma * V(t+1)
   reinterpret state-value as value for reaching the state (plus future) instead of
   value for already being in the state.
-
 - For dreaming: Should we sample from the Bernoulli distribution (for `continue` flags) or use greedy?
   We do use the deterministic mean for the dreamed rewards. Should probably do the same for `continues`.
 - Now that we are using the continuous episode buffer, if an episode is truncated AND the truncated

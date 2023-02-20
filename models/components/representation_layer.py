@@ -86,6 +86,9 @@ class RepresentationLayer(tf.keras.layers.Layer):
         # by adding the probs and subtracting the sg(probs). Note that `sample`
         # does not have any gradients as it's the result of a Categorical sample step,
         # which is non-differentiable (other than say a Gaussian sample step).
+        # [1] "The representations are sampled from a vector of softmax distributions
+        # and we take straight-through gradients through the sampling step."
+        # [2] Algorithm 1.
         differentiable_sample = sample + probs - tf.stop_gradient(probs)
         if return_z_probs:
             return differentiable_sample, probs

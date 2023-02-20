@@ -19,19 +19,7 @@ from ray.rllib.algorithms.algorithm_config import AlgorithmConfig
 from ray.rllib.env.wrappers.atari_wrappers import EpisodicLifeEnv, FireResetEnv, NoopResetEnv, MaxAndSkipEnv
 from ray.rllib.policy.sample_batch import MultiAgentBatch
 
-
-class CountEnv(gym.ObservationWrapper):
-    def reset(self, **kwargs):
-        self.__counter = 0
-        return super().reset(**kwargs)
-
-    def observation(self, observation):
-        # For gray-scaled observations.
-        observation[0][0] = self.__counter
-        # For 3-color observations
-        #observation[0][0][0] = self.__counter
-        self.__counter += 1
-        return observation
+from utils.env_runner_v2 import CountEnv
 
 
 class NormalizeImageObs(gym.ObservationWrapper):
@@ -185,6 +173,11 @@ class EnvRunner:
             self.needs_initial_reset = False
             for i, o in enumerate(self._split_by_env(obs)):
                 self.observations[i].append(o)
+                if self.continuous_episodes:
+                    # r0 = 0.0; term0 = trunc0 = True;
+                    self.rewards.append(0.0)
+                    self.terminateds.append(True)
+                    self.truncateds.append(True)
         else:
             obs = np.stack([o[-1] for o in self.observations])
 
@@ -196,7 +189,6 @@ class EnvRunner:
                 # TODO: hack; right now, our model (a world model) does not have an
                 #  actor head yet. Still perform a forward pass to get the next h-states.
                 actions = self.env.action_space.sample()
-                #print(f"took action {actions}")
                 if self.model is not None:
                     self.next_h_states = (
                         self.model.world_model.forward_inference(
