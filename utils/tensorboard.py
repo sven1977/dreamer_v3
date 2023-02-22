@@ -60,7 +60,7 @@ def summarize_forward_train_outs_vs_samples(
     """
     _summarize_obs(
         computed_float_obs_B_T_dims=tf.reshape(inverse_symlog(
-            forward_train_outs["obs_distribution"].loc
+            forward_train_outs["obs_distribution_BxT"].loc
         ), shape=(batch_size_B, batch_length_T) + sample["obs"].shape[2:]),
         sampled_obs_B_T_dims=sample["obs"],
         B=batch_size_B,
@@ -68,7 +68,7 @@ def summarize_forward_train_outs_vs_samples(
         descr="predicted(posterior)",
     )
     predicted_rewards = tf.reshape(
-        inverse_symlog(forward_train_outs["reward_distribution"].mean()),
+        inverse_symlog(forward_train_outs["reward_distribution_BxT"].mean()),
         shape=(batch_size_B, batch_length_T),
     )
     _summarize_rewards(
@@ -82,7 +82,7 @@ def summarize_forward_train_outs_vs_samples(
     tf.summary.histogram("predicted(posterior)_rewards", predicted_rewards)
 
     predicted_continues = tf.reshape(
-        forward_train_outs["continue_distribution"].mode(),
+        forward_train_outs["continue_distribution_BxT"].mode(),
         shape=(batch_size_B, batch_length_T),
     )
     _summarize_continues(
@@ -145,15 +145,15 @@ def summarize_dreamed_trajectory_vs_samples(
 
 
 def summarize_world_model_losses(world_model_train_results):
-    tf.summary.histogram("L_pred_BxT", world_model_train_results["L_pred_BxT"])
+    tf.summary.histogram("L_pred_B_T", world_model_train_results["L_pred_B_T"])
     tf.summary.scalar("L_pred", world_model_train_results["L_pred"])
 
-    tf.summary.histogram("L_decoder_BxT", world_model_train_results["L_decoder_BxT"])
+    tf.summary.histogram("L_decoder_B_T", world_model_train_results["L_decoder_B_T"])
     tf.summary.scalar("L_decoder", world_model_train_results["L_decoder"])
 
     # Two-hot reward loss.
     tf.summary.histogram(
-        "L_reward_two_hot_BxT", world_model_train_results["L_reward_two_hot_BxT"]
+        "L_reward_two_hot_B_T", world_model_train_results["L_reward_two_hot_B_T"]
     )
     tf.summary.scalar(
         "L_reward_two_hot", world_model_train_results["L_reward_two_hot"]
@@ -162,23 +162,23 @@ def summarize_world_model_losses(world_model_train_results):
     # rewards using the FiniteDiscrete distribution. This should be very close
     # to the two-hot reward loss.
     tf.summary.histogram(
-        "L_reward_logp_BxT", world_model_train_results["L_reward_logp_BxT"]
+        "L_reward_logp_B_T", world_model_train_results["L_reward_logp_B_T"]
     )
     tf.summary.scalar(
         "L_reward_logp", world_model_train_results["L_reward_logp"]
     )
 
-    tf.summary.histogram("L_continue_BxT", world_model_train_results["L_continue_BxT"])
+    tf.summary.histogram("L_continue_B_T", world_model_train_results["L_continue_B_T"])
     tf.summary.scalar("L_continue", world_model_train_results["L_continue"])
 
-    tf.summary.histogram("L_dyn_BxT", world_model_train_results["L_dyn_BxT"])
+    tf.summary.histogram("L_dyn_B_T", world_model_train_results["L_dyn_B_T"])
     tf.summary.scalar("L_dyn", world_model_train_results["L_dyn"])
 
-    tf.summary.histogram("L_rep_BxT", world_model_train_results["L_rep_BxT"])
+    tf.summary.histogram("L_rep_B_T", world_model_train_results["L_rep_B_T"])
     tf.summary.scalar("L_rep", world_model_train_results["L_rep"])
 
     # Total loss.
-    tf.summary.histogram("L_world_model_total_BxT", world_model_train_results["L_world_model_total_BxT"])
+    tf.summary.histogram("L_world_model_total_B_T", world_model_train_results["L_world_model_total_B_T"])
     tf.summary.scalar("L_world_model_total", world_model_train_results["L_world_model_total"])
 
 

@@ -169,13 +169,12 @@ class WorldModel(tf.keras.Model):
         # a time. This is necessary because the sequence model's output (h(t+1)) depends
         # on the current z(t), but z(t) depends on the current sequence model's output
         # h(t).
-        zs = []
+        z_t1_to_T = []
         z_probs_encoder = []
         z_probs_dynamics = []
-        hs = [initial_h if initial_h is not None else self._get_initial_h(batch_size=B)]
-        h_tp1 = hs[-1]
+        h_t1_to_T = [initial_h if initial_h is not None else self._get_initial_h(batch_size=B)]
         for t in range(self.batch_length_T):
-            h_t = hs[-1]
+            h_t = h_t1_to_T[-1]
             posterior_mlp_input = tf.concat([encoder_out[:, t], h_t], axis=-1)
             repr_input = self.posterior_mlp(posterior_mlp_input)
             # Draw one z-sample (z(t)) and also get the z-distribution for dynamics and
@@ -186,7 +185,7 @@ class WorldModel(tf.keras.Model):
             )
             # z_t=[B, num_categoricals, num_classes]
             z_probs_encoder.append(z_probs)
-            zs.append(z_t)
+            z_t1_to_T.append(z_t)
 
             # Compute the predicted z_t (z^) using the dynamics model.
             _, z_probs = self.dynamics_predictor(h_t, return_z_probs=True)
@@ -202,11 +201,11 @@ class WorldModel(tf.keras.Model):
             )
             # Not needed for the last time step.
             if t < self.batch_length_T - 1:
-                hs.append(h_tp1)
+                h_t1_to_T.append(h_tp1)
 
         # Stack at time dimension to yield: [B, T, ...].
-        hs = tf.stack(hs, axis=1)
-        zs = tf.stack(zs, axis=1)
+        h_t1_to_T = tf.stack(h_t1_to_T, axis=1)
+        z_t1_to_T = tf.stack(z_t1_to_T, axis=1)
         # Fold time axis to retrieve the final (loss ready) Independent distribution
         # (over `num_categoricals` Categoricals).
         z_probs_encoder = tf.stack(z_probs_encoder, axis=1)
@@ -224,36 +223,37 @@ class WorldModel(tf.keras.Model):
         )
         z_distribution_dynamics = tfp.distributions.Categorical(probs=z_probs_dynamics)
 
-        # Fold time dimension.
-        hs = tf.reshape(hs, shape=[-1] + hs.shape.as_list()[2:])
-        zs = tf.reshape(zs, shape=[-1] + zs.shape.as_list()[2:])
+        # Fold time dimension for parallelization of all dependent predictions:
+        # observations (reproduction via decoder), rewards, continues.
+        h_BxT = tf.reshape(h_t1_to_T, shape=[-1] + h_t1_to_T.shape.as_list()[2:])
+        z_BxT = tf.reshape(z_t1_to_T, shape=[-1] + z_t1_to_T.shape.as_list()[2:])
 
-        _, obs_distribution = self.decoder(h=hs, z=zs)
+        _, obs_distribution = self.decoder(h=h_BxT, z=z_BxT)
 
         # Compute (predicted) reward distributions.
         _, reward_distribution = self.reward_predictor(
-            h=hs, z=zs, return_distribution=True
+            h=h_BxT, z=z_BxT, return_distribution=True
         )
 
         # Compute (predicted) continue distributions.
         _, continue_distribution = self.continue_predictor(
-            h=hs, z=zs, return_distribution=True
+            h=h_BxT, z=z_BxT, return_distribution=True
         )
 
         # Return outputs for loss computation.
         # Note that all shapes are [B, ...] (no time axis).
         return {
-            "obs_distribution": obs_distribution,
-            "reward_distribution": reward_distribution,
-            "continue_distribution": continue_distribution,
-            "z_distribution_encoder": z_distribution_encoder,
-            "z_distribution_dynamics": z_distribution_dynamics,
+            "obs_distribution_BxT": obs_distribution,
+            "reward_distribution_BxT": reward_distribution,
+            "continue_distribution_BxT": continue_distribution,
+            "z_distribution_encoder_BxT": z_distribution_encoder,
+            "z_distribution_dynamics_BxT": z_distribution_dynamics,
             # Deterministic, continuous h-states (t1 to T).
-            "h_states": hs,
+            "h_states_BxT": h_BxT,
             # Sampled, discrete z-states (t1 to T).
-            "z_states": zs,
+            "z_states_BxT": z_BxT,
             # Next deterministic, continuous h-state (h(T+1)).
-            "h_tp1": h_tp1,
+            "h_B_tp1": h_tp1,
         }
 
     @tf.function

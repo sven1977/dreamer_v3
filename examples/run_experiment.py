@@ -302,14 +302,14 @@ for iteration in range(1000):
             if not dreamer_model.critic.trainable_variables:
                 # Forward pass for fast critic.
                 dreamer_model.critic(
-                    h=forward_train_outs["h_states"],
-                    z=forward_train_outs["z_states"],
+                    h=forward_train_outs["h_states_BxT"],
+                    z=forward_train_outs["z_states_BxT"],
                     return_distribution=True,
                 )
                 # Forward pass for EMA-weights critic.
                 dreamer_model.critic(
-                    h=forward_train_outs["h_states"],
-                    z=forward_train_outs["z_states"],
+                    h=forward_train_outs["h_states_BxT"],
+                    z=forward_train_outs["z_states_BxT"],
                     return_distribution=False,
                     use_ema=True,
                 )

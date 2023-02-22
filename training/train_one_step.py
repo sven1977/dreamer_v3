@@ -47,7 +47,7 @@ def train_world_model_one_step(
         #print("\tafter world_model_prediction_losses:",
         #      tf.config.experimental.get_memory_info('GPU:0')['current'])
 
-        L_dyn_BxT, L_rep_BxT = world_model_dynamics_and_representation_loss(
+        L_dyn_B_T, L_rep_B_T = world_model_dynamics_and_representation_loss(
             B=tf.convert_to_tensor(batch_size_B),
             T=tf.convert_to_tensor(batch_length_T),
             forward_train_outs=forward_train_outs,
@@ -56,33 +56,33 @@ def train_world_model_one_step(
         #print("\tafter world_model_dynamics_and_representation_loss:",
         #      tf.config.experimental.get_memory_info('GPU:0')['current'])
 
-        L_pred_BxT = prediction_losses["total_loss"]
-        L_pred = tf.reduce_mean(tf.reduce_sum(L_pred_BxT, axis=-1))
+        L_pred_B_T = prediction_losses["total_loss_B_T"]
+        L_pred = tf.reduce_mean(tf.reduce_sum(L_pred_B_T, axis=-1))
 
-        L_decoder_BxT = prediction_losses["decoder_loss"]
-        L_decoder = tf.reduce_mean(tf.reduce_sum(L_decoder_BxT, axis=-1))
+        L_decoder_B_T = prediction_losses["decoder_loss_B_T"]
+        L_decoder = tf.reduce_mean(tf.reduce_sum(L_decoder_B_T, axis=-1))
 
         # Two-hot reward loss.
-        L_reward_two_hot_BxT = prediction_losses["reward_loss_two_hot"]
-        L_reward_two_hot = tf.reduce_mean(tf.reduce_sum(L_reward_two_hot_BxT, axis=-1))
+        L_reward_two_hot_B_T = prediction_losses["reward_loss_two_hot_B_T"]
+        L_reward_two_hot = tf.reduce_mean(tf.reduce_sum(L_reward_two_hot_B_T, axis=-1))
         # TEST: Out of interest, compare with simplge -log(p) loss for individual
         # rewards using the FiniteDiscrete distribution. This should be very close
         # to the two-hot reward loss.
-        L_reward_logp_BxT = prediction_losses["reward_loss_logp"]
-        L_reward_logp = tf.reduce_mean(tf.reduce_sum(L_reward_logp_BxT, axis=-1))
+        L_reward_logp_B_T = prediction_losses["reward_loss_logp_B_T"]
+        L_reward_logp = tf.reduce_mean(tf.reduce_sum(L_reward_logp_B_T, axis=-1))
 
-        L_continue_BxT = prediction_losses["continue_loss"]
-        L_continue = tf.reduce_mean(tf.reduce_sum(L_continue_BxT, axis=-1))
+        L_continue_B_T = prediction_losses["continue_loss_B_T"]
+        L_continue = tf.reduce_mean(tf.reduce_sum(L_continue_B_T, axis=-1))
 
-        L_dyn = tf.reduce_mean(tf.reduce_sum(L_dyn_BxT, axis=-1))
+        L_dyn = tf.reduce_mean(tf.reduce_sum(L_dyn_B_T, axis=-1))
 
-        L_rep = tf.reduce_mean(tf.reduce_sum(L_rep_BxT, axis=-1))
+        L_rep = tf.reduce_mean(tf.reduce_sum(L_rep_B_T, axis=-1))
 
         # Compute the actual total loss using fixed weights described in [1] eq. 4.
-        L_world_model_total_BxT = 1.0 * L_pred_BxT + 0.5 * L_dyn_BxT + 0.1 * L_rep_BxT
+        L_world_model_total_B_T = 1.0 * L_pred_B_T + 0.5 * L_dyn_B_T + 0.1 * L_rep_B_T
 
         # Sum up timesteps, and average over batch (see eq. 4 in [1]).
-        L_world_model_total = tf.reduce_mean(tf.reduce_sum(L_world_model_total_BxT, axis=-1))
+        L_world_model_total = tf.reduce_mean(tf.reduce_sum(L_world_model_total_B_T, axis=-1))
 
     # Get the gradients from the tape.
     gradients = tape.gradient(L_world_model_total, world_model.trainable_variables)
@@ -103,31 +103,31 @@ def train_world_model_one_step(
 
         # Prediction losses.
         # Total.
-        "L_pred_BxT": L_pred_BxT,
+        "L_pred_B_T": L_pred_B_T,
         "L_pred": L_pred,
         # Decoder.
-        "L_decoder_BxT": L_decoder_BxT,
+        "L_decoder_B_T": L_decoder_B_T,
         "L_decoder": L_decoder,
         # Reward (two-hot).
-        "L_reward_two_hot_BxT": L_reward_two_hot_BxT,
+        "L_reward_two_hot_B_T": L_reward_two_hot_B_T,
         "L_reward_two_hot": L_reward_two_hot,
         # Reward (neg logp).
-        "L_reward_logp_BxT": L_reward_logp_BxT,
+        "L_reward_logp_B_T": L_reward_logp_B_T,
         "L_reward_logp": L_reward_logp,
         # Continues.
-        "L_continue_BxT": L_continue_BxT,
+        "L_continue_B_T": L_continue_B_T,
         "L_continue": L_continue,
 
         # Dynamics loss.
-        "L_dyn_BxT": L_dyn_BxT,
+        "L_dyn_B_T": L_dyn_B_T,
         "L_dyn": L_dyn,
 
         # Reproduction loss.
-        "L_rep_BxT": L_rep_BxT,
+        "L_rep_B_T": L_rep_B_T,
         "L_rep": L_rep,
 
         # Total loss.
-        "L_world_model_total_BxT": L_world_model_total_BxT,
+        "L_world_model_total_B_T": L_world_model_total_B_T,
         "L_world_model_total": L_world_model_total,
     }
 
@@ -152,8 +152,8 @@ def train_actor_and_critic_one_step(
         # Dream trajectories starting in all internal states (h+z) that were
         # computed during world model training.
         dream_data = dreamer_model.dream_trajectory(
-            h=forward_train_outs["h_states"],
-            z=forward_train_outs["z_states"],
+            h=forward_train_outs["h_states_BxT"],
+            z=forward_train_outs["z_states_BxT"],
             timesteps=horizon_H,
         )
         critic_loss_results = critic_loss(dream_data, gamma=gamma, lambda_=lambda_)

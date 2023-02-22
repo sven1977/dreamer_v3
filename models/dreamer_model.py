@@ -357,8 +357,8 @@ if __name__ == "__main__":
     # Note that the last h-state is NOT used here as it's already part of
     # a new trajectory.
     _, dreamed_images_distr = world_model.cnn_transpose_atari(
-        tf.reshape(dreamed_trajectory["h_states"][:,:-1], (B * T, -1)),
-        tf.reshape(dreamed_trajectory["z_dreamed"], (B * T) + dreamed_trajectory["z_dreamed"].shape[2:]),
+        tf.reshape(dreamed_trajectory["h_states_t1_to_Hp1"][:,:-1], (B * T, -1)),
+        tf.reshape(dreamed_trajectory["z_dreamed_t1_to_Hp1"], (B * T) + dreamed_trajectory["z_dreamed_t1_to_Hp1"].shape[2:]),
     )
     # Use mean() of the Gaussian, no sample!
     #

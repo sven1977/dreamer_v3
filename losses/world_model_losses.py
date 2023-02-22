@@ -21,7 +21,7 @@ def world_model_prediction_losses(
         T,
         forward_train_outs,
 ):
-    obs_distr = forward_train_outs["obs_distribution"]
+    obs_distr = forward_train_outs["obs_distribution_BxT"]
     # Learn to produce symlog'd observation predictions.
     # Fold time dim and flatten all other (image?) dims.
     observations = tf.reshape(observations, shape=[-1, int(np.prod(observations.shape.as_list()[2:]))])
@@ -34,7 +34,7 @@ def world_model_prediction_losses(
 
     # The FiniteDiscrete reward bucket distribution computed by our reward predictor.
     # [B x num_buckets].
-    reward_distr = forward_train_outs["reward_distribution"]
+    reward_distr = forward_train_outs["reward_distribution_BxT"]
     # Learn to produce symlog'd reward predictions.
     rewards = symlog(rewards)
     # Fold time dim.
@@ -58,7 +58,7 @@ def world_model_prediction_losses(
     continues = tf.logical_not(tf.logical_or(terminateds, truncateds))
     # Probabilities that episode continues, computed by our continue predictor.
     # [B]
-    continue_distr = forward_train_outs["continue_distribution"]
+    continue_distr = forward_train_outs["continue_distribution_BxT"]
     # -log(p) loss
     # Fold time dim.
     continues = tf.reshape(continues, shape=[-1])
@@ -67,29 +67,29 @@ def world_model_prediction_losses(
     continue_loss = tf.reshape(continue_loss, (B, T))
 
     return {
-        "decoder_loss": decoder_loss,
-        "reward_loss_two_hot": reward_loss_two_hot,
-        "reward_loss_logp": reward_loss_logp,
-        "continue_loss": continue_loss,
-        "total_loss": decoder_loss + reward_loss_two_hot + continue_loss,
+        "decoder_loss_B_T": decoder_loss,
+        "reward_loss_two_hot_B_T": reward_loss_two_hot,
+        "reward_loss_logp_B_T": reward_loss_logp,
+        "continue_loss_B_T": continue_loss,
+        "total_loss_B_T": decoder_loss + reward_loss_two_hot + continue_loss,
     }
 
 
 @tf.function
 def world_model_dynamics_and_representation_loss(forward_train_outs, B, T):
     # Actual distribution over stochastic internal states (z) produced by the encoder.
-    z_distr_encoder = forward_train_outs["z_distribution_encoder"]
+    z_distr_encoder_BxT = forward_train_outs["z_distribution_encoder_BxT"]
     # Actual distribution over stochastic internal states (z) produced by the
     # dynamics network.
-    z_distr_dynamics = forward_train_outs["z_distribution_dynamics"]
+    z_distr_dynamics_BxT = forward_train_outs["z_distribution_dynamics_BxT"]
 
     # Stop gradient for encoder's z-outputs:
-    sg_z_distr_encoder = tfp.distributions.Categorical(
-        probs=tf.stop_gradient(z_distr_encoder.probs)
+    sg_z_distr_encoder_BxT = tfp.distributions.Categorical(
+        probs=tf.stop_gradient(z_distr_encoder_BxT.probs)
     )
     # Stop gradient for dynamics model's z-outputs:
-    sg_z_distr_dynamics = tfp.distributions.Categorical(
-        probs=tf.stop_gradient(z_distr_dynamics.probs)
+    sg_z_distr_dynamics_BxT = tfp.distributions.Categorical(
+        probs=tf.stop_gradient(z_distr_dynamics_BxT.probs)
     )
 
     # Implement free bits. According to [1]:
@@ -98,30 +98,30 @@ def world_model_dynamics_and_representation_loss(forward_train_outs, B, T):
     # the dynamics and representation losses below the value of 1 nat ≈ 1.44 bits. This
     # disables them while they are already minimized well to focus the world model
     # on its prediction loss"
-    L_dyn = tf.math.maximum(
+    L_dyn_BxT = tf.math.maximum(
         1.0,
         # Sum KL over all `num_categoricals` as these are independent.
         # This is the same thing that a tfp.distributions.Independent() distribution
         # with an underlying set of different Categoricals would do.
         tf.reduce_sum(
-            tfp.distributions.kl_divergence(sg_z_distr_encoder, z_distr_dynamics),
+            tfp.distributions.kl_divergence(sg_z_distr_encoder_BxT, z_distr_dynamics_BxT),
             axis=-1,
         ),
     )
     # Unfold time rank back in.
-    L_dyn = tf.reshape(L_dyn, (B, T))
+    L_dyn_B_T = tf.reshape(L_dyn_BxT, (B, T))
 
-    L_rep = tf.math.maximum(
+    L_rep_BxT = tf.math.maximum(
         1.0,
         # Sum KL over all `num_categoricals` as these are independent.
         # This is the same thing that a tfp.distributions.Independent() distribution
         # with an underlying set of different Categoricals would do.
         tf.reduce_sum(
-            tfp.distributions.kl_divergence(z_distr_encoder, sg_z_distr_dynamics),
+            tfp.distributions.kl_divergence(z_distr_encoder_BxT, sg_z_distr_dynamics_BxT),
             axis=-1,
         ),
     )
     # Unfold time rank back in.
-    L_rep = tf.reshape(L_rep, (B, T))
+    L_rep_B_T = tf.reshape(L_rep_BxT, (B, T))
 
-    return L_dyn, L_rep
+    return L_dyn_B_T, L_rep_B_T
