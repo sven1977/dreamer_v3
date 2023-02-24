@@ -31,6 +31,8 @@ class RepresentationLayer(tf.keras.layers.Layer):
         self.z_generating_layer = tf.keras.layers.Dense(
             self.num_categoricals * self.num_classes_per_categorical,
             activation=None,
+            name=f"z({self.num_categoricals}x{self.num_classes_per_categorical})-"
+                 "generating-layer",
         )
 
     def call(self, input_, return_z_probs=False):

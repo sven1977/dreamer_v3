@@ -58,6 +58,7 @@ class RewardPredictorLayer(tf.keras.layers.Layer):
             kernel_initializer="zeros",
             bias_initializer="zeros",  # default anyways
             trainable=trainable,
+            name=f"reward({self.num_buckets}buckets)-predictor-layer"
         )
         # Size of each reward bucket.
         self.bucket_delta = (

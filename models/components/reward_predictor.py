@@ -23,7 +23,10 @@ class RewardPredictor(tf.keras.Model):
     ):
         super().__init__()
 
-        self.mlp = MLP(model_dimension=model_dimension, output_layer_size=None)
+        self.mlp = MLP(
+            model_dimension=model_dimension,
+            output_layer_size=None,
+        )
         self.reward_layer = RewardPredictorLayer(
             num_buckets=num_buckets,
             lower_bound=lower_bound,
