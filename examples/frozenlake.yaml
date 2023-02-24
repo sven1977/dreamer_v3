@@ -1,0 +1,22 @@
+frozenlake-experiment:
+  env: FrozenLake-v1
+  is_atari: false
+
+  env_config:
+    map_name: 4x4
+    #desc:
+    #  - SF
+    #  - HG
+    is_slippery: false
+
+  model_dimension: XS
+  #num_gru_units: 1  # TEST with only one GRU unit (h-state); env has only 2 states
+
+  #train_actor: false
+
+  training_ratio: 1024
+
+  summary_frequency_train_steps: 5
+  evaluation_frequency_main_iters:  1
+  evaluation_num_episodes: 20
+  model_save_frequency_main_iters: 1000

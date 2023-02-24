@@ -11,13 +11,13 @@ import tensorflow_probability as tfp
 def actor_loss(
     *,
     dream_data,
-    critic_loss_results,
+    value_targets,
     actor,
     entropy_scale: float = 3e-4,
     return_normalization_decay: float = 0.99,
 ):
     scaled_value_targets_B_H = compute_scaled_value_targets(
-        critic_loss_results=critic_loss_results,
+        value_targets=value_targets,
         actor=actor,
         return_normalization_decay=return_normalization_decay,
     )
@@ -64,11 +64,11 @@ def actor_loss(
 
 def compute_scaled_value_targets(
     *,
-    critic_loss_results,
+    value_targets,
     actor,
     return_normalization_decay: float = 0.99,
 ):
-    value_targets_B_H = critic_loss_results["value_targets_B_H"]
+    value_targets_B_H = value_targets
 
     # Compute S: [1] eq. 12.
     Per_R_95 = tfp.stats.percentile(value_targets_B_H, 95)

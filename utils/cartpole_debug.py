@@ -34,29 +34,33 @@ class CartPoleDebug(CartPoleEnv):
 
 
 gym.register("CartPoleDebug-v0", CartPoleDebug)
-env = gym.make("CartPoleDebug-v0", render_mode="rgb_array")
-env.reset()
+cartpole_env = gym.make("CartPoleDebug-v0", render_mode="rgb_array")
+cartpole_env.reset()
+
+frozenlake_env = gym.make("FrozenLake-v1", render_mode="rgb_array", is_slippery=False, map_name="4x4")#desc=["SF", "HG"])
+frozenlake_env.reset()
 
 
 def create_cartpole_dream_image(
     dreamed_obs,  # real space (not symlog'd)
     dreamed_V,  # real space (not symlog'd)
     dreamed_a,
-    dreamed_r,  # real space (not symlog'd)
-    dreamed_c,  # continue flag
+    dreamed_r_tp1,  # real space (not symlog'd)
+    dreamed_c_tp1,  # continue flag
     value_target,  # real space (not symlog'd)
+    initial_h,
     as_tensor=False,
 ):
     # CartPoleDebug
     if dreamed_obs.shape == (5,):
         # Set the state of our env to the given observation.
-        env.unwrapped.state = np.array(dreamed_obs[1:], dtype=np.float32)
+        cartpole_env.unwrapped.state = np.array(dreamed_obs[1:], dtype=np.float32)
     # Normal CartPole-v1
     else:
-        env.unwrapped.state = np.array(dreamed_obs, dtype=np.float32)
+        cartpole_env.unwrapped.state = np.array(dreamed_obs, dtype=np.float32)
 
     # Produce an RGB-image of the current state.
-    rgb_array = env.render()
+    rgb_array = cartpole_env.render()
 
     # Add value-, action-, reward-, and continue-prediction information.
     image = Image.fromarray(rgb_array)
@@ -64,13 +68,48 @@ def create_cartpole_dream_image(
 
     #fnt = ImageFont.load_default(size=40)
 
-    draw_obj.text((20, 26), f"V={dreamed_V} (target={value_target})", fill=(0, 0, 0))#, font=fnt.font, size=30)
-    draw_obj.text((20, 38), f"a={'<--' if dreamed_a == 0 else '-->'} ({dreamed_a})", fill=(0, 0, 0))
-    draw_obj.text((20, 50), f"r={dreamed_r}", fill=(0, 0, 0))
-    draw_obj.text((20, 62), f"cont={dreamed_c}", fill=(0, 0, 0))
+    draw_obj.text((5, 6), f"V(t)={dreamed_V} (tgt(t)={value_target})", fill=(0, 0, 0))#, font=fnt.font, size=30)
+    draw_obj.text((5, 18), f"a(t)={'<--' if dreamed_a == 0 else '-->'} ({dreamed_a})", fill=(0, 0, 0))
+    draw_obj.text((5, 30), f"r(t+1)={dreamed_r_tp1}", fill=(0, 0, 0))
+    draw_obj.text((5, 42), f"c(t+1)={dreamed_c_tp1}", fill=(0, 0, 0))
+    draw_obj.text((5, 54), f"ht={np.mean(np.abs(initial_h)):.5f}", fill=(0, 0, 0))
 
     if dreamed_obs.shape == (5,):
         draw_obj.text((20, 100), f"t={dreamed_obs[0]}", fill=(0, 0, 0))
+
+    # Return image.
+    np_img = np.asarray(image)
+    if as_tensor:
+        return tf.convert_to_tensor(np_img, dtype=tf.uint8)
+    return np_img
+
+
+def create_frozenlake_dream_image(
+    dreamed_obs,  # real space (not symlog'd)
+    dreamed_V,  # real space (not symlog'd)
+    dreamed_a,
+    dreamed_r_tp1,  # real space (not symlog'd)
+    dreamed_c_tp1,  # continue flag
+    value_target,  # real space (not symlog'd)
+    initial_h,
+    as_tensor=False,
+):
+    frozenlake_env.unwrapped.s = np.argmax(dreamed_obs, axis=0)
+
+    # Produce an RGB-image of the current state.
+    rgb_array = frozenlake_env.render()
+
+    # Add value-, action-, reward-, and continue-prediction information.
+    image = Image.fromarray(rgb_array)
+    draw_obj = ImageDraw.Draw(image)
+
+    #fnt = ImageFont.load_default(size=40)
+
+    draw_obj.text((5, 6), f"Vt={dreamed_V:.2f} (Rt={value_target:.2f})", fill=(0, 0, 0))#, font=fnt.font, size=30)
+    draw_obj.text((5, 18), f"at={'<--' if dreamed_a == 0 else 'v' if dreamed_a == 1 else '-->' if dreamed_a == 2 else '^'} ({dreamed_a})", fill=(0, 0, 0))
+    draw_obj.text((5, 30), f"rt+1={dreamed_r_tp1:.2f}", fill=(0, 0, 0))
+    draw_obj.text((5, 42), f"ct+1={dreamed_c_tp1}", fill=(0, 0, 0))
+    draw_obj.text((5, 54), f"|h|t={np.mean(np.abs(initial_h)):.5f}", fill=(0, 0, 0))
 
     # Return image.
     np_img = np.asarray(image)
@@ -85,8 +124,9 @@ if __name__ == "__main__":
         dreamed_obs=np.array([100.0, 1.0, -0.01, 1.5, 0.02]),
         dreamed_V=4.3,
         dreamed_a=1,
-        dreamed_r=1.0,
-        dreamed_c=True,
+        dreamed_r_tp1=1.0,
+        dreamed_c_tp1=True,
+        initial_h=0.0,
         value_target=8.0,
     )
     #ImageFont.load("arial.pil")
@@ -98,10 +138,24 @@ if __name__ == "__main__":
         dreamed_obs=np.array([1.0, -0.01, 1.5, 0.02]),
         dreamed_V=4.3,
         dreamed_a=1,
-        dreamed_r=1.0,
-        dreamed_c=True,
+        dreamed_r_tp1=1.0,
+        dreamed_c_tp1=True,
+        initial_h=0.1,
         value_target=8.0,
     )
     #ImageFont.load("arial.pil")
+    image = Image.fromarray(rgb_array)
+    image.show()
+
+    # Frozenlake
+    rgb_array = create_frozenlake_dream_image(
+        dreamed_obs=np.array([1.0] + [0.0] * (frozenlake_env.observation_space.n - 1)),
+        dreamed_V=4.3,
+        dreamed_a=1,
+        dreamed_r_tp1=1.0,
+        dreamed_c_tp1=True,
+        initial_h=0.1,
+        value_target=8.0,
+    )
     image = Image.fromarray(rgb_array)
     image.show()

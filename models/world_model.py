@@ -3,6 +3,8 @@
 D. Hafner, J. Pasukonis, J. Ba, T. Lillicrap
 https://arxiv.org/pdf/2301.04104v1.pdf
 """
+from typing import Optional
+
 import gymnasium as gym
 import tensorflow as tf
 import tensorflow_probability as tfp
@@ -27,6 +29,7 @@ class WorldModel(tf.keras.Model):
         batch_length_T: int = 64,
         encoder: tf.keras.Model,
         decoder: tf.keras.Model,
+        num_gru_units: Optional[int] = None,
     ):
         """TODO
 
@@ -73,6 +76,7 @@ class WorldModel(tf.keras.Model):
         self.sequence_model = SequenceModel(
             model_dimension=self.model_dimension,
             action_space=action_space,
+            num_gru_units=num_gru_units,
         )
 
         # Reward Predictor.
@@ -129,7 +133,7 @@ class WorldModel(tf.keras.Model):
         return h_tp1
 
     @tf.function
-    def forward_train(self, observations, actions, initial_h, training=None):
+    def forward_train(self, observations, actions, initial_h=None, training=None):
         """Performs a forward step for training.
 
         1) Forwards all observations [B, T, ...] through the encoder network to yield
@@ -162,7 +166,7 @@ class WorldModel(tf.keras.Model):
         observations = tf.reshape(observations, shape=[-1] + observations.shape.as_list()[2:])
         encoder_out = self.encoder(symlog(observations))
         # Unfold time dimension.
-        encoder_out = tf.reshape(encoder_out, shape=[-1, T] + encoder_out.shape.as_list()[1:])
+        encoder_out = tf.reshape(encoder_out, shape=[B, T] + encoder_out.shape.as_list()[1:])
         # encoder_out=[B, T, ...]
 
         # Loop through the T-axis of our samples and perform one computation step at
@@ -253,7 +257,7 @@ class WorldModel(tf.keras.Model):
             # Sampled, discrete z-states (t1 to T).
             "z_states_BxT": z_BxT,
             # Next deterministic, continuous h-state (h(T+1)).
-            "h_B_tp1": h_tp1,
+            "h_B_Tp1": h_tp1,
         }
 
     @tf.function

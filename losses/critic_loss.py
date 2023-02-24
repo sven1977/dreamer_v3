@@ -19,16 +19,17 @@ def critic_loss(
 ):
     value_targets_B_H = compute_value_targets(
         # Learn critic in symlog'd space.
-        rewards=dream_data["rewards_dreamed_t1_to_H"],
-        continues=dream_data["continues_dreamed_t1_to_H"],
+        rewards=dream_data["rewards_dreamed_t1_to_Hp1"],
+        continues=dream_data["continues_dreamed_t1_to_Hp1"],
         value_predictions=dream_data["values_dreamed_t1_to_Hp1"],
         gamma=gamma,
         lambda_=lambda_,
     )
     value_symlog_targets_B_H = symlog(value_targets_B_H)
-    # value_targets=(B, T)
+    # Fold time rank (for two_hot'ing).
     value_symlog_targets_BxH = tf.reshape(value_symlog_targets_B_H, (-1,))
     value_symlog_targets_BxH_two_hot = two_hot(value_symlog_targets_BxH)
+    # Unfold time rank.
     value_symlog_targets_two_hot_B_H = tf.reshape(
         value_symlog_targets_BxH_two_hot,
         shape=value_symlog_targets_B_H.shape[:2] + value_symlog_targets_BxH_two_hot.shape[-1],
@@ -38,7 +39,7 @@ def critic_loss(
         [d.probs for d in dream_data["values_symlog_dreamed_distributions_t1_to_Hp1"][:-1]],
         axis=1,
     )
-    # Vector product to reduce over return-buckets. [1] eq. 10.
+    # Vector product to reduce over return-buckets. See [1] eq. 10.
     value_symlog_logp_B_H = tf.reduce_sum(
         tf.multiply(
             tf.stop_gradient(value_symlog_targets_two_hot_B_H),
@@ -84,12 +85,16 @@ def compute_value_targets(rewards, continues, value_predictions, gamma, lambda_)
     Thus, targets are always returned in real (non-symlog'd space).
     They need to be re-symlog'd before computing the critic loss from them (b/c the
     critic does produce predictions in symlog space).
+
+    Furthermore, rewards, continues, and value_predictions are all of shape [B, t1-H+1]
     """
     last_Rs = value_predictions[:, -1]
     Rs = []
-    # Loop through reversed timesteps (axis=1).
-    for i in reversed(range(rewards.shape[1])):
-        Rt = rewards[:, i] + gamma * continues[:, i] * ((1.0 - lambda_) * value_predictions[:, i+1] + lambda_ * last_Rs)
+    # Loop through reversed timesteps (axis=1) from T+1 to t=2.
+    # Exclude t=1 b/c we don't need r1 or c1. The target (R1) for V1 is built from r2,
+    # c2, and V2/R2.
+    for i in range(rewards.shape[1] - 1, 0, -1):
+        Rt = rewards[:, i] + gamma * continues[:, i] * ((1.0 - lambda_) * value_predictions[:, i] + lambda_ * last_Rs)
         last_Rs = Rt
         Rs.append(Rt)
     # Reverse along time axis and cut the last entry (value estimate at very end cannot
@@ -149,18 +154,18 @@ if __name__ == "__main__":
     ))
 
     r = np.array([
-        [0.0, 1.0, 2.0, 3.0, 4.0],
+        [99.0,  1.0,  2.0,  3.0,  4.0,  5.0],
         #[1.0, 1.0, 1.0, 1.0, 1.0],
     ])
     c = np.array([
-        [1.0, 1.0, 1.0, 1.0, 1.0],
-        #[1.0, 0.0, 1.0, 1.0, 1.0],
+        [ 1.0,  1.0,  0.0,  1.0,  1.0,  1.0],
+        #[1.0,  0.0, 1.0, 1.0, 1.0],
     ])
     vf = np.array([
-        [13.0, 13.0, 12.0, 10.0, 7.0, 3.0],  # naive sum of future rewards
+        [ 3.0,  2.0, 15.0, 12.0,  8.0,  3.0],  # naive sum of future rewards
         #[7.0, 6.0, 5.0, 4.0, 3.0, 2.0],  # naive sum of future rewards
     ])
-    last_r = vf[:, -1]
+    #last_r = vf[:, -1]
     gamma = 1.0#0.99
     lambda_ = 1.0#0.7
 

@@ -15,8 +15,7 @@ from utils.two_hot import two_hot
 def world_model_prediction_losses(
         observations,
         rewards,
-        terminateds,
-        truncateds,
+        continues,
         B,
         T,
         forward_train_outs,
@@ -54,8 +53,6 @@ def world_model_prediction_losses(
     # Unfold time rank back in.
     reward_loss_logp = tf.reshape(reward_loss_logp, (B, T))
 
-    # Continue predictor loss.
-    continues = tf.logical_not(tf.logical_or(terminateds, truncateds))
     # Probabilities that episode continues, computed by our continue predictor.
     # [B]
     continue_distr = forward_train_outs["continue_distribution_BxT"]

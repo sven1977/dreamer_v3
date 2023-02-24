@@ -77,7 +77,7 @@ class DreamerModel(tf.keras.Model):
 
     @tf.function
     def dream_trajectory(self, h, z, timesteps):
-        """Dreams trajectory from batch of h- and z-states.
+        """Dreams trajectories from batch of h- and z-states.
 
         Args:
             h: The h-states (B, ...) as computed by a train forward pass. From
@@ -96,9 +96,9 @@ class DreamerModel(tf.keras.Model):
         a_dreamed_t1_to_H = []
         a_dreamed_distributions_t1_to_H = []
         # Dreamed rewards.
-        r_dreamed_t1_to_H = []
+        r_dreamed_t1_to_Hp1 = []
         # Dreamed continue flags.
-        c_dreamed_t1_to_H = []
+        c_dreamed_t1_to_Hp1 = []
         # Dreamed values.
         v_dreamed_t1_to_Hp1 = []
         # TODO: Make these just the probs. These distribution objects are not necessary.
@@ -106,14 +106,20 @@ class DreamerModel(tf.keras.Model):
         v_symlog_dreamed_distributions_ema_t1_to_Hp1 = []
 
         # GRU outputs.
-        h_states_t1_to_Hp1 = [h]
+        h_states_t1_to_Hp1 = []
         # Dynamics model outputs.
         z_states_prior_t1_to_H = []
 
-        for i in range(timesteps):
+        for i in range(timesteps + 1):
+            h_states_t1_to_Hp1.append(h)
+
             # Compute r using reward predictor.
             r = self.world_model.reward_predictor(h=h, z=z)
-            r_dreamed_t1_to_H.append(inverse_symlog(r))
+            r_dreamed_t1_to_Hp1.append(inverse_symlog(r))
+
+            # Compute continues using continue predictor.
+            c = self.world_model.continue_predictor(h=h, z=z)
+            c_dreamed_t1_to_Hp1.append(c)
 
             # Compute the value estimates.
             v, v_distr = self.critic(h=h, z=z, return_distribution=True)
@@ -125,13 +131,16 @@ class DreamerModel(tf.keras.Model):
             )
             v_symlog_dreamed_distributions_ema_t1_to_Hp1.append(v_ema_distr)
 
-            # Compute continues using continue predictor.
-            c = self.world_model.continue_predictor(h=h, z=z)
-            c_dreamed_t1_to_H.append(c)
+            # Only for V, r, and continue flags, we need the values at H+1.
+            # V(H+1): Needed for critic learning bootstrapping.
+            # r(H+1): Needed for critic learning (V(H) depends on r(H+1) and V(H+1)).
+            # c(H+1): Same as r(H+1).
+            if i == timesteps:
+                break
 
             # Compute `a` using actor network.
             a, a_dist = self.actor(h=h, z=z, return_distribution=True)
-            # TEST: compute actor-produced actions, instead of random actions
+            # TEST: Use random actions instead of actor-computed ones.
             # a = tf.random.uniform(tf.shape(h)[0:1], 0, self.action_space.n, tf.int64)
             # END TEST: random actions
             a_dreamed_t1_to_H.append(a)
@@ -144,20 +153,13 @@ class DreamerModel(tf.keras.Model):
                 a=tf.expand_dims(a, axis=1),
                 h=h,  # Initial state must NOT have a T dimension.
             )
-            h_states_t1_to_Hp1.append(h_tp1)
+            # Store z(t).
+            z_states_prior_t1_to_H.append(z)
+            # Compute z(t+1) from h(t+1), using the dynamics model.
+            z = self.world_model.dynamics_predictor(h=h_tp1)
 
             h = h_tp1
 
-            # Compute z from h, using the dynamics model.
-            z = self.world_model.dynamics_predictor(h=h)
-            z_states_prior_t1_to_H.append(z)
-
-        # Predict the last value (for GAE computations).
-        v, v_distr = self.critic(h=h, z=z, return_distribution=True)
-        v_dreamed_t1_to_Hp1.append(inverse_symlog(v))
-        v_symlog_dreamed_distributions_t1_to_Hp1.append(v_distr)
-        _, v_ema_distr = self.critic(h=h, z=z, return_distribution=True, use_ema=True)
-        v_symlog_dreamed_distributions_ema_t1_to_Hp1.append(v_ema_distr)
 
         # Stack along T (horizon=H) axis.
         ret = {
@@ -168,18 +170,22 @@ class DreamerModel(tf.keras.Model):
             "z_states_prior_t1_to_H": tf.stop_gradient(
                 tf.stack(z_states_prior_t1_to_H, axis=1)
             ),
-            "rewards_dreamed_t1_to_H": tf.stop_gradient(
-                tf.stack(r_dreamed_t1_to_H, axis=1)
+            "rewards_dreamed_t1_to_Hp1": tf.stop_gradient(
+                tf.stack(r_dreamed_t1_to_Hp1, axis=1)
             ),
-            "continues_dreamed_t1_to_H": tf.stop_gradient(
-                tf.stack(c_dreamed_t1_to_H, axis=1)
+            "continues_dreamed_t1_to_Hp1": tf.stop_gradient(
+                tf.stack(c_dreamed_t1_to_Hp1, axis=1)
             ),
             # Critic and action outputs are not grad-stopped for critic/actor learning.
             "actions_dreamed_t1_to_H": tf.stack(a_dreamed_t1_to_H, axis=1),
             "actions_dreamed_distributions_t1_to_H": a_dreamed_distributions_t1_to_H,
             "values_dreamed_t1_to_Hp1": tf.stack(v_dreamed_t1_to_Hp1, axis=1),
-            "values_symlog_dreamed_distributions_t1_to_Hp1": v_symlog_dreamed_distributions_t1_to_Hp1,
-            "v_symlog_dreamed_distributions_ema_t1_to_Hp1": v_symlog_dreamed_distributions_ema_t1_to_Hp1,
+            "values_symlog_dreamed_distributions_t1_to_Hp1": (
+                v_symlog_dreamed_distributions_t1_to_Hp1
+            ),
+            "v_symlog_dreamed_distributions_ema_t1_to_Hp1": (
+                v_symlog_dreamed_distributions_ema_t1_to_Hp1
+            ),
         }
 
         return ret

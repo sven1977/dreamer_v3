@@ -87,8 +87,7 @@ def summarize_forward_train_outs_vs_samples(
     )
     _summarize_continues(
         computed_continues_B_T=predicted_continues,
-        sampled_terminateds_B_T=sample["terminateds"],
-        sampled_truncateds_B_T=sample["truncateds"],
+        sampled_continues_B_T=sample["continues"],
         B=batch_size_B,
         T=batch_length_T,
         descr="predicted(posterior)",
@@ -131,12 +130,7 @@ def summarize_dreamed_trajectory_vs_samples(
     # Continues MSE.
     _summarize_continues(
         computed_continues_B_T=dream_data["continues_dreamed_t1_to_T"],
-        sampled_terminateds_B_T=(
-            sample["terminateds"][:, burn_in_T:burn_in_T + dreamed_T]
-        ),
-        sampled_truncateds_B_T=(
-            sample["truncateds"][:, burn_in_T:burn_in_T + dreamed_T]
-        ),
+        sampled_continues_B_T=sample["continues"][:, burn_in_T:burn_in_T + dreamed_T],
         B=batch_size_B,
         T=dreamed_T,
         descr="dreamed(prior)",
@@ -254,8 +248,7 @@ def _summarize_rewards(*, computed_rewards_B_T, sampled_rewards_B_T, B, T, descr
 def _summarize_continues(
     *,
     computed_continues_B_T,
-    sampled_terminateds_B_T,
-    sampled_truncateds_B_T,
+    sampled_continues_B_T,
     B,
     T,
     descr,
@@ -263,15 +256,7 @@ def _summarize_continues(
     # Continue MSE.
     mse_sampled_vs_computed_continues = tf.losses.mse(
         tf.expand_dims(computed_continues_B_T, axis=-1),
-        tf.expand_dims(tf.cast(
-            tf.logical_not(
-                tf.logical_or(
-                    sampled_terminateds_B_T,
-                    sampled_truncateds_B_T,
-                )
-            ),
-            dtype=tf.float32,
-        ), axis=-1),
+        tf.expand_dims(tf.cast(sampled_continues_B_T, dtype=tf.float32), axis=-1),
     )
     mse_sampled_vs_computed_continues = tf.reduce_mean(
         tf.reduce_sum(mse_sampled_vs_computed_continues, axis=1)

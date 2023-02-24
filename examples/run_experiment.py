@@ -28,10 +28,9 @@ from training.train_one_step import (
     train_actor_and_critic_one_step,
     train_world_model_one_step,
 )
-from utils.env_runner import EnvRunner
-from utils.continuous_episode_replay_buffer import ContinuousEpisodeReplayBuffer
+from utils.env_runner_v2 import EnvRunnerV2
+from utils.episode_replay_buffer import EpisodeReplayBuffer
 from utils.cartpole_debug import CartPoleDebug  # import registers `CartPoleDebug-v0`
-from utils.symlog import inverse_symlog
 from utils.tensorboard import (
     summarize_dreamed_trajectory_vs_samples,
     summarize_forward_train_outs_vs_samples,
@@ -67,7 +66,7 @@ burn_in_T = 5
 horizon_H = 15
 
 # Actor/critic hyperparameters.
-discount_gamma = 0.997  # [1] eq. 7.
+discount_gamma = options.get("discount_gamma", 0.997)  # [1] eq. 7.
 gae_lambda = options.get("gae_lambda", 0.95)  # [1] eq. 7.
 entropy_scale = 3e-4  # [1] eq. 11.
 return_normalization_decay = 0.99  # [1] eq. 11 and 12.
@@ -87,28 +86,22 @@ config = (
         # already done by MaxAndSkip wrapper "frameskip": 4,  # "action repeat" (frameskip) == 4
         "repeat_action_probability": 0.25,  # "sticky actions"
         "full_action_space": True,  # "full action space"
-    } if options["is_atari"] else {})
+    } if options["is_atari"] else options.get("env_config", {}))
     .rollouts(
         num_envs_per_worker=1,
         rollout_fragment_length=batch_length_T,
     )
 )
 # The vectorized gymnasium EnvRunner to collect samples of shape (B, T, ...).
-env_runner = EnvRunner(
-    model=None,
-    config=config,
-    max_seq_len=None,
-    continuous_episodes=True,
-)
-env_runner_evaluation = EnvRunner(
-    model=None,
-    config=config,
-    max_seq_len=None,
-    continuous_episodes=True,
-)
+env_runner = EnvRunnerV2(model=None, config=config)
+env_runner_evaluation = EnvRunnerV2(model=None, config=config)
 
 # Whether to o nly train the world model (not the critic and actor networks).
-train_world_model_only = options["train_world_model_only"]
+train_critic = options.get("train_critic", True)
+train_actor = options.get("train_actor", True)
+# Cannot train actor w/o critic.
+assert not (train_actor and not train_critic)
+
 # Our DreamerV3 world model.
 from_checkpoint = None
 # Uncomment this next line to load from a saved model.
@@ -121,6 +114,7 @@ else:
         model_dimension=model_dimension,
         action_space=env_runner.env.single_action_space,
         batch_length_T=batch_length_T,
+        num_gru_units=options.get("num_gru_units"),
         encoder=CNNAtari(model_dimension=model_dimension) if options["is_atari"] else MLP(model_dimension=model_dimension),
         decoder=ConvTransposeAtari(
             model_dimension=model_dimension,
@@ -145,11 +139,7 @@ env_runner.model = dreamer_model
 env_runner_evaluation.model = dreamer_model
 
 # The replay buffer for storing actual env samples.
-buffer = ContinuousEpisodeReplayBuffer(
-    capacity=int(1e6 / batch_length_T),
-    # Only add (B=1, T=...)-style data at a time.
-    num_data_tracks=1,
-)
+buffer = EpisodeReplayBuffer(capacity=int(1e6))
 # Timesteps to put into the buffer before the first learning step.
 warm_up_timesteps = 0
 
@@ -182,38 +172,30 @@ for iteration in range(1000):
     #END TEST
     while True:
         # Sample one round.
-        (
-            obs,
-            next_obs,
-            actions,
-            rewards,
-            terminateds,
-            truncateds,
-            h_states,
-        ) = env_runner.sample(random_actions=False)
+        done_episodes, ongoing_episodes = env_runner.sample(random_actions=False)
 
         # We took B x T env steps.
-        env_steps_last_sample = rewards.shape[0] * rewards.shape[1]
+        env_steps_last_sample = sum(
+            len(eps) for eps in done_episodes + ongoing_episodes
+        )
         env_steps += env_steps_last_sample
 
-        buffer.add({
-            "obs": obs,
-            "next_obs": next_obs,
-            "actions": actions,
-            "rewards": rewards,
-            "terminateds": terminateds,
-            "truncateds": truncateds,
-            "h_states": h_states,
-        })
-        trajectories_in_buffer = len(buffer)
-        ts_in_buffer = trajectories_in_buffer * batch_length_T
-        print(f"\tsampled env-steps={env_steps}; buffer size (ts)={ts_in_buffer}; buffer size (trajectories)={trajectories_in_buffer}")
+        buffer.add(episodes=done_episodes + ongoing_episodes)
+        episodes_in_buffer = buffer.get_num_episodes()
+        ts_in_buffer = buffer.get_num_timesteps()
+        print(
+            f"\tsampled env-steps={env_steps}; "
+            f"buffer size (ts)={ts_in_buffer}; "
+            f"buffer size (episodes)={episodes_in_buffer}"
+        )
 
         if (
             # Got to have more timesteps than warm up setting.
             ts_in_buffer > warm_up_timesteps
-            # But also at least as many trajectories as the batch size B.
-            and trajectories_in_buffer >= batch_size_B
+            # and more timesteps than BxT.
+            and ts_in_buffer >= batch_size_B * batch_length_T
+            # But also at least as many episodes as the batch size B.
+            and episodes_in_buffer >= batch_size_B
         ):
             break
 
@@ -221,13 +203,17 @@ for iteration in range(1000):
     metrics = env_runner.get_metrics()
     with tb_writer.as_default(step=total_env_steps):
         # Summarize buffer length.
-        tf.summary.scalar("buffer_size_num_trajectories", trajectories_in_buffer)
+        tf.summary.scalar("buffer_size_num_episodes", episodes_in_buffer)
         tf.summary.scalar("buffer_size_timesteps", ts_in_buffer)
         # Summarize episode returns.
-        if metrics["episode_returns"]:
+        if metrics.get("episode_returns"):
             episode_return_mean = np.mean(metrics["episode_returns"])
             tf.summary.scalar("ENV_episode_return_mean", episode_return_mean)
         # Summarize actions taken.
+        actions = np.concatenate(
+            [eps.actions for eps in done_episodes + ongoing_episodes],
+            axis=0,
+        )
         tf.summary.histogram("ENV_actions_taken", actions)
 
     total_env_steps += env_steps
@@ -257,7 +243,7 @@ for iteration in range(1000):
             tb_ctx.__enter__()
 
         # Draw a new sample from the replay buffer.
-        sample = buffer.sample(num_items=batch_size_B)
+        sample = buffer.sample(batch_size_B=batch_size_B, batch_length_T=batch_length_T)
         replayed_steps += batch_size_B * batch_length_T
 
         # Convert samples (numpy) to tensors.
@@ -272,15 +258,30 @@ for iteration in range(1000):
             world_model=world_model,
             optimizer=world_model_optimizer,
         )
+        forward_train_outs = world_model_train_results["forward_train_outs"]
+
+        # Update h_states in buffer after the world model (sequential model)
+        # forward pass.
+        h_BxT = forward_train_outs["h_states_BxT"]
+        h_B_t2_to_Tp1 = tf.concat([tf.reshape(
+            h_BxT,
+            shape=(batch_size_B, batch_length_T) + h_BxT.shape[1:],
+        )[:, 1:], tf.expand_dims(forward_train_outs["h_B_Tp1"], axis=1)], axis=1)
+        buffer.update_h_states(h_B_t2_to_Tp1.numpy(), sample["indices"].numpy())
+
         # Summarize world model.
         if iteration == 0 and sub_iter == 0:
             # Dummy forward pass to be able to produce summary.
-            world_model(sample["obs"][:, 0], sample["actions"][:, 0], sample["h_states"])
+            world_model(
+                sample["obs"][:, 0],
+                sample["actions"][:, 0],
+                sample["h_states"][:, 0],
+            )
             world_model.summary()
 
         if total_train_steps % summary_frequency_train_steps == 0:
             summarize_forward_train_outs_vs_samples(
-                forward_train_outs=world_model_train_results["forward_train_outs"],
+                forward_train_outs=forward_train_outs,
                 sample=sample,
                 batch_size_B=batch_size_B,
                 batch_length_T=batch_length_T,
@@ -295,9 +296,7 @@ for iteration in range(1000):
         )
 
         # Train critic and actor.
-        if not train_world_model_only:
-            forward_train_outs = world_model_train_results["forward_train_outs"]
-
+        if train_critic:
             # Build critic model first, so we can initialize EMA weights.
             if not dreamer_model.critic.trainable_variables:
                 # Forward pass for fast critic.
@@ -327,18 +326,21 @@ for iteration in range(1000):
                 critic_optimizer=critic_optimizer,
                 entropy_scale=entropy_scale,
                 return_normalization_decay=return_normalization_decay,
+                train_actor=train_actor,
             )
             L_critic = actor_critic_train_results["L_critic"]
-            L_actor = actor_critic_train_results["L_actor"]
+            if train_actor:
+                L_actor = actor_critic_train_results["L_actor"]
 
             # Summarize actor/critic models.
             if iteration == 0 and sub_iter == 0:
                 # Dummy forward pass to be able to produce summary.
-                dreamer_model.actor(
-                    actor_critic_train_results["dream_data"]["h_states_t1_to_Hp1"][:, 0],
-                    actor_critic_train_results["dream_data"]["z_states_prior_t1_to_H"][:, 0],
-                )
-                dreamer_model.actor.summary()
+                if train_actor:
+                    dreamer_model.actor(
+                        actor_critic_train_results["dream_data"]["h_states_t1_to_Hp1"][:, 0],
+                        actor_critic_train_results["dream_data"]["z_states_prior_t1_to_H"][:, 0],
+                    )
+                    dreamer_model.actor.summary()
                 dreamer_model.critic(
                     actor_critic_train_results["dream_data"]["h_states_t1_to_Hp1"][:, 0],
                     actor_critic_train_results["dream_data"]["z_states_prior_t1_to_H"][:, 0],
@@ -350,8 +352,8 @@ for iteration in range(1000):
             if total_train_steps % summary_frequency_train_steps == 0:
                 #TODO: put all of this block into tensorboard module.
                 #TODO: Make this work with any renderable env.
-                if env_runner.config.env in ["CartPoleDebug-v0", "CartPole-v1"]:
-                    from utils.cartpole_debug import create_cartpole_dream_image
+                if env_runner.config.env in ["CartPoleDebug-v0", "CartPole-v1", "FrozenLake-v1"]:
+                    from utils.cartpole_debug import create_cartpole_dream_image, create_frozenlake_dream_image
                     dream_data = actor_critic_train_results["dream_data"]
                     dreamed_obs_B_H = reconstruct_obs_from_h_and_z(
                         h_t1_to_Tp1=dream_data["h_states_t1_to_Hp1"],
@@ -361,13 +363,15 @@ for iteration in range(1000):
                     )
                     # Take 0th dreamed trajectory and produce series of images.
                     for t in range(len(dreamed_obs_B_H[0])):
-                        img = create_cartpole_dream_image(
+                        func = create_cartpole_dream_image if env_runner.config.env.startswith("CartPole") else create_frozenlake_dream_image
+                        img = func(
                             dreamed_obs=dreamed_obs_B_H[0][t],
                             dreamed_V=dream_data["values_dreamed_t1_to_Hp1"][0][t],
                             dreamed_a=dream_data["actions_dreamed_t1_to_H"][0][t],
-                            dreamed_r=dream_data["rewards_dreamed_t1_to_H"][0][t],
-                            dreamed_c=dream_data["continues_dreamed_t1_to_H"][0][t],
+                            dreamed_r_tp1=dream_data["rewards_dreamed_t1_to_Hp1"][0][t+1],
+                            dreamed_c_tp1=dream_data["continues_dreamed_t1_to_Hp1"][0][t+1],
                             value_target=actor_critic_train_results["value_targets_B_H"][0][t],
+                            initial_h=dream_data["h_states_t1_to_Hp1"][0][t],
                             as_tensor=True,
                         )
                         tf.summary.image(
@@ -380,13 +384,14 @@ for iteration in range(1000):
                 tf.summary.histogram("L_critic_value_targets", actor_critic_train_results["value_targets_B_H"])
                 tf.summary.histogram("L_critic_ema_regularization_loss_B_H", actor_critic_train_results["ema_regularization_loss_B_H"])
 
-                tf.summary.scalar("L_actor", L_actor)
-                tf.summary.scalar("L_actor_action_entropy", actor_critic_train_results["action_entropy"])
-                tf.summary.histogram("L_actor_scaled_value_targets_B_H", actor_critic_train_results["scaled_value_targets_B_H"])
-                tf.summary.histogram("L_actor_logp_loss_B_H", actor_critic_train_results["logp_loss_B_H"])
+                if train_actor:
+                    tf.summary.scalar("L_actor", L_actor)
+                    tf.summary.scalar("L_actor_action_entropy", actor_critic_train_results["action_entropy"])
+                    tf.summary.histogram("L_actor_scaled_value_targets_B_H", actor_critic_train_results["scaled_value_targets_B_H"])
+                    tf.summary.histogram("L_actor_logp_loss_B_H", actor_critic_train_results["logp_loss_B_H"])
 
             print(
-                f"\t\tL_actor={L_actor.numpy():.5f} L_critic={L_critic.numpy():.5f}"
+                f"\t\tL_actor={L_actor.numpy() if train_actor else 0.0:.5f} L_critic={L_critic.numpy():.5f}"
             )
 
         sub_iter += 1
@@ -408,7 +413,7 @@ for iteration in range(1000):
             dream_data = dreamer_model.dream_trajectory_with_burn_in(
                 observations=sample["obs"][:, :burn_in_T],  # use only first burn_in_T obs
                 actions=sample["actions"][:, :burn_in_T + dreamed_T],  # use all actions from 0 to T (no actor)
-                initial_h=sample["h_states"],
+                initial_h=sample["h_states"][:, 0],  # use initial T=0 h-states
                 timesteps=dreamed_T,  # dream for n timesteps
                 use_sampled_actions=True,  # use sampled actions, not the actor
             )
@@ -425,12 +430,14 @@ for iteration in range(1000):
 
             # Run n episodes in an actual env and report mean episode returns.
             print(f"Running {evaluation_num_episodes} episodes in env for evaluation ...")
-            _, _, _, eval_rewards, _, _ = env_runner_evaluation.sample_episodes(
+            episodes = env_runner_evaluation.sample_episodes(
                 num_episodes=evaluation_num_episodes, random_actions=False
             )
-            mean_episode_return = np.mean([np.sum(rs) for rs in eval_rewards])
-            print(f"\tMean episode return: {mean_episode_return:.4f}")
+            mean_episode_len = np.mean([len(eps) for eps in episodes])
+            mean_episode_return = np.mean([eps.get_return() for eps in episodes])
+            print(f"\tMean episode return: {mean_episode_return:.4f}; mean len: {mean_episode_len:.1f}")
             tf.summary.scalar("EVAL_mean_episode_return", mean_episode_return)
+            tf.summary.scalar("EVAL_mean_episode_length", mean_episode_len)
 
     # Save the model every N iterations (but not after the very first).
     if iteration != 0 and iteration % model_save_frequency_main_iters == 0:

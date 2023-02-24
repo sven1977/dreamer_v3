@@ -28,33 +28,23 @@ def train_world_model_one_step(
         forward_train_outs = world_model.forward_train(
             observations=sample["obs"],
             actions=sample["actions"],
-            initial_h=sample["h_states"],
+            initial_h=sample["h_states"][:, 0],
         )
-        # TEST: OOM
-        #print("\tafter world_model.forward_train:",
-        #      tf.config.experimental.get_memory_info('GPU:0')['current'])
 
         prediction_losses = world_model_prediction_losses(
             observations=sample["obs"],
             rewards=sample["rewards"],
-            terminateds=sample["terminateds"],
-            truncateds=sample["truncateds"],
+            continues=sample["continues"],
             B=tf.convert_to_tensor(batch_size_B),
             T=tf.convert_to_tensor(batch_length_T),
             forward_train_outs=forward_train_outs,
         )
-        # TEST: OOM
-        #print("\tafter world_model_prediction_losses:",
-        #      tf.config.experimental.get_memory_info('GPU:0')['current'])
 
         L_dyn_B_T, L_rep_B_T = world_model_dynamics_and_representation_loss(
             B=tf.convert_to_tensor(batch_size_B),
             T=tf.convert_to_tensor(batch_length_T),
             forward_train_outs=forward_train_outs,
         )
-        # TEST: OOM
-        #print("\tafter world_model_dynamics_and_representation_loss:",
-        #      tf.config.experimental.get_memory_info('GPU:0')['current'])
 
         L_pred_B_T = prediction_losses["total_loss_B_T"]
         L_pred = tf.reduce_mean(tf.reduce_sum(L_pred_B_T, axis=-1))
@@ -92,10 +82,6 @@ def train_world_model_one_step(
         clipped_gradients.append(tf.clip_by_value(grad, -grad_clip, grad_clip))
     # Apply gradients to our model.
     optimizer.apply_gradients(zip(clipped_gradients, world_model.trainable_variables))
-
-    # TEST: OOM
-    #print("\tafter world_model.apply_gradients:",
-    #      tf.config.experimental.get_memory_info('GPU:0')['current'])
 
     return {
         # Forward train results.
@@ -146,6 +132,7 @@ def train_actor_and_critic_one_step(
     critic_optimizer,
     entropy_scale,
     return_normalization_decay,
+    train_actor=True,
 ):
     # Compute losses.
     with tf.GradientTape(persistent=True) as tape:
@@ -157,46 +144,51 @@ def train_actor_and_critic_one_step(
             timesteps=horizon_H,
         )
         critic_loss_results = critic_loss(dream_data, gamma=gamma, lambda_=lambda_)
-        actor_loss_results = actor_loss(
-            dream_data=dream_data,
-            critic_loss_results=critic_loss_results,
-            actor=dreamer_model.actor,
-            entropy_scale=entropy_scale,
-            return_normalization_decay=return_normalization_decay
-        )
+        if train_actor:
+            actor_loss_results = actor_loss(
+                dream_data=dream_data,
+                value_targets=critic_loss_results["value_targets_B_H"],
+                actor=dreamer_model.actor,
+                entropy_scale=entropy_scale,
+                return_normalization_decay=return_normalization_decay
+            )
 
     results = critic_loss_results.copy()
-    results.update(actor_loss_results)
-    results["dream_data"] = dream_data
+    if train_actor:
+        results.update(actor_loss_results)
+        L_actor = results["L_actor"]
 
-    L_actor = results["L_actor"]
+    results["dream_data"] = dream_data
     L_critic = results["L_critic"]
 
     # Get the gradients from the tape.
-    actor_gradients = tape.gradient(
-        L_actor,
-        dreamer_model.actor.trainable_variables,
-    )
+    if train_actor:
+        actor_gradients = tape.gradient(
+            L_actor,
+            dreamer_model.actor.trainable_variables,
+        )
     critic_gradients = tape.gradient(
         L_critic,
         dreamer_model.critic.trainable_variables,
     )
 
     # Clip all gradients.
-    clipped_actor_gradients = []
-    for grad in actor_gradients:
-        clipped_actor_gradients.append(
-            tf.clip_by_value(grad, -actor_grad_clip, actor_grad_clip)
-        )
+    if train_actor:
+        clipped_actor_gradients = []
+        for grad in actor_gradients:
+            clipped_actor_gradients.append(
+                tf.clip_by_value(grad, -actor_grad_clip, actor_grad_clip)
+            )
     clipped_critic_gradients = []
     for grad in critic_gradients:
         clipped_critic_gradients.append(
             tf.clip_by_value(grad, -critic_grad_clip, critic_grad_clip)
         )
     # Apply gradients to our models.
-    actor_optimizer.apply_gradients(
-        zip(clipped_actor_gradients, dreamer_model.actor.trainable_variables)
-    )
+    if train_actor:
+        actor_optimizer.apply_gradients(
+            zip(clipped_actor_gradients, dreamer_model.actor.trainable_variables)
+        )
     critic_optimizer.apply_gradients(
         zip(clipped_critic_gradients, dreamer_model.critic.trainable_variables)
     )
@@ -204,6 +196,8 @@ def train_actor_and_critic_one_step(
     # Update EMA weights of the critic.
     dreamer_model.critic.update_ema()
 
-    results["actor_gradients"] = actor_gradients
+    if train_actor:
+        results["actor_gradients"] = actor_gradients
     results["critic_gradients"] = critic_gradients
+
     return results
