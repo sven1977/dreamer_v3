@@ -14,12 +14,14 @@ class Episode:
         self.actions = []
         # Rewards: t1 to T.
         self.rewards = []
+        # h-states: t1 (initial h is always 0s) to T.
+        self.h_states = []
         # obs(T) is the final observation in the episode.
         self.is_terminated = False
 
     def concat_episode(self, episode_chunk: "Episode"):
         assert episode_chunk.id_ == self.id_
-        assert self.is_terminated is False
+        assert not self.is_terminated
 
         episode_chunk.validate()
 
@@ -28,22 +30,26 @@ class Episode:
         # Pop out our end.
         self.observations.pop()
 
-        # Extend ourselves.
-        self.observations.extend(episode_chunk.observations)
-        self.actions.extend(episode_chunk.actions)
-        self.rewards.extend(episode_chunk.rewards)
+        # Extend ourselves. In case, episode_chunk is already terminated (and numpyfied)
+        # we need to convert to lists (as we are ourselves still filling up lists).
+        self.observations.extend(list(episode_chunk.observations))
+        self.actions.extend(list(episode_chunk.actions))
+        self.rewards.extend(list(episode_chunk.rewards))
+        self.h_states.extend(list(episode_chunk.h_states))
 
         if episode_chunk.is_terminated:
             self.is_terminated = True
         # Validate.
         self.validate()
 
-    def add_timestep(self, observation, action, reward, is_terminated=False):
+    def add_timestep(self, observation, action, reward, h_state=None, is_terminated=False):
         assert not self.is_terminated
 
         self.observations.append(observation)
         self.actions.append(action)
         self.rewards.append(reward)
+        if h_state is not None:
+            self.h_states.append(h_state)
         self.is_terminated = is_terminated
         self.validate()
 
@@ -60,6 +66,15 @@ class Episode:
         assert (
             len(self.observations) == len(self.rewards) + 1 == len(self.actions) + 1
         )
+        # H-states are either non-existent OR we have the same as rewards.
+        assert len(self.h_states) == 0 or len(self.h_states) == len(self.rewards)
+
+        # Convert all lists to numpy arrays, if we are terminated.
+        if self.is_terminated:
+            self.observations = np.array(self.observations)
+            self.actions = np.array(self.actions)
+            self.rewards = np.array(self.rewards)
+            self.h_states = np.array(self.h_states)
 
     def get_return(self):
         return sum(self.rewards)
