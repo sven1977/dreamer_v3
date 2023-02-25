@@ -4,8 +4,6 @@ cartpole-experiment:
 
   model_dimension: XS
 
-  train_world_model_only: false
-
   training_ratio: 1024
 
   summary_frequency_train_steps: 5
