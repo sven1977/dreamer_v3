@@ -56,7 +56,7 @@ class RewardPredictorLayer(tf.keras.layers.Layer):
             # weights of the reward predictor and critic to zeros, which effectively
             # alleviates the problem and accelerates early learning."
             kernel_initializer="zeros",
-            bias_initializer="zeros",  # default anyways
+            bias_initializer="zeros",  # zero-bias is default anyways
             trainable=trainable,
             name=f"reward-{self.num_buckets}buckets-predictor-layer"
         )

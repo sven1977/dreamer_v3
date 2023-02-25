@@ -188,7 +188,7 @@ def _summarize_obs(*, computed_float_obs_B_T_dims, sampled_obs_B_T_dims, B, T, d
             `sampled_obs_B_T_dims` above).
         T: The batch length T (see shapes of `computed_float_obs_B_T_dims` and
             `sampled_obs_B_T_dims` above).
-        descr: A string used to describe the computed data tobe used in the TB
+        descr: A string used to describe the computed data to be used in the TB
             summaries.
     """
     # MSE is the mean over all feature dimensions.
