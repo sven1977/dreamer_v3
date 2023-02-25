@@ -40,13 +40,20 @@ def critic_loss(
         axis=1,
     )
     # Vector product to reduce over return-buckets. See [1] eq. 10.
-    value_symlog_logp_B_H = tf.reduce_sum(
+    #value_symlog_logp_B_H = tf.reduce_sum(
+    #    tf.multiply(
+    #        tf.stop_gradient(value_symlog_targets_two_hot_B_H),
+    #        tf.math.log(value_symlog_probs_B_H),
+    #    ),
+    #    axis=-1,
+    #)
+    value_symlog_logp_B_H = tf.math.log(tf.reduce_sum(
         tf.multiply(
             tf.stop_gradient(value_symlog_targets_two_hot_B_H),
-            tf.math.log(value_symlog_probs_B_H),
+            value_symlog_probs_B_H,
         ),
         axis=-1,
-    )
+    ))
 
     # Compute EMA L2-regularization loss.
     value_symlog_ema_probs_B_H = tf.stack(

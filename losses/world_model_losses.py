@@ -42,9 +42,11 @@ def world_model_prediction_losses(
     # A) Two-hot encode.
     two_hot_rewards = two_hot(rewards)
     # two_hot_rewards=[B*T, num_buckets]
-    predicted_reward_log_probs = tf.math.log(reward_distr.probs)
+    #predicted_reward_log_probs = tf.math.log(reward_distr.probs)
+    predicted_reward_probs = reward_distr.probs
     # predicted_reward_log_probs=[B*T, num_buckets]
-    reward_loss_two_hot = - tf.reduce_sum(tf.multiply(two_hot_rewards, predicted_reward_log_probs), axis=-1)
+    #reward_loss_two_hot = - tf.reduce_sum(tf.multiply(two_hot_rewards, predicted_reward_log_probs), axis=-1)
+    reward_loss_two_hot = - tf.math.log(tf.reduce_sum(tf.multiply(two_hot_rewards, predicted_reward_probs), axis=-1))
     # Unfold time rank back in.
     reward_loss_two_hot = tf.reshape(reward_loss_two_hot, (B, T))
 

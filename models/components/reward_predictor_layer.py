@@ -66,15 +66,19 @@ class RewardPredictorLayer(tf.keras.layers.Layer):
         )
 
     def call(self, inputs_, return_distribution=False):
-        """Computes a distribution over N equal sized buckets reward.
-
-        TODO: which tfp distribution do we use here?
+        """Computes a distribution over N equal sized buckets of possible reward values.
 
         Args:
             inputs_: The input tensor for the layer, which computes the reward bucket
                 weights (logits). [B, dim].
             return_distribution: Whether to return the FiniteDiscrete reward
-                distribution object as a second return value (besides a reward sample).
+                distribution object as a second return value (besides the expected
+                reward).
+
+        Returns:
+            The expected reward OR a tuple consisting of the expected reward and the
+            tfp `FiniteDiscrete` distribution object. To get the individual bucket
+            probs, do `[FiniteDiscrete object].probs`.
         """
         # Compute the `num_buckets` weights.
         assert len(inputs_.shape) == 2
