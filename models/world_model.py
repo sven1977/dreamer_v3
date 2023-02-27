@@ -30,6 +30,7 @@ class WorldModel(tf.keras.Model):
         encoder: tf.keras.Model,
         decoder: tf.keras.Model,
         num_gru_units: Optional[int] = None,
+        symlog_obs: bool = True,
     ):
         """TODO
 
@@ -53,18 +54,19 @@ class WorldModel(tf.keras.Model):
                 a (symlogged) predicted observation.
             num_gru_units: The number of GRU units to use. If None, use
                 `model_dimension` to figure out this parameter.
-            #symlog_obs: Whether to predict decoded observations in symlog space.
-            #    This should be False for image based observations.
-            #    According to the paper [1] Appendix E: "NoObsSymlog: This ablation
-            #    removes the symlog encoding of inputs to the world model and also
-            #    changes the symlog MSE loss in the decoder to a simple MSE loss.
-            #    *Because symlog encoding is only used for vector observations*, this
-            #    ablation is equivalent to DreamerV3 on purely image-based environments".
+            symlog_obs: Whether to predict decoded observations in symlog space.
+                This should be False for image based observations.
+                According to the paper [1] Appendix E: "NoObsSymlog: This ablation
+                removes the symlog encoding of inputs to the world model and also
+                changes the symlog MSE loss in the decoder to a simple MSE loss.
+                *Because symlog encoding is only used for vector observations*, this
+                ablation is equivalent to DreamerV3 on purely image-based environments".
         """
         super().__init__()
 
         self.model_dimension = model_dimension
         self.batch_length_T = batch_length_T
+        self.symlog_obs = symlog_obs
 
         # RSSM (Recurrent State-Space Model)
         # Encoder + z-generator (x, h -> z).
@@ -168,12 +170,15 @@ class WorldModel(tf.keras.Model):
                 z(t) and then - in combination with the first action (a(t)) and z(t)
                 to yield the next h-state (h(t+1)) via the RSSM.
         """
+        if self.symlog_obs:
+            observations = symlog(observations)
+
         # Compute bare encoder outs (not z; this is done later with involvement of the
         # sequence model and the h-states).
         # Fold time dimension for CNN pass.
         B, T = observations.shape[0], observations.shape[1]
         observations = tf.reshape(observations, shape=[-1] + observations.shape.as_list()[2:])
-        encoder_out = self.encoder(symlog(observations))
+        encoder_out = self.encoder(observations)
         # Unfold time dimension.
         encoder_out = tf.reshape(encoder_out, shape=[B, T] + encoder_out.shape.as_list()[1:])
         # encoder_out=[B, T, ...]
@@ -274,7 +279,9 @@ class WorldModel(tf.keras.Model):
         # Compute bare encoder outs (not z; this done in next step with involvement of
         # the previous output (initial_h) of the sequence model).
         # encoder_outs=[B, ...]
-        encoder_out = self.encoder(symlog(observations))
+        if self.symlog_obs:
+            observations = symlog(observations)
+        encoder_out = self.encoder(observations)
         posterior_mlp_input = tf.concat([encoder_out, initial_h], axis=-1)
         repr_input = self.posterior_mlp(posterior_mlp_input)
         # Draw one z-sample (no need to return the distribution here).

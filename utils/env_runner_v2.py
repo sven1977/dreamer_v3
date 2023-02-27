@@ -38,10 +38,18 @@ class CountEnv(gym.ObservationWrapper):
 
 
 class NormalizedImageEnv(gym.ObservationWrapper):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.observation_space = gym.spaces.Box(
+            -1.0,
+            1.0,
+            shape=self.observation_space.shape,
+            dtype=np.float32,
+        )
     # Divide by scale and center around 0.0, such that observations are in the range
     # of -1.0 and 1.0.
     def observation(self, observation):
-        return (observation / 128.0) - 1.0
+        return (observation.astype(np.float32) / 128.0) - 1.0
 
 
 class OneHot(gym.ObservationWrapper):
@@ -95,7 +103,7 @@ class EnvRunnerV2:
                 partial(gym.wrappers.TimeLimit, max_episode_steps=108000),
                 color_reduction_v0,  # grayscale
                 partial(resize_v1, x_size=64, y_size=64),  # resize to 64x64
-                #NormalizedImageEnv,
+                NormalizedImageEnv,
                 NoopResetEnv,
                 MaxAndSkipEnv,
             ]

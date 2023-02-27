@@ -38,6 +38,7 @@ def train_world_model_one_step(
             B=tf.convert_to_tensor(batch_size_B),
             T=tf.convert_to_tensor(batch_length_T),
             forward_train_outs=forward_train_outs,
+            symlog_obs=world_model.symlog_obs,
         )
 
         L_dyn_B_T, L_rep_B_T = world_model_dynamics_and_representation_loss(

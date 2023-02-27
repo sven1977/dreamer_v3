@@ -38,7 +38,7 @@ from utils.tensorboard import (
     summarize_world_model_losses,
 )
 
-with open("frozenlake_2x2.yaml", "r") as f:
+with open("atari_pong.yaml", "r") as f:
     options = yaml.safe_load(f)
     assert len(options) == 1
     options = next(iter(options.values()))
@@ -64,6 +64,9 @@ batch_length_T = 64
 # to compute z, after that, only the prior (dynamics network) will be used.
 burn_in_T = 5
 horizon_H = 15
+
+# Whether to symlog the observations or not.
+symlog_obs = not options.get("is_atari", False)
 
 # Actor/critic hyperparameters.
 discount_gamma = options.get("discount_gamma", 0.997)  # [1] eq. 7.
@@ -122,7 +125,8 @@ else:
         ) if options["is_atari"] else VectorDecoder(
             model_dimension=model_dimension,
             observation_space=env_runner.env.single_observation_space,
-        )
+        ),
+        symlog_obs=symlog_obs,
     )
     dreamer_model = DreamerModel(
         model_dimension=model_dimension,
@@ -285,6 +289,7 @@ for iteration in range(1000):
                 sample=sample,
                 batch_size_B=batch_size_B,
                 batch_length_T=batch_length_T,
+                symlog_obs=symlog_obs,
             )
             summarize_world_model_losses(world_model_train_results)
 

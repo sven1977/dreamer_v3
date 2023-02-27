@@ -19,15 +19,22 @@ def world_model_prediction_losses(
         B,
         T,
         forward_train_outs,
+        symlog_obs: bool = True,
 ):
+    if symlog_obs:
+        observations = symlog(observations)
+
     obs_distr = forward_train_outs["obs_distribution_BxT"]
     # Learn to produce symlog'd observation predictions.
     # Fold time dim and flatten all other (image?) dims.
     observations = tf.reshape(observations, shape=[-1, int(np.prod(observations.shape.as_list()[2:]))])
-    decoder_loss = - obs_distr.log_prob(symlog(observations))
-    decoder_loss /= observations.shape.as_list()[1]
-    #TODO: try MSE (instead of -log(p))
-    #decoder_loss = tf.losses.mse(symlog(observations), obs_distr.loc)
+
+    # Neg logp loss.
+    #decoder_loss = - obs_distr.log_prob(observations)
+    #decoder_loss /= observations.shape.as_list()[1]
+    # MSE loss (instead of -log(p)).
+    decoder_loss = tf.losses.mse(observations, obs_distr.loc)
+
     # Unfold time rank back in.
     decoder_loss = tf.reshape(decoder_loss, (B, T))
 

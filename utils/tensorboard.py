@@ -8,6 +8,7 @@ def reconstruct_obs_from_h_and_z(
     z_t1_to_T,
     dreamer_model,
     obs_dims_shape,
+    symlog_obs: bool = True,
 ):
     """Returns """
     shape = tf.shape(z_t1_to_T)
@@ -21,12 +22,12 @@ def reconstruct_obs_from_h_and_z(
         h=tf.reshape(h_t1_to_Tp1[:, :-1], shape=(B * T, -1)),
         z=tf.reshape(z_t1_to_T, shape=(B * T,) + z_t1_to_T.shape[2:]),
     )
+    # Use mean() of the Gaussian, no sample!
+    loc = reconstructed_obs_distr_BxT.loc
+    if symlog_obs:
+        loc = inverse_symlog(loc)
     # Unfold time rank again.
-    reconstructed_obs_B_T = tf.reshape(
-        # Use mean() of the Gaussian, no sample!
-        inverse_symlog(reconstructed_obs_distr_BxT.loc),
-        shape=(B, T) + obs_dims_shape,
-    )
+    reconstructed_obs_B_T = tf.reshape(loc, shape=(B, T) + obs_dims_shape)
     # Return inverse symlog'd (real env obs space) reconstructed observations.
     return reconstructed_obs_B_T
 
@@ -36,6 +37,7 @@ def summarize_forward_train_outs_vs_samples(
     sample,
     batch_size_B,
     batch_length_T,
+    symlog_obs: bool = True,
 ):
     """Summarizes sampled data (from the replay buffer) vs world-model predictions.
 
@@ -58,10 +60,15 @@ def summarize_forward_train_outs_vs_samples(
         batch_length_T: The batch length (T). This is the length of an individual
             trajectory sampled from the buffer.
     """
+    obs_distr_loc = forward_train_outs["obs_distribution_BxT"].loc
+    if symlog_obs:
+        obs_distr_loc = inverse_symlog(obs_distr_loc)
+
     _summarize_obs(
-        computed_float_obs_B_T_dims=tf.reshape(inverse_symlog(
-            forward_train_outs["obs_distribution_BxT"].loc
-        ), shape=(batch_size_B, batch_length_T) + sample["obs"].shape[2:]),
+        computed_float_obs_B_T_dims=tf.reshape(
+            obs_distr_loc,
+            shape=(batch_size_B, batch_length_T) + sample["obs"].shape[2:],
+        ),
         sampled_obs_B_T_dims=sample["obs"],
         B=batch_size_B,
         T=batch_length_T,
