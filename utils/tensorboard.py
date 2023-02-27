@@ -218,7 +218,10 @@ def _summarize_obs(*, computed_float_obs_B_T_dims, sampled_obs_B_T_dims, B, T, d
         # Restore image pixels from normalized (non-symlog'd) data.
         if not symlog_obs:
             computed_float_obs_B_T_dims = (computed_float_obs_B_T_dims + 1.0) * 128
-
+            sampled_obs_B_T_dims = (sampled_obs_B_T_dims + 1.0) * 128
+            sampled_obs_B_T_dims = tf.cast(
+                tf.clip_by_value(sampled_obs_B_T_dims, 0.0, 255.0), tf.uint8
+            )
         computed_images = tf.cast(
             tf.clip_by_value(computed_float_obs_B_T_dims, 0.0, 255.0), tf.uint8
         )
