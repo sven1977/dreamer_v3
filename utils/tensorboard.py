@@ -226,7 +226,7 @@ def _summarize_obs(*, computed_float_obs_B_T_dims, sampled_obs_B_T_dims, B, T, d
             tf.clip_by_value(computed_float_obs_B_T_dims, 0.0, 255.0), tf.uint8
         )
         # Concat sampled and computed images along the height axis (2) such that
-        # real images show on top of respective predicted ones.
+        # real images show below respective predicted ones.
         # (B, w, h, C)
         sampled_vs_computed_images = tf.concat(
             [computed_images[0], sampled_obs_B_T_dims[0]], axis=1,

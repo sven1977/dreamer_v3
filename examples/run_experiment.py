@@ -437,6 +437,7 @@ for iteration in range(1000):
                 burn_in_T=burn_in_T,
                 dreamed_T=dreamed_T,
                 dreamer_model=dreamer_model,
+                symlog_obs=symlog_obs,
             )
             print(f"\tMSE sampled vs dreamed obs (B={batch_size_B} T/H={dreamed_T}): {mse_sampled_vs_dreamed_obs:.6f}")
 
