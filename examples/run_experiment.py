@@ -86,9 +86,9 @@ config = (
         # integrates information over time, DreamerV2 does not use frame stacking.
         # The experiments use a single-task setup where a separate agent is trained
         # for each game. Moreover, each agent uses only a single environment instance.
-        # already done by MaxAndSkip wrapper "frameskip": 4,  # "action repeat" (frameskip) == 4
         "repeat_action_probability": 0.25,  # "sticky actions"
         "full_action_space": True,  # "full action space"
+        "frameskip": 1,  # already done by MaxAndSkip wrapper: "action repeat" == 4
     } if options["is_atari"] else options.get("env_config", {}))
     .rollouts(
         num_envs_per_worker=1,
