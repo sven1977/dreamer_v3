@@ -51,6 +51,15 @@ class WorldModel(tf.keras.Model):
                 (sequence model) or not (dynamics network)).
             decoder: The decoder Model taking h- and z- states as input and generating
                 a (symlogged) predicted observation.
+            num_gru_units: The number of GRU units to use. If None, use
+                `model_dimension` to figure out this parameter.
+            #symlog_obs: Whether to predict decoded observations in symlog space.
+            #    This should be False for image based observations.
+            #    According to the paper [1] Appendix E: "NoObsSymlog: This ablation
+            #    removes the symlog encoding of inputs to the world model and also
+            #    changes the symlog MSE loss in the decoder to a simple MSE loss.
+            #    *Because symlog encoding is only used for vector observations*, this
+            #    ablation is equivalent to DreamerV3 on purely image-based environments".
         """
         super().__init__()
 
