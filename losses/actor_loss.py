@@ -18,6 +18,7 @@ def actor_loss(
 ):
     scaled_value_targets_B_H = compute_scaled_value_targets(
         value_targets=value_targets,
+        value_predictions=dream_data["values_dreamed_t1_to_Hp1"][:, :-1],
         actor=actor,
         return_normalization_decay=return_normalization_decay,
     )
@@ -78,14 +79,16 @@ def actor_loss(
 def compute_scaled_value_targets(
     *,
     value_targets,
+    value_predictions,
     actor,
     return_normalization_decay: float = 0.99,
 ):
     value_targets_B_H = value_targets
+    value_predictions_B_H = value_predictions
 
     # Compute S: [1] eq. 12.
-    Per_R_95 = tfp.stats.percentile(value_targets_B_H, 95)
     Per_R_5 = tfp.stats.percentile(value_targets_B_H, 5)
+    Per_R_95 = tfp.stats.percentile(value_targets_B_H, 95)
 
     # Update EMAs stored in actor network.
     # Initial values: Just set.
@@ -106,10 +109,16 @@ def compute_scaled_value_targets(
         )
 
     # [1] eq. 11 (first term).
-    scaled_value_targets_B_H = tf.stop_gradient(
-        value_targets_B_H / tf.math.maximum(
-            1.0,
-            actor.ema_value_target_pct95 - actor.ema_value_target_pct5,
-       )
-    )
-    return scaled_value_targets_B_H
+    #scaled_value_targets_B_H = tf.stop_gradient(
+    #    value_targets_B_H / tf.math.maximum(
+    #        1.0,
+    #        actor.ema_value_target_pct95 - actor.ema_value_target_pct5,
+    #   )
+    #)
+    # Dani's code: TODO: describe ...
+    offset = actor.ema_value_target_pct5
+    invscale = tf.math.maximum(1e-8, (actor.ema_value_target_pct95 - actor.ema_value_target_pct5))
+    scaled_value_targets_B_H = (value_targets_B_H - offset) / invscale
+    scaled_value_predictions_B_H = (value_predictions_B_H - offset) / invscale
+    # Return advantages.
+    return tf.stop_gradient(scaled_value_targets_B_H - scaled_value_predictions_B_H)
