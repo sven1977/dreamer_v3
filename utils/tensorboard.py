@@ -8,7 +8,6 @@ def reconstruct_obs_from_h_and_z(
     z_t1_to_T,
     dreamer_model,
     obs_dims_shape,
-    symlog_obs: bool = True,
 ):
     """Returns """
     shape = tf.shape(z_t1_to_T)
@@ -24,8 +23,6 @@ def reconstruct_obs_from_h_and_z(
     )
     # Use mean() of the Gaussian, no sample!
     loc = reconstructed_obs_distr_BxT.loc
-    if symlog_obs:
-        loc = inverse_symlog(loc)
     # Unfold time rank again.
     reconstructed_obs_B_T = tf.reshape(loc, shape=(B, T) + obs_dims_shape)
     # Return inverse symlog'd (real env obs space) reconstructed observations.
@@ -60,19 +57,16 @@ def summarize_forward_train_outs_vs_samples(
         batch_length_T: The batch length (T). This is the length of an individual
             trajectory sampled from the buffer.
     """
-    obs_distr_loc = forward_train_outs["obs_distribution_BxT"].loc
-    if symlog_obs:
-        obs_distr_loc = inverse_symlog(obs_distr_loc)
-
     _summarize_obs(
         computed_float_obs_B_T_dims=tf.reshape(
-            obs_distr_loc,
+            forward_train_outs["obs_distribution_BxT"].loc,
             shape=(batch_size_B, batch_length_T) + sample["obs"].shape[2:],
         ),
         sampled_obs_B_T_dims=sample["obs"],
         B=batch_size_B,
         T=batch_length_T,
         descr="predicted(posterior)",
+        symlog_obs=symlog_obs,
     )
     predicted_rewards = tf.reshape(
         inverse_symlog(forward_train_outs["reward_distribution_BxT"].mean()),
@@ -108,6 +102,7 @@ def summarize_dreamed_trajectory_vs_samples(
     burn_in_T,
     dreamed_T,
     dreamer_model,
+    symlog_obs: bool = True,
 ):
     # Obs MSE.
     dreamed_obs = reconstruct_obs_from_h_and_z(
@@ -123,6 +118,7 @@ def summarize_dreamed_trajectory_vs_samples(
         B=batch_size_B,
         T=dreamed_T,
         descr="dreamed(prior)",
+        symlog_obs=symlog_obs,
     )
 
     # Reward MSE.
@@ -183,7 +179,7 @@ def summarize_world_model_losses(world_model_train_results):
     tf.summary.scalar("L_world_model_total", world_model_train_results["L_world_model_total"])
 
 
-def _summarize_obs(*, computed_float_obs_B_T_dims, sampled_obs_B_T_dims, B, T, descr):
+def _summarize_obs(*, computed_float_obs_B_T_dims, sampled_obs_B_T_dims, B, T, descr, symlog_obs):
     """Summarizes computed- vs sampled observations: MSE and (if applicable) images.
 
     Args:
@@ -198,6 +194,9 @@ def _summarize_obs(*, computed_float_obs_B_T_dims, sampled_obs_B_T_dims, B, T, d
         descr: A string used to describe the computed data to be used in the TB
             summaries.
     """
+    if symlog_obs:
+        computed_float_obs_B_T_dims = inverse_symlog(computed_float_obs_B_T_dims)
+
     # MSE is the mean over all feature dimensions.
     # Images: Flatten image dimensions (w, h, C); Vectors: Mean over all items, etc..
     # Then sum over time-axis and mean over batch-axis.
@@ -216,6 +215,10 @@ def _summarize_obs(*, computed_float_obs_B_T_dims, sampled_obs_B_T_dims, B, T, d
     # Images: Create image summary, comparing computed images with actual sampled ones.
     # Note: We only use images here from the first (0-index) batch item.
     if len(sampled_obs_B_T_dims.shape) in [2+2, 2+3]:
+        # Restore image pixels from normalized (non-symlog'd) data.
+        if not symlog_obs:
+            computed_float_obs_B_T_dims = (computed_float_obs_B_T_dims + 1.0) * 128
+
         computed_images = tf.cast(
             tf.clip_by_value(computed_float_obs_B_T_dims, 0.0, 255.0), tf.uint8
         )
