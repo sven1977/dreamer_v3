@@ -394,6 +394,8 @@ for iteration in range(1000):
                     tf.summary.scalar("L_actor_action_entropy_term", actor_critic_train_results["L_actor_action_entropy_term"])
                     tf.summary.histogram("L_actor_scaled_value_targets_B_H", actor_critic_train_results["scaled_value_targets_B_H"])
                     tf.summary.histogram("L_actor_logp_loss_B_H", actor_critic_train_results["logp_loss_B_H"])
+                    tf.summary.scalar("L_actor_ema_value_target_pct95", actor_critic_train_results["L_actor_ema_value_target_pct95"])
+                    tf.summary.scalar("L_actor_ema_value_target_pct5", actor_critic_train_results["L_actor_ema_value_target_pct5"])
 
             print(
                 f"\t\tL_actor={L_actor.numpy() if train_actor else 0.0:.5f} L_critic={L_critic.numpy():.5f}"

@@ -27,7 +27,12 @@ class ActorNetwork(tf.keras.Model):
         # The EMA decay rate used for the [Percentile(R, 95%) - Percentile(R, 5%)]
         # diff to scale value targets for the actor loss.
         self.return_normalization_decay = return_normalization_decay
-        self.ema_range_95_minus_5 = tf.Variable(np.nan, dtype=tf.float32, trainable=False)
+        self.ema_value_target_pct5 = tf.Variable(
+            np.nan, dtype=tf.float32, trainable=False
+        )
+        self.ema_value_target_pct95 = tf.Variable(
+            np.nan, dtype=tf.float32, trainable=False
+        )
 
         self.action_space = action_space
         # TODO: For now, limit to discrete actions.

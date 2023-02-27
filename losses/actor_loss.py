@@ -59,6 +59,8 @@ def actor_loss(
         "L_actor": L_actor,
         "logp_actions_dreamed_B_H": logp_actions_dreamed_B_H,
         "scaled_value_targets_B_H": scaled_value_targets_B_H,
+        "L_actor_ema_value_target_pct95": actor.ema_value_target_pct95,
+        "L_actor_ema_value_target_pct5": actor.ema_value_target_pct5,
         "logp_loss_B_H": logp_loss_B_H,
         "action_entropy_B_H": entropy_B_H,
         "action_entropy": entropy,
@@ -84,25 +86,30 @@ def compute_scaled_value_targets(
     # Compute S: [1] eq. 12.
     Per_R_95 = tfp.stats.percentile(value_targets_B_H, 95)
     Per_R_5 = tfp.stats.percentile(value_targets_B_H, 5)
-    Per_R_95_m_5 = Per_R_95 - Per_R_5
 
-    # Update EMA stored in actor network.
-    # Initial value.
-    if tf.math.is_nan(actor.ema_range_95_minus_5):
-        actor.ema_range_95_minus_5.assign(Per_R_95_m_5)
-    # Later update (something already stored in EMA variable).
+    # Update EMAs stored in actor network.
+    # Initial values: Just set.
+    if tf.math.is_nan(actor.ema_value_target_pct5):
+        actor.ema_value_target_pct5.assign(Per_R_5)
+        actor.ema_value_target_pct95.assign(Per_R_95)
+    # Later update (something already stored in EMA variable): Update EMA.
     else:
-        actor.ema_range_95_minus_5.assign(
-            return_normalization_decay * actor.ema_range_95_minus_5 + (
+        actor.ema_value_target_pct5.assign(
+            return_normalization_decay * actor.ema_value_target_pct5 + (
                 1.0 - return_normalization_decay
-            ) * Per_R_95_m_5
+            ) * Per_R_5
+        )
+        actor.ema_value_target_pct95.assign(
+            return_normalization_decay * actor.ema_value_target_pct95 + (
+                1.0 - return_normalization_decay
+            ) * Per_R_95
         )
 
     # [1] eq. 11 (first term).
     scaled_value_targets_B_H = tf.stop_gradient(
         value_targets_B_H / tf.math.maximum(
             1.0,
-            actor.ema_range_95_minus_5,
+            actor.ema_value_target_pct95 - actor.ema_value_target_pct5,
        )
     )
     return scaled_value_targets_B_H
