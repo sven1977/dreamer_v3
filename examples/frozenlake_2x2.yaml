@@ -1,12 +1,11 @@
-frozenlake-experiment:
+frozenlake-2x2-experiment:
   env: FrozenLake-v1
   is_atari: false
 
   env_config:
-    map_name: 4x4
-    #desc:
-    #  - SF
-    #  - HG
+    desc:
+      - SF
+      - HG
     is_slippery: false
 
   model_dimension: XS

@@ -17,6 +17,7 @@ def critic_loss(
         gamma,
         lambda_,
 ):
+    # Note that value targets are NOT symlog'd.
     value_targets_B_H = compute_value_targets(
         # Learn critic in symlog'd space.
         rewards=dream_data["rewards_dreamed_t1_to_Hp1"],
@@ -47,7 +48,7 @@ def critic_loss(
     #    ),
     #    axis=-1,
     #)
-    value_symlog_logp_B_H = tf.math.log(tf.reduce_sum(
+    value_symlog_neg_logp_target_B_H = - tf.math.log(tf.reduce_sum(
         tf.multiply(
             tf.stop_gradient(value_symlog_targets_two_hot_B_H),
             value_symlog_probs_B_H,
@@ -55,19 +56,41 @@ def critic_loss(
         axis=-1,
     ))
 
-    # Compute EMA L2-regularization loss.
-    value_symlog_ema_probs_B_H = tf.stack(
-        [d.probs for d in dream_data["v_symlog_dreamed_distributions_ema_t1_to_Hp1"][:-1]],
-        axis=1,
+    # Compute EMA regularization loss.
+    # Expected values (dreamed) from the EMA (slow critic) net.
+    value_symlog_ema_B_H = dream_data["v_symlog_dreamed_ema_t1_to_Hp1"][:, :-1]
+    # Fold time rank (for two_hot'ing).
+    value_symlog_ema_BxH = tf.reshape(value_symlog_ema_B_H, (-1,))
+    value_symlog_ema_two_hot_BxH = two_hot(value_symlog_ema_BxH)
+    # Unfold time rank.
+    value_symlog_ema_two_hot_B_H = tf.reshape(
+        value_symlog_ema_two_hot_BxH,
+        shape=value_symlog_targets_B_H.shape[:2] + value_symlog_ema_two_hot_BxH.shape[-1],
     )
-    ema_regularization_loss_B_H = 0.5 * tf.reduce_sum(
-        tf.math.square(
-            value_symlog_probs_B_H - tf.stop_gradient(value_symlog_ema_probs_B_H)
+    # Compute ema regularizer loss.
+    # In the paper, it is not described how exactly to form this regularizer term and
+    # how to weigh it.
+    # So we follow Dani's repo here: `reg = -dist.log_prob(sg(self.slow(traj).mean()))`
+    # with a weight of 1.0, where dist is the bucket'ized distribution output by the
+    # fast critic. sg=stop gradient; mean() -> use the expected EMA values.
+    ema_regularization_loss_B_H = - tf.math.log(tf.reduce_sum(
+        tf.multiply(
+            tf.stop_gradient(value_symlog_ema_two_hot_B_H),
+            value_symlog_probs_B_H,
         ),
         axis=-1,
-    )
+    ))
+    # Using MSE on the outputs (probs) of the EMA net vs the fast critic.
+    #ema_regularization_loss_B_H = 0.5 * tf.reduce_sum(
+    #    tf.math.square(
+    #        value_symlog_probs_B_H - tf.stop_gradient(value_symlog_ema_probs_B_H)
+    #    ),
+    #    axis=-1,
+    #)
+    L_critic_neg_logp_target = tf.reduce_mean(tf.reduce_sum(value_symlog_neg_logp_target_B_H, axis=-1))
+    L_critic_ema_regularization = tf.reduce_mean(tf.reduce_sum(ema_regularization_loss_B_H, axis=-1))
 
-    L_critic_B_H = -value_symlog_logp_B_H + ema_regularization_loss_B_H
+    L_critic_B_H = value_symlog_neg_logp_target_B_H + ema_regularization_loss_B_H
 
     # Reduce over H- (time) axis (sum) and then B-axis (mean).
     L_critic = tf.reduce_mean(tf.reduce_sum(L_critic_B_H, axis=-1))
@@ -78,8 +101,10 @@ def critic_loss(
         "value_targets_B_H": value_targets_B_H,
         "value_symlog_targets_B_H": value_symlog_targets_B_H,
         #"value_probs_B_H": value_probs_B_H,
-        "value_symlog_logp_B_H": value_symlog_logp_B_H,
-        "ema_regularization_loss_B_H": ema_regularization_loss_B_H,
+        "L_critic_neg_logp_target": L_critic_neg_logp_target,
+        "L_critic_neg_logp_target_B_H": value_symlog_neg_logp_target_B_H,
+        "L_critic_ema_regularization": L_critic_ema_regularization,
+        "L_critic_ema_regularization_B_H": ema_regularization_loss_B_H,
     }
 
 

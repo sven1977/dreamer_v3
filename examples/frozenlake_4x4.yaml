@@ -1,0 +1,16 @@
+frozenlake-4x4-experiment:
+  env: FrozenLake-v1
+  is_atari: false
+
+  env_config:
+    map_name: 4x4
+    is_slippery: false
+
+  model_dimension: XS
+
+  training_ratio: 1024
+
+  summary_frequency_train_steps: 5
+  evaluation_frequency_main_iters:  1
+  evaluation_num_episodes: 20
+  model_save_frequency_main_iters: 1000

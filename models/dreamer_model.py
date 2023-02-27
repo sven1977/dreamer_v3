@@ -103,7 +103,7 @@ class DreamerModel(tf.keras.Model):
         v_dreamed_t1_to_Hp1 = []
         # TODO: Make these just the probs. These distribution objects are not necessary.
         v_symlog_dreamed_distributions_t1_to_Hp1 = []
-        v_symlog_dreamed_distributions_ema_t1_to_Hp1 = []
+        v_symlog_dreamed_ema_t1_to_Hp1 = []
 
         # GRU outputs.
         h_states_t1_to_Hp1 = []
@@ -126,10 +126,8 @@ class DreamerModel(tf.keras.Model):
             v_dreamed_t1_to_Hp1.append(inverse_symlog(v))
             v_symlog_dreamed_distributions_t1_to_Hp1.append(v_distr)
 
-            _, v_ema_distr = self.critic(
-                h=h, z=z, return_distribution=True, use_ema=True
-            )
-            v_symlog_dreamed_distributions_ema_t1_to_Hp1.append(v_ema_distr)
+            v_ema = self.critic(h=h, z=z, return_distribution=False, use_ema=True)
+            v_symlog_dreamed_ema_t1_to_Hp1.append(v_ema)
 
             # Only for V, r, and continue flags, we need the values at H+1.
             # V(H+1): Needed for critic learning bootstrapping.
@@ -183,8 +181,8 @@ class DreamerModel(tf.keras.Model):
             "values_symlog_dreamed_distributions_t1_to_Hp1": (
                 v_symlog_dreamed_distributions_t1_to_Hp1
             ),
-            "v_symlog_dreamed_distributions_ema_t1_to_Hp1": (
-                v_symlog_dreamed_distributions_ema_t1_to_Hp1
+            "v_symlog_dreamed_ema_t1_to_Hp1": tf.stop_gradient(
+                tf.stack(v_symlog_dreamed_ema_t1_to_Hp1, axis=1)
             ),
         }
 

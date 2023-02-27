@@ -38,7 +38,7 @@ from utils.tensorboard import (
     summarize_world_model_losses,
 )
 
-with open("atari_pong.yaml", "r") as f:
+with open("frozenlake_2x2.yaml", "r") as f:
     options = yaml.safe_load(f)
     assert len(options) == 1
     options = next(iter(options.values()))
@@ -382,11 +382,16 @@ for iteration in range(1000):
                 # Summarize actor-critic loss stats.
                 tf.summary.scalar("L_critic", L_critic)
                 tf.summary.histogram("L_critic_value_targets", actor_critic_train_results["value_targets_B_H"])
-                tf.summary.histogram("L_critic_ema_regularization_loss_B_H", actor_critic_train_results["ema_regularization_loss_B_H"])
+                tf.summary.scalar("L_critic_neg_logp_target", actor_critic_train_results["L_critic_neg_logp_target"])
+                tf.summary.histogram("L_critic_neg_logp_target_B_H", actor_critic_train_results["L_critic_neg_logp_target_B_H"])
+                tf.summary.scalar("L_critic_ema_regularization", actor_critic_train_results["L_critic_ema_regularization"])
+                tf.summary.histogram("L_critic_ema_regularization_B_H", actor_critic_train_results["L_critic_ema_regularization_B_H"])
 
                 if train_actor:
                     tf.summary.scalar("L_actor", L_actor)
                     tf.summary.scalar("L_actor_action_entropy", actor_critic_train_results["action_entropy"])
+                    tf.summary.scalar("L_actor_reinforce_term", actor_critic_train_results["L_actor_reinforce_term"])
+                    tf.summary.scalar("L_actor_action_entropy_term", actor_critic_train_results["L_actor_action_entropy_term"])
                     tf.summary.histogram("L_actor_scaled_value_targets_B_H", actor_critic_train_results["scaled_value_targets_B_H"])
                     tf.summary.histogram("L_actor_logp_loss_B_H", actor_critic_train_results["logp_loss_B_H"])
 
