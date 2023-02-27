@@ -7,6 +7,7 @@ https://arxiv.org/pdf/2301.04104v1.pdf
 D. Hafner, T. Lillicrap, M. Norouzi, J. Ba
 https://arxiv.org/pdf/2010.02193.pdf
 """
+from collections import defaultdict
 from functools import partial
 from typing import List, Tuple
 
@@ -115,6 +116,7 @@ class EnvRunnerV2:
         self.needs_initial_reset = True
         self.episodes = [None for _ in range(self.num_envs)]
         self.done_episodes_for_metrics = []
+        self.ongoing_episodes_for_metrics = defaultdict(list)
 
     def sample(self, explore: bool = True, random_actions: bool = False):
         if self.config.batch_mode == "complete_episodes":
@@ -264,6 +266,8 @@ class EnvRunnerV2:
             Episode(id_=eps.id_, initial_observation=eps.observations[-1])
             for eps in self.episodes
         ]
+        for eps in ongoing_episodes:
+            self.ongoing_episodes_for_metrics[eps.id_].append(eps)
 
         return done_episodes_to_return, ongoing_episodes
 
@@ -382,15 +386,23 @@ class EnvRunnerV2:
         return done_episodes_to_return
 
     def get_metrics(self):
-        if not self.done_episodes_for_metrics:
-            metrics = {}
-        else:
-            metrics = {
-                "episode_returns": np.mean([
-                    eps.get_return() for eps in self.done_episodes_for_metrics
-                ]),
-            }
+        metrics = {}
+        if self.done_episodes_for_metrics:
+            mean_returns = 0.0
+            for eps in self.done_episodes_for_metrics:
+                mean_returns += eps.get_return()
+                # Don't forget about the already returned chunks of this episode.
+                if eps.id_ in self.ongoing_episodes_for_metrics:
+                    mean_returns += sum(
+                        eps2.get_return()
+                        for eps2 in self.ongoing_episodes_for_metrics[eps.id_]
+                    )
+                    del self.ongoing_episodes_for_metrics[eps.id_]
+            mean_returns /= len(self.done_episodes_for_metrics)
+            metrics["episode_returns"] = mean_returns
+
         self.done_episodes_for_metrics.clear()
+
         return metrics
 
     def _split_by_env(self, inputs):
