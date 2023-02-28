@@ -99,9 +99,12 @@ class EnvRunnerV2:
             # information, full action space, and sticky actions. Because the world
             # model integrates information over time, DreamerV2 does not use frame
             # stacking."
+            # However, in Danijar's repo, Atari100k experiments are configured as:
+            # noop=30, 64x64x3 (no grayscaling), sticky actions=False,
+            # full action space=False,
             wrappers = [
                 partial(gym.wrappers.TimeLimit, max_episode_steps=108000),
-                color_reduction_v0,  # grayscale
+                # color_reduction_v0,  # grayscale
                 partial(resize_v1, x_size=64, y_size=64),  # resize to 64x64
                 NormalizedImageEnv,
                 NoopResetEnv,
