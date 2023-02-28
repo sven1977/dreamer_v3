@@ -50,8 +50,7 @@ with open("atari_pong.yaml", "r") as f:
 os.makedirs("checkpoints", exist_ok=True)
 # Create the tensorboard summary data dir.
 os.makedirs("tensorboard", exist_ok=True)
-tbx_writer = SummaryWriter("tensorboardX")
-#tb_writer = tf.summary.create_file_writer("tensorboard")
+tbx_writer = SummaryWriter("tensorboard")
 # Every how many training steps do we write data to TB?
 summary_frequency_train_steps = options["summary_frequency_train_steps"]
 # Every how many main iterations do we evaluate?
@@ -138,9 +137,6 @@ else:
         world_model=world_model,
     )
 
-#TEST: OOM
-#print("current mem:", tf.config.experimental.get_memory_info('GPU:0')['current'])
-
 # TODO: ugly hack (resulting from the insane fact that you cannot know
 #  an env's spaces prior to actually constructing an instance of it) :(
 env_runner.model = dreamer_model
@@ -213,18 +209,26 @@ for iteration in range(1000000):
     metrics = env_runner.get_metrics()
     #with tbx_writer.(step=total_env_steps):
     # Summarize buffer length.
-    tbx_writer.add_scalar("buffer_size_num_episodes", episodes_in_buffer, global_step=total_env_steps)
-    tbx_writer.add_scalar("buffer_size_timesteps", ts_in_buffer)
+    tbx_writer.add_scalar(
+        "buffer_size_num_episodes", episodes_in_buffer, global_step=total_env_steps
+    )
+    tbx_writer.add_scalar(
+        "buffer_size_timesteps", ts_in_buffer, global_step=total_env_steps
+    )
     # Summarize episode returns.
     if metrics.get("episode_returns"):
         episode_return_mean = np.mean(metrics["episode_returns"])
-        tbx_writer.add_scalar("ENV_episode_return_mean", episode_return_mean)
+        tbx_writer.add_scalar(
+            "ENV_episode_return_mean", episode_return_mean, global_step=total_env_steps
+        )
     # Summarize actions taken.
     actions = np.concatenate(
         [eps.actions for eps in done_episodes + ongoing_episodes],
         axis=0,
     )
-    tbx_writer.add_histogram("ENV_actions_taken", actions)
+    tbx_writer.add_histogram(
+        "ENV_actions_taken", actions, global_step=total_env_steps
+    )
 
     total_env_steps += env_steps
 
@@ -245,12 +249,6 @@ for iteration in range(1000000):
     sub_iter = 0
     while replayed_steps / env_steps_last_sample < training_ratio:
         print(f"\tSub-iteration {iteration}/{sub_iter})")
-
-        # Enable TB summaries this step?
-        #tb_ctx = None
-        #if total_train_steps % summary_frequency_train_steps == 0:
-        #    tb_ctx = tb_writer.as_default(step=total_env_steps)
-        #    tb_ctx.__enter__()
 
         # Draw a new sample from the replay buffer.
         sample = buffer.sample(batch_size_B=batch_size_B, batch_length_T=batch_length_T)
@@ -292,6 +290,7 @@ for iteration in range(1000000):
         if total_train_steps % summary_frequency_train_steps == 0:
             summarize_forward_train_outs_vs_samples(
                 tbx_writer=tbx_writer,
+                step=total_env_steps,
                 forward_train_outs=forward_train_outs,
                 sample=sample,
                 batch_size_B=batch_size_B,
@@ -300,6 +299,7 @@ for iteration in range(1000000):
             )
             summarize_world_model_losses(
                 tbx_writer=tbx_writer,
+                step=total_env_steps,
                 world_model_train_results=world_model_train_results,
             )
 
@@ -393,17 +393,20 @@ for iteration in range(1000000):
                             f"dreamed_trajectories_for_critic_actor_learning[B=0,T={t}]",
                             tf.expand_dims(img, axis=0).numpy(),
                             dataformats="NHWC",
+                            global_step=total_env_steps,
                         )
 
                 # Summarize actor-critic loss stats.
                 summarize_critic_losses(
                     tbx_writer = tbx_writer,
+                    step=total_env_steps,
                     actor_critic_train_results = actor_critic_train_results,
                 )
 
                 if train_actor:
                     summarize_actor_losses(
                         tbx_writer=tbx_writer,
+                        step=total_env_steps,
                         actor_critic_train_results=actor_critic_train_results,
                     )
 
@@ -413,9 +416,6 @@ for iteration in range(1000000):
 
         sub_iter += 1
         total_train_steps += 1
-
-        #if tb_ctx is not None:
-        #    tb_ctx.__exit__(None, None, None)
 
     total_replayed_steps += replayed_steps
 
@@ -436,6 +436,7 @@ for iteration in range(1000000):
 
         mse_sampled_vs_dreamed_obs = summarize_dreamed_trajectory_vs_samples(
             tbx_writer=tbx_writer,
+            step=total_env_steps,
             dream_data=dream_data,
             sample=sample,
             batch_size_B=batch_size_B,
@@ -449,27 +450,47 @@ for iteration in range(1000000):
         # Run n episodes in an actual env and report mean episode returns.
         print(f"Running {evaluation_num_episodes} episodes in env for evaluation ...")
         episodes = env_runner_evaluation.sample_episodes(
-            num_episodes=evaluation_num_episodes, random_actions=False
+            num_episodes=evaluation_num_episodes,
+            random_actions=False,
+            with_render_data=True,
         )
         mean_episode_len = np.mean([len(eps) for eps in episodes])
         mean_episode_return = np.mean([eps.get_return() for eps in episodes])
-        print(f"\tMean episode return: {mean_episode_return:.4f}; mean len: {mean_episode_len:.1f}")
-        tbx_writer.add_scalar("EVAL_mean_episode_return", mean_episode_return)
-        tbx_writer.add_scalar("EVAL_mean_episode_length", mean_episode_len)
+        print(
+            f"\tMean episode return: {mean_episode_return:.4f}; "
+            f"mean len: {mean_episode_len:.1f}"
+        )
+        tbx_writer.add_scalar(
+            "EVAL_mean_episode_return", mean_episode_return, global_step=total_env_steps
+        )
+        tbx_writer.add_scalar(
+            "EVAL_mean_episode_length", mean_episode_len, global_step=total_env_steps
+        )
+        tbx_writer.add_video(
+            "EVAL_episode_videos",
+            np.array([eps.render_images for eps in episodes]),
+            global_step=total_env_steps,
+            dataformats="NTHWC",
+        )
 
     # Save the model every N iterations (but not after the very first).
     if iteration != 0 and iteration % model_save_frequency_main_iters == 0:
         dreamer_model.save(f"checkpoints/dreamer_model_{iteration}")
 
-    #TEST: try trick from https://medium.com/dive-into-ml-ai/dealing-with-memory-leak-issue-in-keras-model-training-e703907a6501
+    # Try trick from https://medium.com/dive-into-ml-ai/dealing-with-memory-leak-
+    # issue-in-keras-model-training-e703907a6501
     gc.collect()
-    #tf.keras.backend.clear_session()
+    # tf.keras.backend.clear_session()  # <- this seems to be not needed.
 
     try:
         gpu_memory = tf.config.experimental.get_memory_info('GPU:0')
         print(f"\nMEM (GPU) consumption: {gpu_memory['current']}")
-        tbx_writer.add_scalar("MEM_gpu_memory_used", gpu_memory['current'])
-        tbx_writer.add_scalar("MEM_gpu_memory_peak", gpu_memory['peak'])
+        tbx_writer.add_scalar(
+            "MEM_gpu_memory_used", gpu_memory['current'], global_step=total_env_steps
+        )
+        tbx_writer.add_scalar(
+            "MEM_gpu_memory_peak", gpu_memory['peak'], global_step=total_env_steps
+        )
     except ValueError:
         pass
 

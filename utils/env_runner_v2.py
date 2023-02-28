@@ -30,9 +30,9 @@ class CountEnv(gym.ObservationWrapper):
 
     def observation(self, observation):
         # For gray-scaled observations.
-        observation[0][0] = self.__counter
+        # observation[0][0] = self.__counter
         # For 3-color observations.
-        #observation[0][0][0] = self.__counter__
+        observation[0][0][0] = self.__counter__
         self.__counter += 1
         return observation
 
@@ -295,6 +295,7 @@ class EnvRunnerV2:
         num_episodes: int,
         explore: bool = True,
         random_actions: bool = False,
+        with_render_data: bool = False,
     ):
         """Runs n episodes (reset first) on the environment(s) and returns experiences.
 
@@ -323,8 +324,14 @@ class EnvRunnerV2:
         else:
             h_states = np.array([0.0] * self.num_envs)
 
+        render_images = [None] * self.num_envs
+        if with_render_data:
+            render_images = self.env.render()
+
         for i, o in enumerate(self._split_by_env(obs)):
-            episodes[i].add_initial_observation(initial_observation=o)
+            episodes[i].add_initial_observation(
+                initial_observation=o, render_image=render_images[i]
+            )
 
         eps = 0
 
@@ -359,6 +366,8 @@ class EnvRunnerV2:
                     #act = np.argmax(action_logits, axis=-1)
 
             obs, rewards, terminateds, truncateds, infos = self.env.step(actions)
+            if with_render_data:
+                render_images = self.env.render()
 
             for i, (o, a, r, term, trunc, h) in enumerate(zip(
                 self._split_by_env(obs),
@@ -389,7 +398,7 @@ class EnvRunnerV2:
 
                     done_episodes_to_return.append(episodes[i])
 
-                    episodes[i] = Episode(initial_observation=o)
+                    episodes[i] = Episode(initial_observation=o, render_image=render_images[i])
                 else:
                     episodes[i].add_timestep(
                         o,
@@ -397,6 +406,7 @@ class EnvRunnerV2:
                         r,
                         h_state=h,
                         is_terminated=False,
+                        render_image=render_images[i],
                     )
 
             if eps >= num_episodes:
@@ -450,6 +460,15 @@ if __name__ == "__main__":
         config=config,
         _debug_count_env=True,
     )
+
+    for _ in range(10):
+        done_episodes = env_runner.sample_episodes(
+            num_episodes=10, random_actions=True, with_render_data=True
+        )
+        for eps in done_episodes:
+            assert eps.is_terminated
+            print(f"done episode {eps.id_} obs[0]={eps.observations[0][0][0]} obs[-1]={eps.observations[-1][0][0]}")
+
     for _ in range(10):
         done_episodes, ongoing_episodes = (
             env_runner.sample(random_actions=True)
@@ -461,12 +480,6 @@ if __name__ == "__main__":
             assert not eps.is_terminated
             print(f"ongoing episode {eps.id_} obs[0]={eps.observations[0][0][0]} obs[-1]={eps.observations[-1][0][0]}")
         print()
-
-    for _ in range(10):
-        done_episodes = env_runner.sample_episodes(num_episodes=10, random_actions=True)
-        for eps in done_episodes:
-            assert eps.is_terminated
-            print(f"done episode {eps.id_} obs[0]={eps.observations[0][0][0]} obs[-1]={eps.observations[-1][0][0]}")
 
     #obs, next_obs, actions, rewards, terminateds, truncateds = (
     #    env_runner.sample_episodes(num_episodes=10, random_actions=True)

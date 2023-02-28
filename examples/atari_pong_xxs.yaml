@@ -7,6 +7,6 @@ atari-pong-xxs-experiment:
   training_ratio: 1024
 
   summary_frequency_train_steps: 10
-  evaluation_frequency_main_iters:  10
-  evaluation_num_episodes: 20
-  model_save_frequency_main_iters: 1000
+  evaluation_frequency_main_iters:  1
+  evaluation_num_episodes: 10
+  model_save_frequency_main_iters: 10

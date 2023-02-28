@@ -18,6 +18,9 @@ class Episode:
         self.h_states = []
         # obs(T) is the final observation in the episode.
         self.is_terminated = False
+        # RGB uint8 images from rendering the env; the images include the corresponding
+        # rewards.
+        self.render_images = []
 
     def concat_episode(self, episode_chunk: "Episode"):
         assert episode_chunk.id_ == self.id_
@@ -42,7 +45,8 @@ class Episode:
         # Validate.
         self.validate()
 
-    def add_timestep(self, observation, action, reward, h_state=None, is_terminated=False):
+    def add_timestep(self, observation, action, reward, *,
+                     h_state=None, is_terminated=False, render_image=None):
         assert not self.is_terminated
 
         self.observations.append(observation)
@@ -50,14 +54,18 @@ class Episode:
         self.rewards.append(reward)
         if h_state is not None:
             self.h_states.append(h_state)
+        if render_image is not None:
+            self.render_images.append(render_image)
         self.is_terminated = is_terminated
         self.validate()
 
-    def add_initial_observation(self, initial_observation):
+    def add_initial_observation(self, initial_observation, render_image=None):
         assert not self.is_terminated
         assert len(self.observations) == 0
 
         self.observations.append(initial_observation)
+        if render_image is not None:
+            self.render_images.append(render_image)
         self.validate()
 
     def validate(self):
@@ -68,6 +76,8 @@ class Episode:
         )
         # H-states are either non-existent OR we have the same as rewards.
         assert len(self.h_states) == 0 or len(self.h_states) == len(self.rewards)
+        # Render images are either non-existent OR we have the same as observations.
+        #assert len(self.render_images) == 0 or len(self.render_images) == len(self.observations)
 
         # Convert all lists to numpy arrays, if we are terminated.
         if self.is_terminated:
@@ -75,6 +85,7 @@ class Episode:
             self.actions = np.array(self.actions)
             self.rewards = np.array(self.rewards)
             self.h_states = np.array(self.h_states)
+            self.render_images = np.array(self.render_images, dtype=np.uint8)
 
     def get_return(self):
         return sum(self.rewards)
