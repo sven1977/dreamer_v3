@@ -1,4 +1,5 @@
 import tensorflow as tf
+import tree  # pip install dm_tree
 
 from utils.symlog import inverse_symlog
 
@@ -30,6 +31,8 @@ def reconstruct_obs_from_h_and_z(
 
 
 def summarize_forward_train_outs_vs_samples(
+    *,
+    tbx_writer,
     forward_train_outs,
     sample,
     batch_size_B,
@@ -58,6 +61,7 @@ def summarize_forward_train_outs_vs_samples(
             trajectory sampled from the buffer.
     """
     _summarize_obs(
+        tbx_writer=tbx_writer,
         computed_float_obs_B_T_dims=tf.reshape(
             forward_train_outs["obs_distribution_BxT"].loc,
             shape=(batch_size_B, batch_length_T) + sample["obs"].shape[2:],
@@ -73,20 +77,22 @@ def summarize_forward_train_outs_vs_samples(
         shape=(batch_size_B, batch_length_T),
     )
     _summarize_rewards(
+        tbx_writer=tbx_writer,
         computed_rewards_B_T=predicted_rewards,
         sampled_rewards_B_T=sample["rewards"],
         B=batch_size_B,
         T=batch_length_T,
         descr="predicted(posterior)",
     )
-    tf.summary.histogram("sampled_rewards", sample["rewards"])
-    tf.summary.histogram("predicted(posterior)_rewards", predicted_rewards)
+    tbx_writer.add_histogram("sampled_rewards", sample["rewards"].numpy())
+    tbx_writer.add_histogram("predicted(posterior)_rewards", predicted_rewards.numpy())
 
     predicted_continues = tf.reshape(
         forward_train_outs["continue_distribution_BxT"].mode(),
         shape=(batch_size_B, batch_length_T),
     )
     _summarize_continues(
+        tbx_writer=tbx_writer,
         computed_continues_B_T=predicted_continues,
         sampled_continues_B_T=sample["continues"],
         B=batch_size_B,
@@ -95,7 +101,53 @@ def summarize_forward_train_outs_vs_samples(
     )
 
 
+def summarize_actor_losses(*, tbx_writer, actor_critic_train_results):
+    results = tree.map_structure(
+        lambda s: s.numpy() if tf.is_tensor(s) else s,
+        actor_critic_train_results,
+    )
+    tbx_writer.add_scalar("L_actor", results["L_actor"])
+    tbx_writer.add_scalar("L_actor_action_entropy", results["action_entropy"])
+    tbx_writer.add_scalar("L_actor_reinforce_term", results["L_actor_reinforce_term"])
+    tbx_writer.add_scalar(
+        "L_actor_action_entropy_term", results["L_actor_action_entropy_term"]
+    )
+    tbx_writer.add_histogram(
+        "L_actor_scaled_value_targets_B_H", results["scaled_value_targets_B_H"]
+    )
+    tbx_writer.add_histogram("L_actor_logp_loss_B_H", results["logp_loss_B_H"])
+    tbx_writer.add_scalar(
+        "L_actor_ema_value_target_pct95", results["L_actor_ema_value_target_pct95"]
+    )
+    tbx_writer.add_scalar(
+        "L_actor_ema_value_target_pct5", results["L_actor_ema_value_target_pct5"]
+    )
+
+
+def summarize_critic_losses(*, tbx_writer, actor_critic_train_results):
+    results = tree.map_structure(
+        lambda s: s.numpy() if tf.is_tensor(s) else s,
+        actor_critic_train_results,
+    )
+    tbx_writer.add_scalar("L_critic", results["L_critic"])
+    tbx_writer.add_histogram("L_critic_value_targets", results["value_targets_B_H"])
+    tbx_writer.add_scalar(
+        "L_critic_neg_logp_target", results["L_critic_neg_logp_target"]
+    )
+    tbx_writer.add_histogram(
+        "L_critic_neg_logp_target_B_H", results["L_critic_neg_logp_target_B_H"],
+    )
+    tbx_writer.add_scalar(
+        "L_critic_ema_regularization", results["L_critic_ema_regularization"],
+    )
+    tbx_writer.add_histogram(
+        "L_critic_ema_regularization_B_H", results["L_critic_ema_regularization_B_H"],
+    )
+
+
 def summarize_dreamed_trajectory_vs_samples(
+    *,
+    tbx_writer,
     dream_data,
     sample,
     batch_size_B,
@@ -113,6 +165,7 @@ def summarize_dreamed_trajectory_vs_samples(
     )
     # Observation MSE and - if applicable - images comparisons.
     mse_sampled_vs_dreamed_obs = _summarize_obs(
+        tbx_writer=tbx_writer,
         computed_float_obs_B_T_dims=dreamed_obs,
         sampled_obs_B_T_dims=sample["obs"][:, burn_in_T:burn_in_T + dreamed_T],
         B=batch_size_B,
@@ -123,6 +176,7 @@ def summarize_dreamed_trajectory_vs_samples(
 
     # Reward MSE.
     _summarize_rewards(
+        tbx_writer=tbx_writer,
         computed_rewards_B_T=dream_data["rewards_dreamed_t1_to_T"],
         sampled_rewards_B_T=sample["rewards"][:, burn_in_T:burn_in_T + dreamed_T],
         B=batch_size_B,
@@ -132,6 +186,7 @@ def summarize_dreamed_trajectory_vs_samples(
 
     # Continues MSE.
     _summarize_continues(
+        tbx_writer=tbx_writer,
         computed_continues_B_T=dream_data["continues_dreamed_t1_to_T"],
         sampled_continues_B_T=sample["continues"][:, burn_in_T:burn_in_T + dreamed_T],
         B=batch_size_B,
@@ -141,45 +196,70 @@ def summarize_dreamed_trajectory_vs_samples(
     return mse_sampled_vs_dreamed_obs
 
 
-def summarize_world_model_losses(world_model_train_results):
-    tf.summary.histogram("L_pred_B_T", world_model_train_results["L_pred_B_T"])
-    tf.summary.scalar("L_pred", world_model_train_results["L_pred"])
+def summarize_world_model_losses(*, tbx_writer, world_model_train_results):
+    world_model_train_results = tree.map_structure(
+        lambda s: s.numpy() if tf.is_tensor(s) else s,
+        world_model_train_results,
+    )
+    tbx_writer.add_histogram("L_pred_B_T", world_model_train_results["L_pred_B_T"])
+    tbx_writer.add_scalar("L_pred", world_model_train_results["L_pred"])
 
-    tf.summary.histogram("L_decoder_B_T", world_model_train_results["L_decoder_B_T"])
-    tf.summary.scalar("L_decoder", world_model_train_results["L_decoder"])
+    tbx_writer.add_histogram(
+        "L_decoder_B_T",
+        world_model_train_results["L_decoder_B_T"],
+    )
+    tbx_writer.add_scalar("L_decoder", world_model_train_results["L_decoder"])
 
     # Two-hot reward loss.
-    tf.summary.histogram(
+    tbx_writer.add_histogram(
         "L_reward_two_hot_B_T", world_model_train_results["L_reward_two_hot_B_T"]
     )
-    tf.summary.scalar(
+    tbx_writer.add_scalar(
         "L_reward_two_hot", world_model_train_results["L_reward_two_hot"]
     )
     # TEST: Out of interest, compare with simplge -log(p) loss for individual
     # rewards using the FiniteDiscrete distribution. This should be very close
     # to the two-hot reward loss.
-    tf.summary.histogram(
+    tbx_writer.add_histogram(
         "L_reward_logp_B_T", world_model_train_results["L_reward_logp_B_T"]
     )
-    tf.summary.scalar(
+    tbx_writer.add_scalar(
         "L_reward_logp", world_model_train_results["L_reward_logp"]
     )
 
-    tf.summary.histogram("L_continue_B_T", world_model_train_results["L_continue_B_T"])
-    tf.summary.scalar("L_continue", world_model_train_results["L_continue"])
+    tbx_writer.add_histogram(
+        "L_continue_B_T",
+        world_model_train_results["L_continue_B_T"],
+    )
+    tbx_writer.add_scalar("L_continue", world_model_train_results["L_continue"])
 
-    tf.summary.histogram("L_dyn_B_T", world_model_train_results["L_dyn_B_T"])
-    tf.summary.scalar("L_dyn", world_model_train_results["L_dyn"])
+    tbx_writer.add_histogram("L_dyn_B_T", world_model_train_results["L_dyn_B_T"])
+    tbx_writer.add_scalar("L_dyn", world_model_train_results["L_dyn"])
 
-    tf.summary.histogram("L_rep_B_T", world_model_train_results["L_rep_B_T"])
-    tf.summary.scalar("L_rep", world_model_train_results["L_rep"])
+    tbx_writer.add_histogram("L_rep_B_T", world_model_train_results["L_rep_B_T"])
+    tbx_writer.add_scalar("L_rep", world_model_train_results["L_rep"])
 
     # Total loss.
-    tf.summary.histogram("L_world_model_total_B_T", world_model_train_results["L_world_model_total_B_T"])
-    tf.summary.scalar("L_world_model_total", world_model_train_results["L_world_model_total"])
+    tbx_writer.add_histogram(
+        "L_world_model_total_B_T",
+        world_model_train_results["L_world_model_total_B_T"],
+    )
+    tbx_writer.add_scalar(
+        "L_world_model_total",
+        world_model_train_results["L_world_model_total"],
+    )
 
 
-def _summarize_obs(*, computed_float_obs_B_T_dims, sampled_obs_B_T_dims, B, T, descr, symlog_obs):
+def _summarize_obs(
+    *,
+    tbx_writer,
+    computed_float_obs_B_T_dims,
+    sampled_obs_B_T_dims,
+    B,
+    T,
+    descr,
+    symlog_obs,
+):
     """Summarizes computed- vs sampled observations: MSE and (if applicable) images.
 
     Args:
@@ -207,9 +287,9 @@ def _summarize_obs(*, computed_float_obs_B_T_dims, sampled_obs_B_T_dims, B, T, d
     mse_sampled_vs_computed_obs = tf.reduce_mean(
         tf.reduce_sum(mse_sampled_vs_computed_obs, axis=1)
     )
-    tf.summary.scalar(
+    tbx_writer.add_scalar(
         f"MEAN(SUM(mse,T={T}),B={B})_sampled_vs_{descr}_obs",
-        mse_sampled_vs_computed_obs,
+        mse_sampled_vs_computed_obs.numpy(),
     )
 
     # Images: Create image summary, comparing computed images with actual sampled ones.
@@ -231,20 +311,29 @@ def _summarize_obs(*, computed_float_obs_B_T_dims, sampled_obs_B_T_dims, B, T, d
         sampled_vs_computed_images = tf.concat(
             [computed_images[0], sampled_obs_B_T_dims[0]], axis=1,
         )
-        tf.summary.image(
+        tbx_writer.add_images(
             f"sampled_vs_{descr}_images[0th batch item]",
             (
                 tf.expand_dims(sampled_vs_computed_images, -1)
                 if len(sampled_obs_B_T_dims.shape) == 2+2
                 else sampled_vs_computed_images
-            ),
-            max_outputs=20,
+            ).numpy(),
+            dataformats="NHWC",
+            #max_outputs=20,
         )
 
     return mse_sampled_vs_computed_obs
 
 
-def _summarize_rewards(*, computed_rewards_B_T, sampled_rewards_B_T, B, T, descr):
+def _summarize_rewards(
+    *,
+    tbx_writer,
+    computed_rewards_B_T,
+    sampled_rewards_B_T,
+    B,
+    T,
+    descr,
+):
     mse_sampled_vs_computed_rewards = tf.losses.mse(
         tf.expand_dims(computed_rewards_B_T, axis=-1),
         tf.expand_dims(sampled_rewards_B_T, axis=-1),
@@ -252,14 +341,15 @@ def _summarize_rewards(*, computed_rewards_B_T, sampled_rewards_B_T, B, T, descr
     mse_sampled_vs_computed_rewards = tf.reduce_mean(
         tf.reduce_sum(mse_sampled_vs_computed_rewards, axis=1)
     )
-    tf.summary.scalar(
+    tbx_writer.add_scalar(
         f"MEAN(SUM(mse,T={T}),B={B})_sampled_vs_{descr}_rewards",
-        mse_sampled_vs_computed_rewards,
+        mse_sampled_vs_computed_rewards.numpy(),
     )
 
 
 def _summarize_continues(
     *,
+    tbx_writer,
     computed_continues_B_T,
     sampled_continues_B_T,
     B,
@@ -274,8 +364,8 @@ def _summarize_continues(
     mse_sampled_vs_computed_continues = tf.reduce_mean(
         tf.reduce_sum(mse_sampled_vs_computed_continues, axis=1)
     )
-    tf.summary.scalar(
+    tbx_writer.add_scalar(
         f"MEAN(SUM(mse,T={T}),B={B})_sampled_vs_{descr}_continues",
-        mse_sampled_vs_computed_continues,
+        mse_sampled_vs_computed_continues.numpy(),
     )
 

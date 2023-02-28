@@ -15,6 +15,7 @@ import yaml
 import numpy as np
 import tree  # pip install dm_tree
 import tensorflow as tf
+from tensorboardX import SummaryWriter
 
 from ray.rllib.algorithms.algorithm_config import AlgorithmConfig
 
@@ -32,6 +33,8 @@ from utils.env_runner_v2 import EnvRunnerV2
 from utils.episode_replay_buffer import EpisodeReplayBuffer
 from utils.cartpole_debug import CartPoleDebug  # import registers `CartPoleDebug-v0`
 from utils.tensorboard import (
+    summarize_actor_losses,
+    summarize_critic_losses,
     summarize_dreamed_trajectory_vs_samples,
     summarize_forward_train_outs_vs_samples,
     reconstruct_obs_from_h_and_z,
@@ -47,7 +50,8 @@ with open("atari_pong.yaml", "r") as f:
 os.makedirs("checkpoints", exist_ok=True)
 # Create the tensorboard summary data dir.
 os.makedirs("tensorboard", exist_ok=True)
-tb_writer = tf.summary.create_file_writer("tensorboard")
+tbx_writer = SummaryWriter("tensorboardX")
+#tb_writer = tf.summary.create_file_writer("tensorboard")
 # Every how many training steps do we write data to TB?
 summary_frequency_train_steps = options["summary_frequency_train_steps"]
 # Every how many main iterations do we evaluate?
@@ -86,8 +90,8 @@ config = (
         # integrates information over time, DreamerV2 does not use frame stacking.
         # The experiments use a single-task setup where a separate agent is trained
         # for each game. Moreover, each agent uses only a single environment instance.
-        "repeat_action_probability": 0.25,  # "sticky actions"
-        "full_action_space": True,  # "full action space"
+        "repeat_action_probability": 0.0,#25,  # "sticky actions" but not according to Dani's 100k configs
+        "full_action_space": False,#True,  # "full action space" but not according to Dani's 100k configs
         "frameskip": 1,  # already done by MaxAndSkip wrapper: "action repeat" == 4
     } if options["is_atari"] else options.get("env_config", {}))
     .rollouts(
@@ -121,7 +125,7 @@ else:
         encoder=CNNAtari(model_dimension=model_dimension) if options["is_atari"] else MLP(model_dimension=model_dimension),
         decoder=ConvTransposeAtari(
             model_dimension=model_dimension,
-            gray_scaled=True,
+            gray_scaled=False,
         ) if options["is_atari"] else VectorDecoder(
             model_dimension=model_dimension,
             observation_space=env_runner.env.single_observation_space,
@@ -166,7 +170,7 @@ total_env_steps = 0
 total_replayed_steps = 0
 total_train_steps = 0
 
-for iteration in range(1000):
+for iteration in range(1000000):
     print(f"Main iteration {iteration}")
     # Push enough samples into buffer initially before we start training.
     env_steps = env_steps_last_sample = 0
@@ -198,27 +202,29 @@ for iteration in range(1000):
             ts_in_buffer > warm_up_timesteps
             # and more timesteps than BxT.
             and ts_in_buffer >= batch_size_B * batch_length_T
-            # But also at least as many episodes as the batch size B.
-            and episodes_in_buffer >= batch_size_B
+            ## But also at least as many episodes as the batch size B.
+            ## Actually: This is not useful for longer episode envs, such as Atari.
+            ## Too much initial data goes into the buffer, then.
+            #and episodes_in_buffer >= batch_size_B
         ):
             break
 
     # Summarize actual environment interaction data.
     metrics = env_runner.get_metrics()
-    with tb_writer.as_default(step=total_env_steps):
-        # Summarize buffer length.
-        tf.summary.scalar("buffer_size_num_episodes", episodes_in_buffer)
-        tf.summary.scalar("buffer_size_timesteps", ts_in_buffer)
-        # Summarize episode returns.
-        if metrics.get("episode_returns"):
-            episode_return_mean = np.mean(metrics["episode_returns"])
-            tf.summary.scalar("ENV_episode_return_mean", episode_return_mean)
-        # Summarize actions taken.
-        actions = np.concatenate(
-            [eps.actions for eps in done_episodes + ongoing_episodes],
-            axis=0,
-        )
-        tf.summary.histogram("ENV_actions_taken", actions)
+    #with tbx_writer.(step=total_env_steps):
+    # Summarize buffer length.
+    tbx_writer.add_scalar("buffer_size_num_episodes", episodes_in_buffer, global_step=total_env_steps)
+    tbx_writer.add_scalar("buffer_size_timesteps", ts_in_buffer)
+    # Summarize episode returns.
+    if metrics.get("episode_returns"):
+        episode_return_mean = np.mean(metrics["episode_returns"])
+        tbx_writer.add_scalar("ENV_episode_return_mean", episode_return_mean)
+    # Summarize actions taken.
+    actions = np.concatenate(
+        [eps.actions for eps in done_episodes + ongoing_episodes],
+        axis=0,
+    )
+    tbx_writer.add_histogram("ENV_actions_taken", actions)
 
     total_env_steps += env_steps
 
@@ -241,10 +247,10 @@ for iteration in range(1000):
         print(f"\tSub-iteration {iteration}/{sub_iter})")
 
         # Enable TB summaries this step?
-        tb_ctx = None
-        if total_train_steps % summary_frequency_train_steps == 0:
-            tb_ctx = tb_writer.as_default(step=total_env_steps)
-            tb_ctx.__enter__()
+        #tb_ctx = None
+        #if total_train_steps % summary_frequency_train_steps == 0:
+        #    tb_ctx = tb_writer.as_default(step=total_env_steps)
+        #    tb_ctx.__enter__()
 
         # Draw a new sample from the replay buffer.
         sample = buffer.sample(batch_size_B=batch_size_B, batch_length_T=batch_length_T)
@@ -285,17 +291,21 @@ for iteration in range(1000):
 
         if total_train_steps % summary_frequency_train_steps == 0:
             summarize_forward_train_outs_vs_samples(
+                tbx_writer=tbx_writer,
                 forward_train_outs=forward_train_outs,
                 sample=sample,
                 batch_size_B=batch_size_B,
                 batch_length_T=batch_length_T,
                 symlog_obs=symlog_obs,
             )
-            summarize_world_model_losses(world_model_train_results)
+            summarize_world_model_losses(
+                tbx_writer=tbx_writer,
+                world_model_train_results=world_model_train_results,
+            )
 
         print(
             f"\t\tL_world_model_total={world_model_train_results['L_world_model_total'].numpy():.5f} ("
-            f"L_pred={world_model_train_results['L_pred'].numpy():.5f}; "
+            f"L_pred={world_model_train_results['L_pred'].numpy():.5f} (obs={world_model_train_results['L_pred'].numpy()} reward(two-hot)={world_model_train_results['L_reward_two_hot'].numpy()} cont={world_model_train_results['L_continue'].numpy()}); "
             f"L_dyn={world_model_train_results['L_dyn'].numpy():.5f}; "
             f"L_rep={world_model_train_results['L_rep'].numpy():.5f})"
         )
@@ -379,28 +389,23 @@ for iteration in range(1000):
                             initial_h=dream_data["h_states_t1_to_Hp1"][0][t],
                             as_tensor=True,
                         )
-                        tf.summary.image(
+                        tbx_writer.add_images(
                             f"dreamed_trajectories_for_critic_actor_learning[B=0,T={t}]",
-                            tf.expand_dims(img, axis=0),
+                            tf.expand_dims(img, axis=0).numpy(),
+                            dataformats="NHWC",
                         )
 
                 # Summarize actor-critic loss stats.
-                tf.summary.scalar("L_critic", L_critic)
-                tf.summary.histogram("L_critic_value_targets", actor_critic_train_results["value_targets_B_H"])
-                tf.summary.scalar("L_critic_neg_logp_target", actor_critic_train_results["L_critic_neg_logp_target"])
-                tf.summary.histogram("L_critic_neg_logp_target_B_H", actor_critic_train_results["L_critic_neg_logp_target_B_H"])
-                tf.summary.scalar("L_critic_ema_regularization", actor_critic_train_results["L_critic_ema_regularization"])
-                tf.summary.histogram("L_critic_ema_regularization_B_H", actor_critic_train_results["L_critic_ema_regularization_B_H"])
+                summarize_critic_losses(
+                    tbx_writer = tbx_writer,
+                    actor_critic_train_results = actor_critic_train_results,
+                )
 
                 if train_actor:
-                    tf.summary.scalar("L_actor", L_actor)
-                    tf.summary.scalar("L_actor_action_entropy", actor_critic_train_results["action_entropy"])
-                    tf.summary.scalar("L_actor_reinforce_term", actor_critic_train_results["L_actor_reinforce_term"])
-                    tf.summary.scalar("L_actor_action_entropy_term", actor_critic_train_results["L_actor_action_entropy_term"])
-                    tf.summary.histogram("L_actor_scaled_value_targets_B_H", actor_critic_train_results["scaled_value_targets_B_H"])
-                    tf.summary.histogram("L_actor_logp_loss_B_H", actor_critic_train_results["logp_loss_B_H"])
-                    tf.summary.scalar("L_actor_ema_value_target_pct95", actor_critic_train_results["L_actor_ema_value_target_pct95"])
-                    tf.summary.scalar("L_actor_ema_value_target_pct5", actor_critic_train_results["L_actor_ema_value_target_pct5"])
+                    summarize_actor_losses(
+                        tbx_writer=tbx_writer,
+                        actor_critic_train_results=actor_critic_train_results,
+                    )
 
             print(
                 f"\t\tL_actor={L_actor.numpy() if train_actor else 0.0:.5f} L_critic={L_critic.numpy():.5f}"
@@ -409,48 +414,48 @@ for iteration in range(1000):
         sub_iter += 1
         total_train_steps += 1
 
-        if tb_ctx is not None:
-            tb_ctx.__exit__(None, None, None)
+        #if tb_ctx is not None:
+        #    tb_ctx.__exit__(None, None, None)
 
     total_replayed_steps += replayed_steps
 
     # EVALUATION.
     if total_train_steps % evaluation_frequency_main_iters == 0:
         print("\nEVALUATION:")
-        with tb_writer.as_default(step=total_env_steps):
-            # Dream a trajectory using the samples from the buffer and compare obs,
-            # rewards, continues to the actually observed trajectory.
-            dreamed_T = horizon_H
-            print(f"\tDreaming trajectories (H={dreamed_T}) from all 1st timesteps drawn from buffer ...")
-            dream_data = dreamer_model.dream_trajectory_with_burn_in(
-                observations=sample["obs"][:, :burn_in_T],  # use only first burn_in_T obs
-                actions=sample["actions"][:, :burn_in_T + dreamed_T],  # use all actions from 0 to T (no actor)
-                initial_h=sample["h_states"][:, 0],  # use initial T=0 h-states
-                timesteps=dreamed_T,  # dream for n timesteps
-                use_sampled_actions=True,  # use sampled actions, not the actor
-            )
+        # Dream a trajectory using the samples from the buffer and compare obs,
+        # rewards, continues to the actually observed trajectory.
+        dreamed_T = horizon_H
+        print(f"\tDreaming trajectories (H={dreamed_T}) from all 1st timesteps drawn from buffer ...")
+        dream_data = dreamer_model.dream_trajectory_with_burn_in(
+            observations=sample["obs"][:, :burn_in_T],  # use only first burn_in_T obs
+            actions=sample["actions"][:, :burn_in_T + dreamed_T],  # use all actions from 0 to T (no actor)
+            initial_h=sample["h_states"][:, 0],  # use initial T=0 h-states
+            timesteps=dreamed_T,  # dream for n timesteps
+            use_sampled_actions=True,  # use sampled actions, not the actor
+        )
 
-            mse_sampled_vs_dreamed_obs = summarize_dreamed_trajectory_vs_samples(
-                dream_data,
-                sample,
-                batch_size_B=batch_size_B,
-                burn_in_T=burn_in_T,
-                dreamed_T=dreamed_T,
-                dreamer_model=dreamer_model,
-                symlog_obs=symlog_obs,
-            )
-            print(f"\tMSE sampled vs dreamed obs (B={batch_size_B} T/H={dreamed_T}): {mse_sampled_vs_dreamed_obs:.6f}")
+        mse_sampled_vs_dreamed_obs = summarize_dreamed_trajectory_vs_samples(
+            tbx_writer=tbx_writer,
+            dream_data=dream_data,
+            sample=sample,
+            batch_size_B=batch_size_B,
+            burn_in_T=burn_in_T,
+            dreamed_T=dreamed_T,
+            dreamer_model=dreamer_model,
+            symlog_obs=symlog_obs,
+        )
+        print(f"\tMSE sampled vs dreamed obs (B={batch_size_B} T/H={dreamed_T}): {mse_sampled_vs_dreamed_obs:.6f}")
 
-            # Run n episodes in an actual env and report mean episode returns.
-            print(f"Running {evaluation_num_episodes} episodes in env for evaluation ...")
-            episodes = env_runner_evaluation.sample_episodes(
-                num_episodes=evaluation_num_episodes, random_actions=False
-            )
-            mean_episode_len = np.mean([len(eps) for eps in episodes])
-            mean_episode_return = np.mean([eps.get_return() for eps in episodes])
-            print(f"\tMean episode return: {mean_episode_return:.4f}; mean len: {mean_episode_len:.1f}")
-            tf.summary.scalar("EVAL_mean_episode_return", mean_episode_return)
-            tf.summary.scalar("EVAL_mean_episode_length", mean_episode_len)
+        # Run n episodes in an actual env and report mean episode returns.
+        print(f"Running {evaluation_num_episodes} episodes in env for evaluation ...")
+        episodes = env_runner_evaluation.sample_episodes(
+            num_episodes=evaluation_num_episodes, random_actions=False
+        )
+        mean_episode_len = np.mean([len(eps) for eps in episodes])
+        mean_episode_return = np.mean([eps.get_return() for eps in episodes])
+        print(f"\tMean episode return: {mean_episode_return:.4f}; mean len: {mean_episode_len:.1f}")
+        tbx_writer.add_scalar("EVAL_mean_episode_return", mean_episode_return)
+        tbx_writer.add_scalar("EVAL_mean_episode_length", mean_episode_len)
 
     # Save the model every N iterations (but not after the very first).
     if iteration != 0 and iteration % model_save_frequency_main_iters == 0:
@@ -463,9 +468,8 @@ for iteration in range(1000):
     try:
         gpu_memory = tf.config.experimental.get_memory_info('GPU:0')
         print(f"\nMEM (GPU) consumption: {gpu_memory['current']}")
-        with tb_writer.as_default(step=total_env_steps):
-            tf.summary.scalar("MEM_gpu_memory_used", gpu_memory['current'])
-            tf.summary.scalar("MEM_gpu_memory_peak", gpu_memory['peak'])
+        tbx_writer.add_scalar("MEM_gpu_memory_used", gpu_memory['current'])
+        tbx_writer.add_scalar("MEM_gpu_memory_peak", gpu_memory['peak'])
     except ValueError:
         pass
 
