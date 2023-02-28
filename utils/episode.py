@@ -6,7 +6,7 @@ import numpy as np
 
 class Episode:
 
-    def __init__(self, id_: Optional[str] = None, initial_observation=None):
+    def __init__(self, id_: Optional[str] = None, initial_observation=None, initial_render_image=None):
         self.id_ = id_ or uuid.uuid4().hex
         # Observations: t0 (initial obs) to T.
         self.observations = [] if initial_observation is None else [initial_observation]
@@ -20,7 +20,8 @@ class Episode:
         self.is_terminated = False
         # RGB uint8 images from rendering the env; the images include the corresponding
         # rewards.
-        self.render_images = []
+        assert initial_render_image is None or initial_observation is not None
+        self.render_images = [] if initial_render_image is None else [initial_render_image]
 
     def concat_episode(self, episode_chunk: "Episode"):
         assert episode_chunk.id_ == self.id_
@@ -59,13 +60,13 @@ class Episode:
         self.is_terminated = is_terminated
         self.validate()
 
-    def add_initial_observation(self, initial_observation, render_image=None):
+    def add_initial_observation(self, initial_observation, initial_render_image=None):
         assert not self.is_terminated
         assert len(self.observations) == 0
 
         self.observations.append(initial_observation)
-        if render_image is not None:
-            self.render_images.append(render_image)
+        if initial_render_image is not None:
+            self.render_images.append(initial_render_image)
         self.validate()
 
     def validate(self):

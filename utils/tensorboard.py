@@ -309,8 +309,7 @@ def _summarize_obs(
         global_step=step,
     )
 
-    # Images: Create image summary, comparing computed images with actual sampled ones.
-    # Note: We only use images here from the first (0-index) batch item.
+    # Videos: Create summary, comparing computed images with actual sampled ones.
     if len(sampled_obs_B_T_dims.shape) in [2+2, 2+3]:
         # Restore image pixels from normalized (non-symlog'd) data.
         if not symlog_obs:
@@ -324,18 +323,18 @@ def _summarize_obs(
         )
         # Concat sampled and computed images along the height axis (2) such that
         # real images show below respective predicted ones.
-        # (B, w, h, C)
+        # (B, T, h, w, C)
         sampled_vs_computed_images = tf.concat(
-            [computed_images[0], sampled_obs_B_T_dims[0]], axis=1,
+            [computed_images, sampled_obs_B_T_dims], axis=2,
         )
-        tbx_writer.add_images(
-            f"sampled_vs_{descr}_images[0th batch item]",
-            (
-                tf.expand_dims(sampled_vs_computed_images, -1)
-                if len(sampled_obs_B_T_dims.shape) == 2+2
-                else sampled_vs_computed_images
-            ).numpy(),
-            dataformats="NHWC",
+        # Add grayscale dim, if necessary.
+        if len(sampled_obs_B_T_dims.shape) == 2 + 2:
+            sampled_vs_computed_images = tf.expand_dims(sampled_vs_computed_images, -1)
+
+        tbx_writer.add_video(
+            f"sampled_vs_{descr}_videos",
+            sampled_vs_computed_images.numpy(),
+            dataformats="NTHWC",
             global_step=step,
         )
 

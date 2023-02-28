@@ -118,7 +118,7 @@ class EnvRunnerV2:
                 wrappers=wrappers,
                 num_envs=self.config.num_envs_per_worker,
                 asynchronous=self.config.remote_worker_envs,
-                make_kwargs=self.config.env_config,
+                make_kwargs=dict(self.config.env_config, **{"render_mode": "rgb_array"}),
             )
         else:
             wrappers = [] if self.config.env != "FrozenLake-v1" else [OneHot]
@@ -326,11 +326,11 @@ class EnvRunnerV2:
 
         render_images = [None] * self.num_envs
         if with_render_data:
-            render_images = self.env.render()
+            render_images = [e.render() for e in self.env.envs]
 
         for i, o in enumerate(self._split_by_env(obs)):
             episodes[i].add_initial_observation(
-                initial_observation=o, render_image=render_images[i]
+                initial_observation=o, initial_render_image=render_images[i]
             )
 
         eps = 0
@@ -367,7 +367,7 @@ class EnvRunnerV2:
 
             obs, rewards, terminateds, truncateds, infos = self.env.step(actions)
             if with_render_data:
-                render_images = self.env.render()
+                render_images = [e.render() for e in self.env.envs]
 
             for i, (o, a, r, term, trunc, h) in enumerate(zip(
                 self._split_by_env(obs),
@@ -398,7 +398,7 @@ class EnvRunnerV2:
 
                     done_episodes_to_return.append(episodes[i])
 
-                    episodes[i] = Episode(initial_observation=o, render_image=render_images[i])
+                    episodes[i] = Episode(initial_observation=o, initial_render_image=render_images[i])
                 else:
                     episodes[i].add_timestep(
                         o,
@@ -458,7 +458,7 @@ if __name__ == "__main__":
     env_runner = EnvRunnerV2(
         model=None,
         config=config,
-        _debug_count_env=True,
+        #_debug_count_env=True,
     )
 
     for _ in range(10):
