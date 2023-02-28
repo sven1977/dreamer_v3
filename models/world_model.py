@@ -231,7 +231,7 @@ class WorldModel(tf.keras.Model):
             z_probs_encoder,
             shape=[-1] + z_probs_encoder.shape.as_list()[2:],
         )
-        z_distribution_encoder = tfp.distributions.Categorical(probs=z_probs_encoder)
+        #z_distribution_encoder = tfp.distributions.Categorical(probs=z_probs_encoder)
         # Fold time axis to retrieve the final (loss ready) Independent distribution
         # (over `num_categoricals` Categoricals).
         z_probs_dynamics = tf.stack(z_probs_dynamics, axis=1)
@@ -239,7 +239,7 @@ class WorldModel(tf.keras.Model):
             z_probs_dynamics,
             shape=[-1] + z_probs_dynamics.shape.as_list()[2:],
         )
-        z_distribution_dynamics = tfp.distributions.Categorical(probs=z_probs_dynamics)
+        #z_distribution_dynamics = tfp.distributions.Categorical(probs=z_probs_dynamics)
 
         # Fold time dimension for parallelization of all dependent predictions:
         # observations (reproduction via decoder), rewards, continues.
@@ -264,8 +264,8 @@ class WorldModel(tf.keras.Model):
             "obs_distribution_BxT": obs_distribution,
             "reward_distribution_BxT": reward_distribution,
             "continue_distribution_BxT": continue_distribution,
-            "z_distribution_encoder_BxT": z_distribution_encoder,
-            "z_distribution_dynamics_BxT": z_distribution_dynamics,
+            "z_probs_encoder_BxT": z_probs_encoder,
+            "z_probs_dynamics_BxT": z_probs_dynamics,
             # Deterministic, continuous h-states (t1 to T).
             "h_states_BxT": h_BxT,
             # Sampled, discrete z-states (t1 to T).

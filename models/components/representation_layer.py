@@ -77,13 +77,18 @@ class RepresentationLayer(tf.keras.layers.Layer):
         probs = 0.99 * probs + 0.01 * (1.0 / self.num_classes_per_categorical)
 
         # Create the distribution object using the unimix'd probs.
-        distribution = tfp.distributions.Categorical(probs=probs)
-
-        # Draw a sample and one-hot the results (B, num_categoricals, num_classes)
-        sample = tf.one_hot(
-            distribution.sample(),
-            depth=self.num_classes_per_categorical,
+        #distribution = tfp.distributions.Categorical(probs=probs)
+        distribution = tfp.distributions.Independent(
+            tfp.distributions.OneHotCategorical(probs=probs),
+            reinterpreted_batch_ndims=1,
         )
+
+        # Draw a one-hot sample (B, num_categoricals, num_classes).
+        #sample = tf.one_hot(
+        #    distribution.sample(),
+        #    depth=self.num_classes_per_categorical,
+        #)
+        sample = tf.cast(distribution.sample(), tf.float32)
         # Make sure we can take gradients "straight-through" the sampling step
         # by adding the probs and subtracting the sg(probs). Note that `sample`
         # does not have any gradients as it's the result of a Categorical sample step,
@@ -91,7 +96,9 @@ class RepresentationLayer(tf.keras.layers.Layer):
         # [1] "The representations are sampled from a vector of softmax distributions
         # and we take straight-through gradients through the sampling step."
         # [2] Algorithm 1.
-        differentiable_sample = sample + probs - tf.stop_gradient(probs)
+        differentiable_sample = (
+            tf.stop_gradient(sample) + probs - tf.stop_gradient(probs)
+        )
         if return_z_probs:
             return differentiable_sample, probs
         return differentiable_sample

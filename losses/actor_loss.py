@@ -47,13 +47,13 @@ def actor_loss(
         axis=1,
     )
     assert len(entropy_B_H.shape) == 2
-    entropy = tf.reduce_mean(tf.reduce_sum(entropy_B_H, axis=-1))
+    entropy = tf.reduce_mean(entropy_B_H)
 
     L_actor_reinforce_term_B_H = - logp_loss_B_H
     L_actor_action_entropy_term_B_H = - entropy_scale * entropy_B_H
 
     L_actor_B_H = L_actor_reinforce_term_B_H + L_actor_action_entropy_term_B_H
-    L_actor = tf.reduce_mean(tf.reduce_sum(L_actor_B_H, axis=-1))
+    L_actor = tf.reduce_mean(L_actor_B_H)
 
     return {
         "L_actor_B_H": L_actor_B_H,
@@ -66,13 +66,9 @@ def actor_loss(
         "action_entropy_B_H": entropy_B_H,
         "action_entropy": entropy,
         "L_actor_reinforce_term_B_H": L_actor_reinforce_term_B_H,
-        "L_actor_reinforce_term": tf.reduce_mean(
-            tf.reduce_sum(L_actor_reinforce_term_B_H, axis=-1)
-        ),
+        "L_actor_reinforce_term": tf.reduce_mean(L_actor_reinforce_term_B_H),
         "L_actor_action_entropy_term_B_H": L_actor_action_entropy_term_B_H,
-        "L_actor_action_entropy_term": tf.reduce_mean(
-            tf.reduce_sum(L_actor_action_entropy_term_B_H, axis=-1)
-        ),
+        "L_actor_action_entropy_term": tf.reduce_mean(L_actor_action_entropy_term_B_H),
     }
 
 

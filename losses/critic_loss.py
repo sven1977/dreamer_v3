@@ -87,13 +87,13 @@ def critic_loss(
     #    ),
     #    axis=-1,
     #)
-    L_critic_neg_logp_target = tf.reduce_mean(tf.reduce_sum(value_symlog_neg_logp_target_B_H, axis=-1))
-    L_critic_ema_regularization = tf.reduce_mean(tf.reduce_sum(ema_regularization_loss_B_H, axis=-1))
+    L_critic_neg_logp_target = tf.reduce_mean(value_symlog_neg_logp_target_B_H)
+    L_critic_ema_regularization = tf.reduce_mean(ema_regularization_loss_B_H)
 
     L_critic_B_H = value_symlog_neg_logp_target_B_H + ema_regularization_loss_B_H
 
     # Reduce over H- (time) axis (sum) and then B-axis (mean).
-    L_critic = tf.reduce_mean(tf.reduce_sum(L_critic_B_H, axis=-1))
+    L_critic = tf.reduce_mean(L_critic_B_H)
 
     return {
         "L_critic": L_critic,

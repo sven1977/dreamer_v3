@@ -47,33 +47,33 @@ def train_world_model_one_step(
             forward_train_outs=forward_train_outs,
         )
 
-        L_pred_B_T = prediction_losses["total_loss_B_T"]
-        L_pred = tf.reduce_mean(tf.reduce_sum(L_pred_B_T, axis=-1))
+        L_pred_B_T = prediction_losses["prediction_loss_B_T"]
+        L_pred = tf.reduce_mean(L_pred_B_T)
 
         L_decoder_B_T = prediction_losses["decoder_loss_B_T"]
-        L_decoder = tf.reduce_mean(tf.reduce_sum(L_decoder_B_T, axis=-1))
+        L_decoder = tf.reduce_mean(L_decoder_B_T)
 
         # Two-hot reward loss.
         L_reward_two_hot_B_T = prediction_losses["reward_loss_two_hot_B_T"]
-        L_reward_two_hot = tf.reduce_mean(tf.reduce_sum(L_reward_two_hot_B_T, axis=-1))
+        L_reward_two_hot = tf.reduce_mean(L_reward_two_hot_B_T)
         # TEST: Out of interest, compare with simplge -log(p) loss for individual
         # rewards using the FiniteDiscrete distribution. This should be very close
         # to the two-hot reward loss.
         L_reward_logp_B_T = prediction_losses["reward_loss_logp_B_T"]
-        L_reward_logp = tf.reduce_mean(tf.reduce_sum(L_reward_logp_B_T, axis=-1))
+        L_reward_logp = tf.reduce_mean(L_reward_logp_B_T)
 
         L_continue_B_T = prediction_losses["continue_loss_B_T"]
-        L_continue = tf.reduce_mean(tf.reduce_sum(L_continue_B_T, axis=-1))
+        L_continue = tf.reduce_mean(L_continue_B_T)
 
-        L_dyn = tf.reduce_mean(tf.reduce_sum(L_dyn_B_T, axis=-1))
+        L_dyn = tf.reduce_mean(L_dyn_B_T)
 
-        L_rep = tf.reduce_mean(tf.reduce_sum(L_rep_B_T, axis=-1))
+        L_rep = tf.reduce_mean(L_rep_B_T)
 
         # Compute the actual total loss using fixed weights described in [1] eq. 4.
         L_world_model_total_B_T = 1.0 * L_pred_B_T + 0.5 * L_dyn_B_T + 0.1 * L_rep_B_T
 
         # Sum up timesteps, and average over batch (see eq. 4 in [1]).
-        L_world_model_total = tf.reduce_mean(tf.reduce_sum(L_world_model_total_B_T, axis=-1))
+        L_world_model_total = tf.reduce_mean(L_world_model_total_B_T)
 
     # Get the gradients from the tape.
     gradients = tape.gradient(L_world_model_total, world_model.trainable_variables)
