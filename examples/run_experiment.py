@@ -318,7 +318,11 @@ for iteration in range(1000000):
 
         print(
             f"\t\tL_world_model_total={world_model_train_results['L_world_model_total'].numpy():.5f} ("
-            f"L_pred={world_model_train_results['L_pred'].numpy():.5f} (obs={world_model_train_results['L_pred'].numpy()} reward(two-hot)={world_model_train_results['L_reward_two_hot'].numpy()} cont={world_model_train_results['L_continue'].numpy()}); "
+            f"L_pred={world_model_train_results['L_pred'].numpy():.5f} ("
+            f"decoder/obs={world_model_train_results['L_decoder'].numpy()} "
+            f"reward(two-hot)={world_model_train_results['L_reward_two_hot'].numpy()} "
+            f"cont={world_model_train_results['L_continue'].numpy()}"
+            "); "
             f"L_dyn={world_model_train_results['L_dyn'].numpy():.5f}; "
             f"L_rep={world_model_train_results['L_rep'].numpy():.5f})"
         )
@@ -482,7 +486,8 @@ for iteration in range(1000000):
         for i, eps in enumerate(episodes):
             tbx_writer.add_video(
                 f"EVAL_episode_video_{i}",
-                np.expand_dims(eps.render_images, 0),
+                # Must have a batch (N) dim. Simply THWC not allowed.
+                np.expand_dims(eps.render_images, axis=0),
                 global_step=total_env_steps,
                 dataformats="NTHWC",
             )

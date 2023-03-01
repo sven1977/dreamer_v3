@@ -127,7 +127,7 @@ class EnvRunnerV2:
                 wrappers=wrappers,
                 num_envs=self.config.num_envs_per_worker,
                 asynchronous=self.config.remote_worker_envs,
-                **self.config.env_config,
+                **dict(self.config.env_config, **{"render_mode": "rgb_array"}),
             )
         self.num_envs = self.env.num_envs
         assert self.num_envs == self.config.num_envs_per_worker
