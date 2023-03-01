@@ -8,6 +8,7 @@ D. Hafner, T. Lillicrap, M. Norouzi, J. Ba
 https://arxiv.org/pdf/2010.02193.pdf
 """
 
+import argparse
 import gc
 import os
 import yaml
@@ -35,16 +36,28 @@ from utils.cartpole_debug import CartPoleDebug  # import registers `CartPoleDebu
 from utils.tensorboard import (
     summarize_actor_losses,
     summarize_critic_losses,
-    summarize_dreamed_trajectory_vs_samples,
+    summarize_dreamed_eval_trajectory_vs_samples,
     summarize_forward_train_outs_vs_samples,
     reconstruct_obs_from_h_and_z,
     summarize_world_model_losses,
 )
 
-with open("atari_pong.yaml", "r") as f:
-    options = yaml.safe_load(f)
-    assert len(options) == 1
-    options = next(iter(options.values()))
+parser = argparse.ArgumentParser()
+parser.add_argument(
+    "--config",
+    "-c",
+    type=str,
+    default="atari_pong.yaml",
+    help="The config yaml file for the experiment.",
+)
+args = parser.parse_args()
+
+print(f"Trying to open config file {args.config} ...")
+with open(args.config, "r") as f:
+    config = yaml.safe_load(f)
+print(f"Running with the following config:\n{config}")
+assert len(config) == 1, "Only one experiment allowed in config yaml!"
+config = next(iter(config.values()))
 
 # Create the checkpoint path, if it doesn't exist yet.
 os.makedirs("checkpoints", exist_ok=True)
@@ -52,12 +65,12 @@ os.makedirs("checkpoints", exist_ok=True)
 os.makedirs("tensorboard", exist_ok=True)
 tbx_writer = SummaryWriter("tensorboard")
 # Every how many training steps do we write data to TB?
-summary_frequency_train_steps = options["summary_frequency_train_steps"]
+summary_frequency_train_steps = config["summary_frequency_train_steps"]
 # Every how many main iterations do we evaluate?
-evaluation_frequency_main_iters = options["evaluation_frequency_main_iters"]
-evaluation_num_episodes = options["evaluation_num_episodes"]
+evaluation_frequency_main_iters = config["evaluation_frequency_main_iters"]
+evaluation_num_episodes = config["evaluation_num_episodes"]
 # Every how many (main) iterations (sample + N train steps) do we save our model?
-model_save_frequency_main_iters = options["model_save_frequency_main_iters"]
+model_save_frequency_main_iters = config["model_save_frequency_main_iters"]
 
 # Set batch size and -length according to [1]:
 batch_size_B = 16
@@ -69,19 +82,19 @@ burn_in_T = 5
 horizon_H = 15
 
 # Whether to symlog the observations or not.
-symlog_obs = not options.get("is_atari", False)
+symlog_obs = not config.get("is_atari", False)
 
 # Actor/critic hyperparameters.
-discount_gamma = options.get("discount_gamma", 0.997)  # [1] eq. 7.
-gae_lambda = options.get("gae_lambda", 0.95)  # [1] eq. 7.
+discount_gamma = config.get("discount_gamma", 0.997)  # [1] eq. 7.
+gae_lambda = config.get("gae_lambda", 0.95)  # [1] eq. 7.
 entropy_scale = 3e-4  # [1] eq. 11.
 return_normalization_decay = 0.99  # [1] eq. 11 and 12.
 
 
 # EnvRunner config (an RLlib algorithm config).
-config = (
+algo_config = (
     AlgorithmConfig()
-    .environment(options["env"], env_config={
+    .environment(config["env"], env_config={
         # [2]: "We follow the evaluation protocol of Machado et al. (2018) with 200M
         # environment steps, action repeat of 4, a time limit of 108,000 steps per
         # episode that correspond to 30 minutes of game play, no access to life
@@ -92,19 +105,19 @@ config = (
         "repeat_action_probability": 0.0,#25,  # "sticky actions" but not according to Dani's 100k configs
         "full_action_space": False,#True,  # "full action space" but not according to Dani's 100k configs
         "frameskip": 1,  # already done by MaxAndSkip wrapper: "action repeat" == 4
-    } if options["is_atari"] else options.get("env_config", {}))
+    } if config["is_atari"] else config.get("env_config", {}))
     .rollouts(
         num_envs_per_worker=1,
         rollout_fragment_length=batch_length_T,
     )
 )
 # The vectorized gymnasium EnvRunner to collect samples of shape (B, T, ...).
-env_runner = EnvRunnerV2(model=None, config=config)
-env_runner_evaluation = EnvRunnerV2(model=None, config=config)
+env_runner = EnvRunnerV2(model=None, config=algo_config)
+env_runner_evaluation = EnvRunnerV2(model=None, config=algo_config)
 
 # Whether to o nly train the world model (not the critic and actor networks).
-train_critic = options.get("train_critic", True)
-train_actor = options.get("train_actor", True)
+train_critic = config.get("train_critic", True)
+train_actor = config.get("train_actor", True)
 # Cannot train actor w/o critic.
 assert not (train_actor and not train_critic)
 
@@ -115,17 +128,17 @@ from_checkpoint = None
 if from_checkpoint is not None:
     dreamer_model = tf.keras.models.load_model(from_checkpoint)
 else:
-    model_dimension = options["model_dimension"]
+    model_dimension = config["model_dimension"]
     world_model = WorldModel(
         model_dimension=model_dimension,
         action_space=env_runner.env.single_action_space,
         batch_length_T=batch_length_T,
-        num_gru_units=options.get("num_gru_units"),
-        encoder=CNNAtari(model_dimension=model_dimension) if options["is_atari"] else MLP(model_dimension=model_dimension),
+        num_gru_units=config.get("num_gru_units"),
+        encoder=CNNAtari(model_dimension=model_dimension) if config["is_atari"] else MLP(model_dimension=model_dimension),
         decoder=ConvTransposeAtari(
             model_dimension=model_dimension,
             gray_scaled=False,
-        ) if options["is_atari"] else VectorDecoder(
+        ) if config["is_atari"] else VectorDecoder(
             model_dimension=model_dimension,
             observation_space=env_runner.env.single_observation_space,
         ),
@@ -160,7 +173,7 @@ critic_grad_clip = 100.0
 actor_grad_clip = 100.0
 
 # Training ratio: Ratio of replayed steps over env steps.
-training_ratio = options["training_ratio"]
+training_ratio = config["training_ratio"]
 
 total_env_steps = 0
 total_replayed_steps = 0
@@ -434,7 +447,7 @@ for iteration in range(1000000):
             use_sampled_actions=True,  # use sampled actions, not the actor
         )
 
-        mse_sampled_vs_dreamed_obs = summarize_dreamed_trajectory_vs_samples(
+        mse_sampled_vs_dreamed_obs = summarize_dreamed_eval_trajectory_vs_samples(
             tbx_writer=tbx_writer,
             step=total_env_steps,
             dream_data=dream_data,
@@ -466,12 +479,13 @@ for iteration in range(1000000):
         tbx_writer.add_scalar(
             "EVAL_mean_episode_length", mean_episode_len, global_step=total_env_steps
         )
-        tbx_writer.add_video(
-            "EVAL_episode_videos",
-            np.array([eps.render_images for eps in episodes]),
-            global_step=total_env_steps,
-            dataformats="NTHWC",
-        )
+        for i, eps in enumerate(episodes):
+            tbx_writer.add_video(
+                f"EVAL_episode_video_{i}",
+                np.expand_dims(eps.render_images, 0),
+                global_step=total_env_steps,
+                dataformats="NTHWC",
+            )
 
     # Save the model every N iterations (but not after the very first).
     if iteration != 0 and iteration % model_save_frequency_main_iters == 0:
@@ -482,6 +496,7 @@ for iteration in range(1000000):
     gc.collect()
     # tf.keras.backend.clear_session()  # <- this seems to be not needed.
 
+    # Log GPU memory consumption.
     try:
         gpu_memory = tf.config.experimental.get_memory_info('GPU:0')
         print(f"\nMEM (GPU) consumption: {gpu_memory['current']}")
@@ -491,6 +506,7 @@ for iteration in range(1000000):
         tbx_writer.add_scalar(
             "MEM_gpu_memory_peak", gpu_memory['peak'], global_step=total_env_steps
         )
+    # No GPU? No problem.
     except ValueError:
         pass
 

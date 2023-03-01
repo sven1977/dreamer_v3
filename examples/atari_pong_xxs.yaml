@@ -4,7 +4,7 @@ atari-pong-xxs-experiment:
 
   model_dimension: XXS
 
-  training_ratio: 1024
+  training_ratio: 32
 
   summary_frequency_train_steps: 10
   evaluation_frequency_main_iters:  1

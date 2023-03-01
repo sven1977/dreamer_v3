@@ -71,7 +71,8 @@ def summarize_forward_train_outs_vs_samples(
         sampled_obs_B_T_dims=sample["obs"],
         B=batch_size_B,
         T=batch_length_T,
-        descr="predicted_posterior",
+        descr_prefix="WORLD_MODEL_TRAIN",
+        descr_obs=f"predicted_posterior_T{batch_length_T}",
         symlog_obs=symlog_obs,
     )
     predicted_rewards = tf.reshape(
@@ -85,7 +86,8 @@ def summarize_forward_train_outs_vs_samples(
         sampled_rewards_B_T=sample["rewards"],
         B=batch_size_B,
         T=batch_length_T,
-        descr="predicted_posterior",
+        descr_prefix="WORLD_MODEL_TRAIN",
+        descr_reward="predicted_posterior",
     )
     tbx_writer.add_histogram(
         "sampled_rewards", sample["rewards"].numpy(), global_step=step
@@ -105,7 +107,8 @@ def summarize_forward_train_outs_vs_samples(
         sampled_continues_B_T=sample["continues"],
         B=batch_size_B,
         T=batch_length_T,
-        descr="predicted_posterior",
+        descr_prefix="WORLD_MODEL_TRAIN",
+        descr_cont="predicted_posterior",
     )
 
 
@@ -153,7 +156,7 @@ def summarize_critic_losses(*, tbx_writer, step, actor_critic_train_results):
     )
 
 
-def summarize_dreamed_trajectory_vs_samples(
+def summarize_dreamed_eval_trajectory_vs_samples(
     *,
     tbx_writer,
     step,
@@ -180,7 +183,8 @@ def summarize_dreamed_trajectory_vs_samples(
         sampled_obs_B_T_dims=sample["obs"][:, burn_in_T:burn_in_T + dreamed_T],
         B=batch_size_B,
         T=dreamed_T,
-        descr="dreamed_prior",
+        descr_prefix="EVAL",
+        descr_obs=f"dreamed_prior_H{dreamed_T}",
         symlog_obs=symlog_obs,
     )
 
@@ -192,7 +196,8 @@ def summarize_dreamed_trajectory_vs_samples(
         sampled_rewards_B_T=sample["rewards"][:, burn_in_T:burn_in_T + dreamed_T],
         B=batch_size_B,
         T=dreamed_T,
-        descr="dreamed_prior",
+        descr_prefix="EVAL",
+        descr_reward=f"dreamed_prior_H{dreamed_T}",
     )
 
     # Continues MSE.
@@ -203,7 +208,8 @@ def summarize_dreamed_trajectory_vs_samples(
         sampled_continues_B_T=sample["continues"][:, burn_in_T:burn_in_T + dreamed_T],
         B=batch_size_B,
         T=dreamed_T,
-        descr="dreamed_prior",
+        descr_prefix="EVAL",
+        descr_cont=f"dreamed_prior_H{dreamed_T}",
     )
     return mse_sampled_vs_dreamed_obs
 
@@ -273,7 +279,8 @@ def _summarize_obs(
     sampled_obs_B_T_dims,
     B,
     T,
-    descr,
+    descr_prefix=None,
+    descr_obs,
     symlog_obs,
 ):
     """Summarizes computed- vs sampled observations: MSE and (if applicable) images.
@@ -290,6 +297,8 @@ def _summarize_obs(
         descr: A string used to describe the computed data to be used in the TB
             summaries.
     """
+    descr_prefix = (descr_prefix + "_") if descr_prefix else ""
+
     if symlog_obs:
         computed_float_obs_B_T_dims = inverse_symlog(computed_float_obs_B_T_dims)
 
@@ -304,7 +313,7 @@ def _summarize_obs(
         tf.reduce_sum(mse_sampled_vs_computed_obs, axis=1)
     )
     tbx_writer.add_scalar(
-        f"MSE_sampled_vs_{descr}_obs",
+        f"{descr_prefix}MSE_sampled_vs_{descr_obs}_obs",
         mse_sampled_vs_computed_obs.numpy(),
         global_step=step,
     )
@@ -332,7 +341,7 @@ def _summarize_obs(
             sampled_vs_computed_images = tf.expand_dims(sampled_vs_computed_images, -1)
 
         tbx_writer.add_video(
-            f"sampled_vs_{descr}_videos",
+            f"{descr_prefix}sampled_vs_{descr_obs}_videos",
             sampled_vs_computed_images.numpy(),
             dataformats="NTHWC",
             global_step=step,
@@ -349,8 +358,10 @@ def _summarize_rewards(
     sampled_rewards_B_T,
     B,
     T,
-    descr,
+    descr_prefix=None,
+    descr_reward,
 ):
+    descr_prefix = (descr_prefix + "_") if descr_prefix else ""
     mse_sampled_vs_computed_rewards = tf.losses.mse(
         tf.expand_dims(computed_rewards_B_T, axis=-1),
         tf.expand_dims(sampled_rewards_B_T, axis=-1),
@@ -359,7 +370,7 @@ def _summarize_rewards(
         tf.reduce_sum(mse_sampled_vs_computed_rewards, axis=1)
     )
     tbx_writer.add_scalar(
-        f"MSE_sampled_vs_{descr}_rewards",
+        f"{descr_prefix}MSE_sampled_vs_{descr_reward}_rewards",
         mse_sampled_vs_computed_rewards.numpy(),
         global_step=step,
     )
@@ -373,8 +384,10 @@ def _summarize_continues(
     sampled_continues_B_T,
     B,
     T,
-    descr,
+    descr_prefix=None,
+    descr_cont,
 ):
+    descr_prefix = (descr_prefix + "_") if descr_prefix else ""
     # Continue MSE.
     mse_sampled_vs_computed_continues = tf.losses.mse(
         tf.expand_dims(computed_continues_B_T, axis=-1),
@@ -384,7 +397,7 @@ def _summarize_continues(
         tf.reduce_sum(mse_sampled_vs_computed_continues, axis=1)
     )
     tbx_writer.add_scalar(
-        f"MSE_sampled_vs_{descr}_continues",
+        f"{descr_prefix}MSE_sampled_vs_{descr_cont}_continues",
         mse_sampled_vs_computed_continues.numpy(),
         global_step=step,
     )
