@@ -65,12 +65,12 @@ os.makedirs("checkpoints", exist_ok=True)
 os.makedirs("tensorboard", exist_ok=True)
 tbx_writer = SummaryWriter("tensorboard")
 # Every how many training steps do we write data to TB?
-summary_frequency_train_steps = config["summary_frequency_train_steps"]
+summary_frequency_train_steps = config.get("summary_frequency_train_steps", 20)
 # Every how many main iterations do we evaluate?
-evaluation_frequency_main_iters = config["evaluation_frequency_main_iters"]
+evaluation_frequency_main_iters = config.get("evaluation_frequency_main_iters", 0)
 evaluation_num_episodes = config["evaluation_num_episodes"]
 # Every how many (main) iterations (sample + N train steps) do we save our model?
-model_save_frequency_main_iters = config["model_save_frequency_main_iters"]
+model_save_frequency_main_iters = config("model_save_frequency_main_iters", 100)
 
 # Set batch size and -length according to [1]:
 batch_size_B = 16
@@ -437,7 +437,9 @@ for iteration in range(1000000):
     total_replayed_steps += replayed_steps
 
     # EVALUATION.
-    if total_train_steps % evaluation_frequency_main_iters == 0:
+    if evaluation_frequency_main_iters and (
+            total_train_steps % evaluation_frequency_main_iters == 0
+    ):
         print("\nEVALUATION:")
         # Dream a trajectory using the samples from the buffer and compare obs,
         # rewards, continues to the actually observed trajectory.
