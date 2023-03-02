@@ -363,19 +363,20 @@ for iteration in range(1000000):
             L_critic = actor_critic_train_results["L_critic"]
             if train_actor:
                 L_actor = actor_critic_train_results["L_actor"]
+            dream_data = actor_critic_train_results["dream_data"]
 
             # Summarize actor/critic models.
             if iteration == 0 and sub_iter == 0:
                 # Dummy forward pass to be able to produce summary.
                 if train_actor:
                     dreamer_model.actor(
-                        actor_critic_train_results["dream_data"]["h_states_t1_to_Hp1"][:, 0],
-                        actor_critic_train_results["dream_data"]["z_states_prior_t1_to_H"][:, 0],
+                        dream_data["h_states_t1_to_Hp1"][:, 0],
+                        dream_data["z_states_prior_t1_to_H"][:, 0],
                     )
                     dreamer_model.actor.summary()
                 dreamer_model.critic(
-                    actor_critic_train_results["dream_data"]["h_states_t1_to_Hp1"][:, 0],
-                    actor_critic_train_results["dream_data"]["z_states_prior_t1_to_H"][:, 0],
+                    dream_data["h_states_t1_to_Hp1"][:, 0],
+                    dream_data["z_states_prior_t1_to_H"][:, 0],
                 )
                 dreamer_model.critic.summary()
 
@@ -386,7 +387,6 @@ for iteration in range(1000000):
                 #TODO: Make this work with any renderable env.
                 if env_runner.config.env in ["CartPoleDebug-v0", "CartPole-v1", "FrozenLake-v1"]:
                     from utils.cartpole_debug import create_cartpole_dream_image, create_frozenlake_dream_image
-                    dream_data = actor_critic_train_results["dream_data"]
                     dreamed_obs_B_H = reconstruct_obs_from_h_and_z(
                         h_t1_to_Tp1=dream_data["h_states_t1_to_Hp1"],
                         z_t1_to_T=dream_data["z_states_prior_t1_to_H"],
@@ -483,11 +483,18 @@ for iteration in range(1000000):
         tbx_writer.add_scalar(
             "EVAL_mean_episode_length", mean_episode_len, global_step=total_env_steps
         )
-        for i, eps in enumerate(episodes):
+        # Summarize (best and worst) evaluation episodes.
+        sorted_episodes = sorted(episodes, key=lambda e: e.get_return())
+        tbx_writer.add_video(
+            f"EVAL_episode_video" + ("_best" if len(sorted_episodes) > 1 else ""),
+            np.expand_dims(sorted_episodes[-1].render_images, axis=0),
+            global_step=total_env_steps,
+            dataformats="NTHWC",
+        )
+        if len(sorted_episodes) > 1:
             tbx_writer.add_video(
-                f"EVAL_episode_video_{i}",
-                # Must have a batch (N) dim. Simply THWC not allowed.
-                np.expand_dims(eps.render_images, axis=0),
+                f"EVAL_episode_video_worst",
+                np.expand_dims(sorted_episodes[0].render_images, axis=0),
                 global_step=total_env_steps,
                 dataformats="NTHWC",
             )

@@ -1,4 +1,5 @@
 from collections import deque
+import copy
 from typing import List, Union
 
 import numpy as np
@@ -38,6 +39,9 @@ class EpisodeReplayBuffer:
             episodes = [episodes]
 
         for eps in episodes:
+            # Make sure we don't change what's coming in from the user.
+            eps = copy.deepcopy(eps)
+
             self.size += len(eps)
             # Ongoing episode, concat to existing record.
             if eps.id_ in self.episode_id_to_index:

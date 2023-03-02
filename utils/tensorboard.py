@@ -305,13 +305,10 @@ def _summarize_obs(
     # MSE is the mean over all feature dimensions.
     # Images: Flatten image dimensions (w, h, C); Vectors: Mean over all items, etc..
     # Then sum over time-axis and mean over batch-axis.
-    mse_sampled_vs_computed_obs = tf.losses.mse(
-        tf.reshape(computed_float_obs_B_T_dims, (B, T, -1)),
-        tf.reshape(tf.cast(sampled_obs_B_T_dims, tf.float32), shape=(B, T, -1)),
+    mse_sampled_vs_computed_obs = tf.math.square(
+        computed_float_obs_B_T_dims - tf.cast(sampled_obs_B_T_dims, tf.float32)
     )
-    mse_sampled_vs_computed_obs = tf.reduce_mean(
-        tf.reduce_sum(mse_sampled_vs_computed_obs, axis=1)
-    )
+    mse_sampled_vs_computed_obs = tf.reduce_mean(mse_sampled_vs_computed_obs)
     tbx_writer.add_scalar(
         f"{descr_prefix}MSE_sampled_vs_{descr_obs}_obs",
         mse_sampled_vs_computed_obs.numpy(),
