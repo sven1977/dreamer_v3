@@ -16,6 +16,7 @@ from losses.world_model_losses import (
 def train_world_model_one_step(
     *,
     sample,
+    initial_h,
     batch_size_B,
     batch_length_T,
     grad_clip,
@@ -28,7 +29,7 @@ def train_world_model_one_step(
         forward_train_outs = world_model.forward_train(
             observations=sample["obs"],
             actions=sample["actions"],
-            initial_h=sample["h_states"][:, 0],
+            initial_h=initial_h,#TEST:sample["h_states"][:, 0],
         )
 
         prediction_losses = world_model_prediction_losses(

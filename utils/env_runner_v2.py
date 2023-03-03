@@ -193,7 +193,10 @@ class EnvRunnerV2:
             self.needs_initial_reset = False
 
             for i, o in enumerate(self._split_by_env(obs)):
-                self.episodes[i].add_initial_observation(initial_observation=o)
+                self.episodes[i].add_initial_observation(
+                    initial_observation=o,
+                    initial_h_state=h_states[i],
+                )
         # Don't reset existing envs; continue in already started episodes.
         else:
             obs = np.stack([eps.observations[-1] for eps in self.episodes])
@@ -262,7 +265,7 @@ class EnvRunnerV2:
 
                     done_episodes_to_return.append(self.episodes[i])
 
-                    self.episodes[i] = Episode(initial_observation=o)
+                    self.episodes[i] = Episode(initial_observation=o, initial_h_state=h)
                 else:
                     self.episodes[i].add_timestep(
                         o,
@@ -282,7 +285,11 @@ class EnvRunnerV2:
         # don't alter our ongoing and returned Episode objects.
         ongoing_episodes = self.episodes
         self.episodes = [
-            Episode(id_=eps.id_, initial_observation=eps.observations[-1])
+            Episode(
+                id_=eps.id_,
+                initial_observation=eps.observations[-1],
+                initial_h_state=eps.h_states[-1],
+            )
             for eps in self.episodes
         ]
         for eps in ongoing_episodes:
@@ -330,7 +337,9 @@ class EnvRunnerV2:
 
         for i, o in enumerate(self._split_by_env(obs)):
             episodes[i].add_initial_observation(
-                initial_observation=o, initial_render_image=render_images[i]
+                initial_observation=o,
+                initial_h_state=h_states[i],
+                initial_render_image=render_images[i],
             )
 
         eps = 0
@@ -398,7 +407,11 @@ class EnvRunnerV2:
 
                     done_episodes_to_return.append(episodes[i])
 
-                    episodes[i] = Episode(initial_observation=o, initial_render_image=render_images[i])
+                    episodes[i] = Episode(
+                        initial_observation=o,
+                        initial_h_state=h_states[i],
+                        initial_render_image=render_images[i],
+                    )
                 else:
                     episodes[i].add_timestep(
                         o,
@@ -417,18 +430,18 @@ class EnvRunnerV2:
     def get_metrics(self):
         metrics = {}
         if self.done_episodes_for_metrics:
-            mean_returns = 0.0
+            returns = []
             for eps in self.done_episodes_for_metrics:
-                mean_returns += eps.get_return()
+                returns.append(eps.get_return())
                 # Don't forget about the already returned chunks of this episode.
                 if eps.id_ in self.ongoing_episodes_for_metrics:
-                    mean_returns += sum(
+                    returns[-1] += sum(
                         eps2.get_return()
                         for eps2 in self.ongoing_episodes_for_metrics[eps.id_]
                     )
                     del self.ongoing_episodes_for_metrics[eps.id_]
-            mean_returns /= len(self.done_episodes_for_metrics)
-            metrics["episode_returns"] = mean_returns
+            #mean_returns /= len(self.done_episodes_for_metrics)
+            metrics["episode_returns"] = returns
 
         self.done_episodes_for_metrics.clear()
 

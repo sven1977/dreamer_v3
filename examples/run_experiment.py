@@ -155,6 +155,11 @@ else:
         world_model=world_model,
     )
 
+# TEST: Keep h-states "looping" during training forever, w/o ever resetting them (even
+# if there is a boundary or a new sample from the replay buffer).
+# The replay buffer's h-states don't matter and are ignored.
+h_states_training = dreamer_model.world_model._get_initial_h(batch_size=batch_size_B)
+
 # TODO: ugly hack (resulting from the insane fact that you cannot know
 #  an env's spaces prior to actually constructing an instance of it) :(
 env_runner.model = dreamer_model
@@ -231,6 +236,7 @@ if num_pretrain_iterations > 0:
         # Perform one world-model training step.
         world_model_train_results = train_world_model_one_step(
             sample=sample,
+            initial_h=h_states_training,
             batch_size_B=tf.convert_to_tensor(batch_size_B),
             batch_length_T=tf.convert_to_tensor(batch_length_T),
             grad_clip=tf.convert_to_tensor(world_model_grad_clip),
@@ -238,6 +244,7 @@ if num_pretrain_iterations > 0:
             optimizer=world_model_optimizer,
         )
         forward_train_outs = world_model_train_results["forward_train_outs"]
+        h_states_training = forward_train_outs["h_B_Tp1"]
 
         # Update h_states in buffer after the world model (sequential model)
         # forward pass.
@@ -245,7 +252,7 @@ if num_pretrain_iterations > 0:
         h_B_t2_to_Tp1 = tf.concat([tf.reshape(
             h_BxT,
             shape=(batch_size_B, batch_length_T) + h_BxT.shape[1:],
-        )[:, 1:], tf.expand_dims(forward_train_outs["h_B_Tp1"], axis=1)], axis=1)
+        )[:, 1:], tf.expand_dims(h_states_training, axis=1)], axis=1)
         buffer.update_h_states(h_B_t2_to_Tp1.numpy(), sample["indices"].numpy())
 
         # Summarize world model.
@@ -345,7 +352,7 @@ for iteration in range(1000000):
     # Summarize episode returns.
     if metrics.get("episode_returns"):
         episode_return_mean = np.mean(metrics["episode_returns"])
-        print(f"\tFinished sampling episodes R=[{list(metrics['episode_returns'])}]")
+        print(f"\tFinished sampling episodes R={list(metrics['episode_returns'])}")
         tbx_writer.add_scalar(
             "ENV_episode_return_mean", episode_return_mean, global_step=total_env_steps
         )
@@ -389,6 +396,7 @@ for iteration in range(1000000):
         # Perform one world-model training step.
         world_model_train_results = train_world_model_one_step(
             sample=sample,
+            initial_h=h_states_training,
             batch_size_B=tf.convert_to_tensor(batch_size_B),
             batch_length_T=tf.convert_to_tensor(batch_length_T),
             grad_clip=tf.convert_to_tensor(world_model_grad_clip),
@@ -396,6 +404,7 @@ for iteration in range(1000000):
             optimizer=world_model_optimizer,
         )
         forward_train_outs = world_model_train_results["forward_train_outs"]
+        h_states_training = forward_train_outs["h_B_Tp1"]
 
         # Update h_states in buffer after the world model (sequential model)
         # forward pass.
@@ -403,7 +412,7 @@ for iteration in range(1000000):
         h_B_t2_to_Tp1 = tf.concat([tf.reshape(
             h_BxT,
             shape=(batch_size_B, batch_length_T) + h_BxT.shape[1:],
-        )[:, 1:], tf.expand_dims(forward_train_outs["h_B_Tp1"], axis=1)], axis=1)
+        )[:, 1:], tf.expand_dims(h_states_training, axis=1)], axis=1)
         buffer.update_h_states(h_B_t2_to_Tp1.numpy(), sample["indices"].numpy())
 
         # Summarize world model.
