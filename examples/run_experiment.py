@@ -197,13 +197,11 @@ if config.get("offline", False):
     for eps in dataset:
         eps_ = Episode()
         eps_.observations = eps.observations
-        # TODO(Rohan138): Hacky fix is to add the last_obs twice
-        eps_.observations = np.append(
-            eps_.observations, np.expand_dims(eps.observations[-1], 0), axis=0
-            )
-        eps_.actions = eps.actions
-        eps_.rewards = eps.rewards
-        eps_.is_terminated = eps.terminal
+        # d3rlpy does not store the next_obs, so we are missing the last obervation
+        # TODO(Rohan138): Hacky fix is to drop the entire last timestep
+        eps_.actions = eps.actions[:-1]
+        eps_.rewards = eps.rewards[:-1]
+        eps_.is_terminated = False
         initial_h = dreamer_model._get_initial_h(1).numpy().astype(np.float32)
         eps_.h_states = np.repeat(initial_h, len(eps_.rewards), axis = 0)
         eps_.validate()
