@@ -189,7 +189,10 @@ if "offline" in args.config:
         dataset, _ = d3rlpy.datasets.get_pendulum()
     elif config["is_atari"] == True:
         dataset, _ = d3rlpy.datasets.get_atari(config["offline_dataset"])
+    else:
+        raise ValueError("Unknown offline environment.")
     
+    print("Loading episodes from d3rlpy to dreamer_v3")
     episodes = []
     for eps in dataset:
         eps_ = Episode()
@@ -201,8 +204,14 @@ if "offline" in args.config:
         eps_.actions = eps.actions
         eps_.rewards = eps.rewards
         eps_.is_terminated = eps.terminal
+        initial_h = dreamer_model._get_initial_h(1).numpy().astype(np.float32)
+        eps_.h_states = np.repeat(initial_h, len(eps_.rewards), axis = 0)
         eps_.validate()
         buffer.add(eps_)
+    
+    print("Loaded d3rlpy dataset into replay buffer: ")
+    print(f"{dataset.size()} episodes {dataset.rewards.shape[0]} steps")
+    print("Pretraining world model")
 
     # 2) Pretrain world model on offline data
     for iteration in range(config["pretrain_iter"]):
@@ -233,30 +242,28 @@ if "offline" in args.config:
         buffer.update_h_states(h_B_t2_to_Tp1.numpy(), sample["indices"].numpy())
 
         # Summarize world model.
-        if iteration == 0:
-            # Dummy forward pass to be able to produce summary.
-            world_model(
-                sample["obs"][:, 0],
-                sample["actions"][:, 0],
-                sample["h_states"][:, 0],
-            )
-            world_model.summary()
+        # Dummy forward pass to be able to produce summary.
+        world_model(
+            sample["obs"][:, 0],
+            sample["actions"][:, 0],
+            sample["h_states"][:, 0],
+        )
+        world_model.summary()
 
-        if total_train_steps % summary_frequency_train_steps == 0:
-            summarize_forward_train_outs_vs_samples(
-                tbx_writer=tbx_writer,
-                step=total_env_steps,
-                forward_train_outs=forward_train_outs,
-                sample=sample,
-                batch_size_B=batch_size_B,
-                batch_length_T=batch_length_T,
-                symlog_obs=symlog_obs,
-            )
-            summarize_world_model_losses(
-                tbx_writer=tbx_writer,
-                step=total_env_steps,
-                world_model_train_results=world_model_train_results,
-            )
+        summarize_forward_train_outs_vs_samples(
+            tbx_writer=tbx_writer,
+            step=total_env_steps,
+            forward_train_outs=forward_train_outs,
+            sample=sample,
+            batch_size_B=batch_size_B,
+            batch_length_T=batch_length_T,
+            symlog_obs=symlog_obs,
+        )
+        summarize_world_model_losses(
+            tbx_writer=tbx_writer,
+            step=total_env_steps,
+            world_model_train_results=world_model_train_results,
+        )
 
         print(
             f"\t\tL_world_model_total={world_model_train_results['L_world_model_total'].numpy():.5f} ("
@@ -269,6 +276,9 @@ if "offline" in args.config:
             f"L_rep={world_model_train_results['L_rep'].numpy():.5f})"
         )    
 
+
+print("\n\n\n\n")
+print("Pretraining offline over, switching to online training and evaluation")
 
 
 for iteration in range(1000000):
