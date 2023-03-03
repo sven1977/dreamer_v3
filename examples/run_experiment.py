@@ -70,7 +70,7 @@ summary_frequency_train_steps = config.get("summary_frequency_train_steps", 20)
 evaluation_frequency_main_iters = config.get("evaluation_frequency_main_iters", 0)
 evaluation_num_episodes = config["evaluation_num_episodes"]
 # Every how many (main) iterations (sample + N train steps) do we save our model?
-model_save_frequency_main_iters = config("model_save_frequency_main_iters", 100)
+model_save_frequency_main_iters = config.get("model_save_frequency_main_iters", 100)
 
 # Set batch size and -length according to [1]:
 batch_size_B = 16
@@ -108,7 +108,7 @@ algo_config = (
     } if config["is_atari"] else config.get("env_config", {}))
     .rollouts(
         num_envs_per_worker=1,
-        rollout_fragment_length=batch_length_T,
+        rollout_fragment_length=1,#TESTbatch_length_T,
     )
 )
 # The vectorized gymnasium EnvRunner to collect samples of shape (B, T, ...).
