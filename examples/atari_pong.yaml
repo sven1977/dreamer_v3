@@ -9,4 +9,4 @@ atari-pong-experiment:
   summary_frequency_train_steps: 20
   evaluation_frequency_main_iters: 0
   evaluation_num_episodes: 0
-  model_save_frequency_main_iters: 50
+  model_save_frequency_main_iters: 10000

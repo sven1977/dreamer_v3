@@ -65,6 +65,8 @@ os.makedirs("checkpoints", exist_ok=True)
 # Create the tensorboard summary data dir.
 os.makedirs("tensorboard", exist_ok=True)
 tbx_writer = SummaryWriter("tensorboard")
+# How many iterations do we pre-train?
+num_pretrain_iterations = config.get("num_pretrain_iterations", 0)
 # Every how many training steps do we write data to TB?
 summary_frequency_train_steps = config.get("summary_frequency_train_steps", 20)
 # Every how many training steps do we collect garbage
@@ -182,7 +184,7 @@ total_env_steps = 0
 total_replayed_steps = 0
 total_train_steps = 0
 
-if config.get("offline", False):
+if num_pretrain_iterations > 0:
     # 1) Initialize dataset
     import d3rlpy
     if config["env"] == "CartPole-v0":
@@ -198,23 +200,28 @@ if config.get("offline", False):
     episodes = []
     for eps in dataset:
         eps_ = Episode()
-        eps_.observations = eps.observations
-        # d3rlpy does not store the next_obs, so we are missing the last obervation
-        # TODO(Rohan138): Hacky fix is to drop the entire last timestep
-        eps_.actions = eps.actions[:-1]
-        eps_.rewards = eps.rewards[:-1]
-        eps_.is_terminated = False
+        eps_.observations = np.concatenate(
+            [eps.observations, np.array([eps.observations[-1]])], axis=0
+        )
+        eps_.actions = eps.actions
+        eps_.rewards = eps.rewards
+        eps_.is_terminated = eps.terminal == 1.0
         initial_h = dreamer_model._get_initial_h(1).numpy().astype(np.float32)
         eps_.h_states = np.repeat(initial_h, len(eps_.rewards), axis = 0)
         eps_.validate()
         buffer.add(eps_)
-    
-    print("Loaded d3rlpy dataset into replay buffer: ")
+
+    assert buffer.get_num_episodes() == len(dataset)
+    assert buffer.get_num_timesteps() == dataset.rewards.shape[0]
+
+    print("Loaded d3rlpy dataset into replay buffer:")
     print(f"{dataset.size()} episodes {dataset.rewards.shape[0]} steps")
     print("Pretraining world model")
 
-    # 2) Pretrain world model on offline data
-    for iteration in range(config["pretrain_iter"]):
+    # 2) Pretrain world model on offline data for n iterations.
+    for iteration in range(num_pretrain_iterations):
+        print(f"Offline training iteration {iteration}")
+
         sample = buffer.sample(batch_size_B=batch_size_B, batch_length_T=batch_length_T)
         total_replayed_steps += batch_size_B * batch_length_T
 
@@ -242,28 +249,30 @@ if config.get("offline", False):
         buffer.update_h_states(h_B_t2_to_Tp1.numpy(), sample["indices"].numpy())
 
         # Summarize world model.
-        # Dummy forward pass to be able to produce summary.
-        world_model(
-            sample["obs"][:, 0],
-            sample["actions"][:, 0],
-            sample["h_states"][:, 0],
-        )
-        world_model.summary()
+        if iteration == 0:
+            # Dummy forward pass to be able to produce summary.
+            world_model(
+                sample["obs"][:, 0],
+                sample["actions"][:, 0],
+                sample["h_states"][:, 0],
+            )
+            world_model.summary()
 
-        summarize_forward_train_outs_vs_samples(
-            tbx_writer=tbx_writer,
-            step=total_env_steps,
-            forward_train_outs=forward_train_outs,
-            sample=sample,
-            batch_size_B=batch_size_B,
-            batch_length_T=batch_length_T,
-            symlog_obs=symlog_obs,
-        )
-        summarize_world_model_losses(
-            tbx_writer=tbx_writer,
-            step=total_env_steps,
-            world_model_train_results=world_model_train_results,
-        )
+        if summary_frequency_train_steps and iteration % summary_frequency_train_steps:
+            summarize_forward_train_outs_vs_samples(
+                tbx_writer=tbx_writer,
+                step=total_env_steps,
+                forward_train_outs=forward_train_outs,
+                sample=sample,
+                batch_size_B=batch_size_B,
+                batch_length_T=batch_length_T,
+                symlog_obs=symlog_obs,
+            )
+            summarize_world_model_losses(
+                tbx_writer=tbx_writer,
+                step=total_env_steps,
+                world_model_train_results=world_model_train_results,
+            )
 
         print(
             f"\t\tL_world_model_total={world_model_train_results['L_world_model_total'].numpy():.5f} ("
@@ -274,15 +283,15 @@ if config.get("offline", False):
             "); "
             f"L_dyn={world_model_train_results['L_dyn'].numpy():.5f}; "
             f"L_rep={world_model_train_results['L_rep'].numpy():.5f})"
-        )    
+        )
 
 
-print("\n\n\n\n")
-print("Pretraining offline over, switching to online training and evaluation")
+print("\n\n\n")
+print("Pretraining offline completed ... switching to online training and evaluation")
 
 
 for iteration in range(1000000):
-    print(f"Main iteration {iteration}")
+    print(f"Online training main iteration {iteration}")
     # Push enough samples into buffer initially before we start training.
     env_steps = env_steps_last_sample = 0
     #TEST: Put only a single row in the buffer and try to memorize it.
@@ -300,6 +309,9 @@ for iteration in range(1000000):
         )
         env_steps += env_steps_last_sample
 
+        # Add ongoing and finished episodes into buffer. The buffer will automatically
+        # take care of properly concatenating (by episode IDs) the different chunks of
+        # the same episodes, even if they come in in separate `add()` calls.
         buffer.add(episodes=done_episodes + ongoing_episodes)
         episodes_in_buffer = buffer.get_num_episodes()
         ts_in_buffer = buffer.get_num_timesteps()
@@ -394,7 +406,7 @@ for iteration in range(1000000):
         buffer.update_h_states(h_B_t2_to_Tp1.numpy(), sample["indices"].numpy())
 
         # Summarize world model.
-        if iteration == 0 and sub_iter == 0:
+        if iteration == 0 and sub_iter == 0 and num_pretrain_iterations == 0:
             # Dummy forward pass to be able to produce summary.
             world_model(
                 sample["obs"][:, 0],
