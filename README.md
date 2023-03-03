@@ -17,7 +17,6 @@ pip install gymnasium[atari] gym==0.26.2 supersuit tinyscaler
 # Clone this very repo.
 git clone https://github.com/sven1977/dreamer_v3
 cd dreamer_v3
-pwd
 # We use local imports, so make sure this dir is in your PYTHONPATH
 export PYTHONPATH=[whatever dir the previous pwd command had output]
 
