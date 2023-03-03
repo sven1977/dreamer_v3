@@ -4,7 +4,7 @@ cartpole-experiment:
 
   model_dimension: XS
 
-  pretrain_iter: 100
+  pretrain_iter: 500
   training_ratio: 1024
 
   summary_frequency_train_steps: 10
