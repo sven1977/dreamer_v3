@@ -32,6 +32,7 @@ from training.train_one_step import (
 )
 from utils.env_runner_v2 import EnvRunnerV2
 from utils.episode_replay_buffer import EpisodeReplayBuffer
+from utils.episode import Episode
 from utils.cartpole_debug import CartPoleDebug  # import registers `CartPoleDebug-v0`
 from utils.tensorboard import (
     summarize_actor_losses,
@@ -64,6 +65,8 @@ os.makedirs("checkpoints", exist_ok=True)
 # Create the tensorboard summary data dir.
 os.makedirs("tensorboard", exist_ok=True)
 tbx_writer = SummaryWriter("tensorboard")
+# How many iterations do we pre-train?
+num_pretrain_iterations = config.get("num_pretrain_iterations", 0)
 # Every how many training steps do we write data to TB?
 summary_frequency_train_steps = config.get("summary_frequency_train_steps", 20)
 # Every how many training steps do we collect garbage
@@ -181,14 +184,121 @@ total_env_steps = 0
 total_replayed_steps = 0
 total_train_steps = 0
 
+if num_pretrain_iterations > 0:
+    # 1) Initialize dataset
+    import d3rlpy
+    if config["env"] == "CartPole-v0":
+        dataset, _ = d3rlpy.datasets.get_cartpole()
+    elif config["env"] == "Pendulum-v0":
+        dataset, _ = d3rlpy.datasets.get_pendulum()
+    elif config["is_atari"] == True:
+        dataset, _ = d3rlpy.datasets.get_atari(config["offline_dataset"])
+    else:
+        raise ValueError("Unknown offline environment.")
+    
+    print("Loading episodes from d3rlpy to dreamer_v3")
+    episodes = []
+    for eps in dataset:
+        eps_ = Episode()
+        eps_.observations = np.concatenate(
+            [eps.observations, np.array([eps.observations[-1]])], axis=0
+        )
+        eps_.actions = eps.actions
+        eps_.rewards = eps.rewards
+        eps_.is_terminated = eps.terminal == 1.0
+        initial_h = dreamer_model._get_initial_h(1).numpy().astype(np.float32)
+        eps_.h_states = np.repeat(initial_h, len(eps_.rewards), axis = 0)
+        eps_.validate()
+        buffer.add(eps_)
+
+    assert buffer.get_num_episodes() == len(dataset)
+    assert buffer.get_num_timesteps() == dataset.rewards.shape[0]
+
+    print("Loaded d3rlpy dataset into replay buffer:")
+    print(f"{dataset.size()} episodes {dataset.rewards.shape[0]} steps")
+    print("Pretraining world model")
+
+    # 2) Pretrain world model on offline data for n iterations.
+    for iteration in range(num_pretrain_iterations):
+        print(f"Offline training iteration {iteration}")
+
+        sample = buffer.sample(batch_size_B=batch_size_B, batch_length_T=batch_length_T)
+        total_replayed_steps += batch_size_B * batch_length_T
+
+        # Convert samples (numpy) to tensors.
+        sample = tree.map_structure(lambda v: tf.convert_to_tensor(v), sample)
+
+        # Perform one world-model training step.
+        world_model_train_results = train_world_model_one_step(
+            sample=sample,
+            batch_size_B=tf.convert_to_tensor(batch_size_B),
+            batch_length_T=tf.convert_to_tensor(batch_length_T),
+            grad_clip=tf.convert_to_tensor(world_model_grad_clip),
+            world_model=world_model,
+            optimizer=world_model_optimizer,
+        )
+        forward_train_outs = world_model_train_results["forward_train_outs"]
+
+        # Update h_states in buffer after the world model (sequential model)
+        # forward pass.
+        h_BxT = forward_train_outs["h_states_BxT"]
+        h_B_t2_to_Tp1 = tf.concat([tf.reshape(
+            h_BxT,
+            shape=(batch_size_B, batch_length_T) + h_BxT.shape[1:],
+        )[:, 1:], tf.expand_dims(forward_train_outs["h_B_Tp1"], axis=1)], axis=1)
+        buffer.update_h_states(h_B_t2_to_Tp1.numpy(), sample["indices"].numpy())
+
+        # Summarize world model.
+        if iteration == 0:
+            # Dummy forward pass to be able to produce summary.
+            world_model(
+                sample["obs"][:, 0],
+                sample["actions"][:, 0],
+                sample["h_states"][:, 0],
+            )
+            world_model.summary()
+
+        if summary_frequency_train_steps and iteration % summary_frequency_train_steps:
+            summarize_forward_train_outs_vs_samples(
+                tbx_writer=tbx_writer,
+                step=total_env_steps,
+                forward_train_outs=forward_train_outs,
+                sample=sample,
+                batch_size_B=batch_size_B,
+                batch_length_T=batch_length_T,
+                symlog_obs=symlog_obs,
+            )
+            summarize_world_model_losses(
+                tbx_writer=tbx_writer,
+                step=total_env_steps,
+                world_model_train_results=world_model_train_results,
+            )
+
+        print(
+            f"\t\tL_world_model_total={world_model_train_results['L_world_model_total'].numpy():.5f} ("
+            f"L_pred={world_model_train_results['L_pred'].numpy():.5f} ("
+            f"decoder/obs={world_model_train_results['L_decoder'].numpy()} "
+            f"reward(two-hot)={world_model_train_results['L_reward_two_hot'].numpy()} "
+            f"cont={world_model_train_results['L_continue'].numpy()}"
+            "); "
+            f"L_dyn={world_model_train_results['L_dyn'].numpy():.5f}; "
+            f"L_rep={world_model_train_results['L_rep'].numpy():.5f})"
+        )
+
+
+print("\n\n\n")
+print("Pretraining offline completed ... switching to online training and evaluation")
+
+
 for iteration in range(1000000):
-    print(f"Main iteration {iteration}")
+    print(f"Online training main iteration {iteration}")
     # Push enough samples into buffer initially before we start training.
     env_steps = env_steps_last_sample = 0
     #TEST: Put only a single row in the buffer and try to memorize it.
     #env_steps_last_sample = 64
     #while iteration == 0:
     #END TEST
+
     while True:
         # Sample one round.
         done_episodes, ongoing_episodes = env_runner.sample(random_actions=False)
@@ -199,6 +309,9 @@ for iteration in range(1000000):
         )
         env_steps += env_steps_last_sample
 
+        # Add ongoing and finished episodes into buffer. The buffer will automatically
+        # take care of properly concatenating (by episode IDs) the different chunks of
+        # the same episodes, even if they come in in separate `add()` calls.
         buffer.add(episodes=done_episodes + ongoing_episodes)
         episodes_in_buffer = buffer.get_num_episodes()
         ts_in_buffer = buffer.get_num_timesteps()
@@ -293,7 +406,7 @@ for iteration in range(1000000):
         buffer.update_h_states(h_B_t2_to_Tp1.numpy(), sample["indices"].numpy())
 
         # Summarize world model.
-        if iteration == 0 and sub_iter == 0:
+        if iteration == 0 and sub_iter == 0 and num_pretrain_iterations == 0:
             # Dummy forward pass to be able to produce summary.
             world_model(
                 sample["obs"][:, 0],
