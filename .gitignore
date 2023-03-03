@@ -130,3 +130,4 @@ dmypy.json
 
 # Custom
 tensorboard/
+d3rlpy_data/
