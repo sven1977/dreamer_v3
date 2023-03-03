@@ -285,10 +285,8 @@ if num_pretrain_iterations > 0:
             f"L_rep={world_model_train_results['L_rep'].numpy():.5f})"
         )
 
-
-print("\n\n\n")
-print("Pretraining offline completed ... switching to online training and evaluation")
-
+    print()
+    print("Pretraining offline completed ... switching to online training and evaluation")
 
 for iteration in range(1000000):
     print(f"Online training main iteration {iteration}")
@@ -335,7 +333,8 @@ for iteration in range(1000000):
 
     # Summarize actual environment interaction data.
     metrics = env_runner.get_metrics()
-    #with tbx_writer.(step=total_env_steps):
+    assert not env_runner.get_metrics()  # make sure purges env-runner buffers
+
     # Summarize buffer length.
     tbx_writer.add_scalar(
         "buffer_size_num_episodes", episodes_in_buffer, global_step=total_env_steps
@@ -346,9 +345,11 @@ for iteration in range(1000000):
     # Summarize episode returns.
     if metrics.get("episode_returns"):
         episode_return_mean = np.mean(metrics["episode_returns"])
+        print(f"\tFinished sampling episodes R=[{list(metrics['episode_returns'])}]")
         tbx_writer.add_scalar(
             "ENV_episode_return_mean", episode_return_mean, global_step=total_env_steps
         )
+
     # Summarize actions taken.
     actions = np.concatenate(
         [eps.actions for eps in done_episodes + ongoing_episodes],
