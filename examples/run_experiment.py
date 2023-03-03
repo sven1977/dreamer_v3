@@ -180,7 +180,7 @@ total_env_steps = 0
 total_replayed_steps = 0
 total_train_steps = 0
 
-if "offline" in args.config:
+if config.get("offline", False):
     # 1) Initialize dataset
     import d3rlpy
     if config["env"] == "CartPole-v0":

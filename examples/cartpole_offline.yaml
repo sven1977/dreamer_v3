@@ -1,6 +1,7 @@
 cartpole-experiment:
   env: CartPole-v0
   is_atari: false
+  offline: True
 
   model_dimension: XS
 
