@@ -67,6 +67,8 @@ os.makedirs("tensorboard", exist_ok=True)
 tbx_writer = SummaryWriter("tensorboard")
 # Every how many training steps do we write data to TB?
 summary_frequency_train_steps = config.get("summary_frequency_train_steps", 20)
+# Every how many training steps do we collect garbage
+gc_frequency_train_steps = config.get("gc_frequency_train_steps", 100)
 # Every how many main iterations do we evaluate?
 evaluation_frequency_main_iters = config.get("evaluation_frequency_main_iters", 0)
 evaluation_num_episodes = config["evaluation_num_episodes"]
@@ -109,7 +111,7 @@ algo_config = (
     } if config["is_atari"] else config.get("env_config", {}))
     .rollouts(
         num_envs_per_worker=1,
-        rollout_fragment_length=batch_length_T,
+        rollout_fragment_length=1,#TESTbatch_length_T,
     )
 )
 # The vectorized gymnasium EnvRunner to collect samples of shape (B, T, ...).
@@ -401,7 +403,9 @@ for iteration in range(1000000):
             )
             world_model.summary()
 
-        if total_train_steps % summary_frequency_train_steps == 0:
+        if summary_frequency_train_steps and (
+                total_train_steps % summary_frequency_train_steps == 0
+        ):
             summarize_forward_train_outs_vs_samples(
                 tbx_writer=tbx_writer,
                 step=total_env_steps,
@@ -483,7 +487,9 @@ for iteration in range(1000000):
 
             # Analyze generated dream data for its suitability in training the critic
             # and actors.
-            if total_train_steps % summary_frequency_train_steps == 0:
+            if summary_frequency_train_steps and (
+                total_train_steps % summary_frequency_train_steps == 0
+            ):
                 #TODO: put all of this block into tensorboard module.
                 #TODO: Make this work with any renderable env.
                 if env_runner.config.env in ["CartPoleDebug-v0", "CartPole-v1", "FrozenLake-v1"]:
@@ -608,8 +614,11 @@ for iteration in range(1000000):
 
     # Try trick from https://medium.com/dive-into-ml-ai/dealing-with-memory-leak-
     # issue-in-keras-model-training-e703907a6501
-    gc.collect()
-    # tf.keras.backend.clear_session()  # <- this seems to be not needed.
+    if gc_frequency_train_steps and (
+        total_train_steps % gc_frequency_train_steps == 0
+    ):
+        gc.collect()
+        # tf.keras.backend.clear_session()  # <- this seems to be not needed.
 
     # Log GPU memory consumption.
     try:
