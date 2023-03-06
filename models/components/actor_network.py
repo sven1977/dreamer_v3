@@ -37,16 +37,23 @@ class ActorNetwork(tf.keras.Model):
 
         self.action_space = action_space
         if isinstance(action_space, Discrete):
-            self.output_layer_size = action_space.n
+            output_layer_size = action_space.n
+            self.mlp = MLP(
+                model_dimension=self.model_dimension,
+                output_layer_size=output_layer_size,
+            )
         elif isinstance(action_space, Box):
-            self.output_layer_size = action_space.shape[0]
+            output_layer_size = np.prod(action_space.shape)
+            self.mlp = MLP(
+                model_dimension=self.model_dimension,
+                output_layer_size=output_layer_size,
+            )
+            self.std_mlp = MLP(
+                model_dimension=self.model_dimension,
+                output_layer_size=output_layer_size,
+            )
         else:
             raise ValueError(f"Invalid action space: {action_space}")
-
-        self.mlp = MLP(
-            model_dimension=self.model_dimension,
-            output_layer_size=self.output_layer_size,
-        )
 
     def call(self, h, z, return_distribution=False):
         """TODO
@@ -64,23 +71,35 @@ class ActorNetwork(tf.keras.Model):
         out = tf.concat([h, z], axis=-1)
         # Send h-cat-z through MLP.
         action_logits = self.mlp(out)
-        action_probs = tf.nn.softmax(action_logits)
 
-        # Add the unimix weighting (1% uniform) to the probs.
-        # See [1]: "Unimix categoricals: We parameterize the categorical distributions
-        # for the world model representations and dynamics, as well as for the actor
-        # network, as mixtures of 1% uniform and 99% neural network output to ensure
-        # a minimal amount of probability mass on every class and thus keep log
-        # probabilities and KL divergences well behaved."
-        action_probs = 0.99 * action_probs + 0.01 * (1.0 / self.output_layer_size)
+        if isinstance(action_space, Discrete):
+            action_probs = tf.nn.softmax(action_logits)
 
-        # Create the distribution object using the unimix'd probs.
-        if isinstance(self.action_space, Discrete):
+            # Add the unimix weighting (1% uniform) to the probs.
+            # See [1]: "Unimix categoricals: We parameterize the categorical distributions
+            # for the world model representations and dynamics, as well as for the actor
+            # network, as mixtures of 1% uniform and 99% neural network output to ensure
+            # a minimal amount of probability mass on every class and thus keep log
+            # probabilities and KL divergences well behaved."
+            action_probs = 0.99 * action_probs + 0.01 * (1.0 / self.action_space.n)
+
+            # Create the distribution object using the unimix'd probs.
             distr = tfp.distributions.Categorical(probs=action_probs)
-        elif isinstance(self.action_space, Box):
-            distr = tfp.distributions.TruncatedNormal(loc=action_probs)
+            # Note: This distribution is reparametrized in the original implementation
+            # tfp.distributions.Categorical is NOT reparametrized by default
+            action = distr.sample()
+            action = tf.stop_gradient(action) + tf.cast(
+                action_probs - tf.stop_gradient(action_probs), action.dtype
+            )
 
-        action = distr.sample()
+        elif isinstance(self.action_space, Box):
+            std_logits = self.std_mlp(out)
+            minstd = 0.1
+            maxstd = 1.0
+            std = (maxstd - minstd) * tf.sigmoid(std_logits + 2.0) + minstd
+            distr = tfp.distributions.Normal(tf.tanh(out), std)
+            distr = tfp.distributions.Independent(distr, len(self.action_space.shape))
+            action = distr.sample()
 
         if return_distribution:
             return action, distr
