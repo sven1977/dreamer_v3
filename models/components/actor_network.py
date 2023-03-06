@@ -43,7 +43,7 @@ class ActorNetwork(tf.keras.Model):
                 output_layer_size=output_layer_size,
             )
         elif isinstance(action_space, Box):
-            assert action_space.low == 0.0 and action_space.high == 1.0
+            assert np.all(action_space.low) == 0.0 and np.all(action_space.high) == 1.0
             output_layer_size = np.prod(action_space.shape)
             self.mlp = MLP(
                 model_dimension=self.model_dimension,
@@ -85,13 +85,16 @@ class ActorNetwork(tf.keras.Model):
             action_probs = 0.99 * action_probs + 0.01 * (1.0 / self.action_space.n)
 
             # Create the distribution object using the unimix'd probs.
-            distr = tfp.distributions.Categorical(probs=action_probs)
+            distr = tfp.distributions.OneHotCategorical(probs=action_probs)
             # Note: This distribution is reparametrized in the original implementation
             # tfp.distributions.Categorical is NOT reparametrized by default
             action = distr.sample()
-            action = tf.stop_gradient(action) + tf.cast(
+            reparam = tf.cast(
                 action_probs - tf.stop_gradient(action_probs), action.dtype
             )
+            action = tf.stop_gradient(action) + reparam
+            # Convert from onehot to integer
+            action = tf.argmax(action, axis=-1)
 
         elif isinstance(self.action_space, Box):
             std_logits = self.std_mlp(out)
