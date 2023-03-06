@@ -5,6 +5,7 @@ https://arxiv.org/pdf/2301.04104v1.pdf
 """
 import tensorflow as tf
 import tensorflow_probability as tfp
+from gymnasium.spaces import Discrete, Box
 
 
 @tf.function
@@ -39,7 +40,12 @@ def actor_loss(
     )
     # First term of loss function.
     # [1] eq. 11.
-    logp_loss_B_H = logp_actions_dreamed_B_H * scaled_value_targets_B_H
+    if isinstance(actor.action_space, Discrete):
+        logp_loss_B_H = logp_actions_dreamed_B_H * tf.stop_gradient(scaled_value_targets_B_H)
+    elif isinstance(actor.action_space, Box):
+        logp_loss_B_H = scaled_value_targets_B_H
+    else:
+        raise ValueError(f"Invalid action space: {actor.action_space}")
     assert len(logp_loss_B_H.shape) == 2
     # Add entropy loss term (second term [1] eq. 11).
     entropy_B_H = tf.stack(
