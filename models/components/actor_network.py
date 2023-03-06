@@ -43,6 +43,7 @@ class ActorNetwork(tf.keras.Model):
                 output_layer_size=output_layer_size,
             )
         elif isinstance(action_space, Box):
+            assert action_space.low == 0.0 and action_space.high == 1.0
             output_layer_size = np.prod(action_space.shape)
             self.mlp = MLP(
                 model_dimension=self.model_dimension,
@@ -72,7 +73,7 @@ class ActorNetwork(tf.keras.Model):
         # Send h-cat-z through MLP.
         action_logits = self.mlp(out)
 
-        if isinstance(action_space, Discrete):
+        if isinstance(self.action_space, Discrete):
             action_probs = tf.nn.softmax(action_logits)
 
             # Add the unimix weighting (1% uniform) to the probs.
@@ -96,8 +97,8 @@ class ActorNetwork(tf.keras.Model):
             std_logits = self.std_mlp(out)
             minstd = 0.1
             maxstd = 1.0
-            std = (maxstd - minstd) * tf.sigmoid(std_logits + 2.0) + minstd
-            distr = tfp.distributions.Normal(tf.tanh(out), std)
+            std_logits = (maxstd - minstd) * tf.sigmoid(std_logits + 2.0) + minstd
+            distr = tfp.distributions.Normal(tf.tanh(action_logits), std_logits)
             distr = tfp.distributions.Independent(distr, len(self.action_space.shape))
             action = distr.sample()
 
@@ -108,6 +109,7 @@ class ActorNetwork(tf.keras.Model):
 
 if __name__ == "__main__":
     action_space = gym.spaces.Discrete(5)
+    print("action space: ", action_space)
 
     h_dim = 8
     h = np.random.random(size=(1, 8))
@@ -119,9 +121,11 @@ if __name__ == "__main__":
     print(actions)
 
     actions, distr = model(h, z, return_distribution=True)
-    print(actions, distr.sample(), distr.logits)
+    print(actions, distr.sample())
+    print(distr.logits)
 
     action_space = gym.spaces.Box(0, 1, (5,))
+    print("action space: ", action_space)
 
     h_dim = 8
     h = np.random.random(size=(1, 8))
@@ -133,4 +137,5 @@ if __name__ == "__main__":
     print(actions)
 
     actions, distr = model(h, z, return_distribution=True)
-    print(actions, distr.sample(), distr.logits)
+    print(actions, distr.sample())
+    print(distr.distribution.loc, distr.distribution.scale)
