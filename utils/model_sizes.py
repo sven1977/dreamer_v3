@@ -1,6 +1,6 @@
 
 
-def get_cnn_multiplier(model_dimension, override):
+def get_cnn_multiplier(model_dimension, override=None):
     if override is not None:
         return override
 
@@ -12,7 +12,7 @@ def get_cnn_multiplier(model_dimension, override):
     return cnn_multipliers[model_dimension]
 
 
-def get_dense_hidden_units(model_dimension, override):
+def get_dense_hidden_units(model_dimension, override=None):
     if override is not None:
         return override
 
@@ -24,7 +24,7 @@ def get_dense_hidden_units(model_dimension, override):
     return dense_units[model_dimension]
 
 
-def get_gru_units(model_dimension, override):
+def get_gru_units(model_dimension, override=None):
     if override is not None:
         return override
 
@@ -36,7 +36,7 @@ def get_gru_units(model_dimension, override):
     return gru_units[model_dimension]
 
 
-def get_num_dense_layers(model_dimension, override):
+def get_num_dense_layers(model_dimension, override=None):
     if override is not None:
         return override
 

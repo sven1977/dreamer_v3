@@ -13,9 +13,9 @@ from utils.two_hot import two_hot
 
 @tf.function
 def critic_loss(
-        dream_data,
-        gamma,
-        lambda_,
+    dream_data,
+    gamma,
+    lambda_,
 ):
     # Note that value targets are NOT symlog'd.
     value_targets_B_H = compute_value_targets(
@@ -108,10 +108,20 @@ def critic_loss(
     }
 
 
-def compute_value_targets(rewards, continues, value_predictions, gamma, lambda_):
-    """All args are (B, T, ...) and in non-symlog'd (real) space.
+def compute_value_targets(
+    *,
+    rewards_H_BxT,
+    continues_H_BxT,
+    value_predictions_H_BxT,
+    gamma,
+    lambda_,
+):
+    """All args are (H, BxT, ...) and in non-symlog'd (real) space.
 
-    The latter is important b/c log(a+b) != log(a) + log(b).
+    Where H=1+horizon (start state + H steps dreamed), BxT=batch_size * batch_length
+    (original trajectory time rank has been folded).
+
+    Non-symlog is important b/c log(a+b) != log(a) + log(b).
     See [1] eq. 8 and 10.
 
     Thus, targets are always returned in real (non-symlog'd space).
@@ -120,88 +130,66 @@ def compute_value_targets(rewards, continues, value_predictions, gamma, lambda_)
 
     Furthermore, rewards, continues, and value_predictions are all of shape [B, t1-H+1]
     """
-    last_Rs = value_predictions[:, -1]
-    Rs = []
+    # In all the following, when building value targets for t=1 to T=H,
+    # exclude rewards & continues for t=1 b/c we don't need r1 or c1.
+    # The target (R1) for V1 is built from r2, c2, and V2/R2.
+    discount = continues_H_BxT[1:] * gamma  # shape=[2-16, BxT]
+    Rs = [value_predictions_H_BxT[-1]]  # Rs indices=[16]
+    intermediates = rewards_H_BxT[1:] + discount * (1 - lambda_) * value_predictions_H_BxT[1:]
+    # intermediates.shape=[2-16, BxT]
+
     # Loop through reversed timesteps (axis=1) from T+1 to t=2.
-    # Exclude t=1 b/c we don't need r1 or c1. The target (R1) for V1 is built from r2,
-    # c2, and V2/R2.
-    for i in range(rewards.shape[1] - 1, 0, -1):
-        Rt = rewards[:, i] + gamma * continues[:, i] * ((1.0 - lambda_) * value_predictions[:, i] + lambda_ * last_Rs)
-        last_Rs = Rt
-        Rs.append(Rt)
+    for t in reversed(range(len(discount))):
+        Rs.append(intermediates[t] + discount[t] * lambda_ * Rs[-1])
+
     # Reverse along time axis and cut the last entry (value estimate at very end cannot
     # be learnt from as it's the same as the ... well ... value estimate).
-    return tf.reverse(tf.stack(Rs, axis=1), axis=[1])
+    targets = tf.stack(list(reversed(Rs))[:-1], axis=0)
+    # targets.shape=[1-15,BxT]
 
-
-def _rllib_gae(rewards, value_predictions, last_r, gamma, lambda_):
-    value_predictions = np.concatenate([value_predictions, np.array([last_r])])
-    delta_t = rewards + gamma * value_predictions[1:] - value_predictions[:-1]
-    # This formula for the advantage comes from:
-    # "Generalized Advantage Estimation": https://arxiv.org/abs/1506.02438
-    advantages = _rllib_discounted_return_to_go(delta_t, gamma * lambda_)
-    targets = (advantages + value_predictions[:-1]).astype(np.float32)
     return targets
 
-
-def _rllib_discounted_return_to_go(rewards: np.ndarray, gamma: float) -> np.ndarray:
-    """Calculates the discounted returns to go over a reward sequence.
-
-    Moving from the end backwards in time until the beginning of the reward
-    sequence, at each step, we compute:
-    y[t] - discount*y[t+1] = x[t]
-    reversed(y)[t] - discount*reversed(y)[t-1] = reversed(x)[t]
-
-    Args:
-        gamma: The discount factor gamma.
-
-    Returns:
-        The sequence containing the discounted cumulative sums
-        for each individual reward in `x` till the end of the trajectory.
-
-    Examples:
-        >>> rewards = np.array([0.0, 1.0, 2.0, 3.0])
-        >>> gamma = 0.9
-        >>> discount_cumsum(x, gamma)
-        ... array([0.0 + 0.9*1.0 + 0.9**2*2.0 + 0.9**3*3.0,
-        ...        1.0 + 0.9*2.0 + 0.9**2*3.0,
-        ...        2.0 + 0.9*3.0,
-        ...        3.0])
-    """
-    return scipy.signal.lfilter([1], [1, float(-gamma)], rewards[::-1], axis=0)[::-1]
+    # Danijar's code:
+    # Note: All shapes are time-major: H=16, B=1024(==BxT), ...
+    # rew = self.rewfn(traj)  # shape=[2-16, B(1024)]  # 2-16 means: includes 16, but excludes first reward (from initial porterior state)
+    # discount = 1 - 1 / self.config.horizon
+    # disc = traj['cont'][1:] * discount  # shape=[2-16, B]
+    # value = self.net(traj).mean()  # shape=[1-16, B]
+    # vals = [value[-1]]  # val indices = [16]
+    # interm = rew + disc * value[1:] * (1 - self.config.return_lambda)
+    # interm.shape==[2-16, B]
+    # for t in reversed(range(len(disc))):
+    #   vals.append(interm[t] + disc[t] * self.config.return_lambda * vals[-1])
+    #   # val indices = [16, 15, 14, 13, 12, ..., 1]
+    # ret = jnp.stack(list(reversed(vals))[:-1])
+    # ret.shape=[1-15, B]  # value targets for values, except last (doesn't make sense as target == prediction)
+    # return rew (1-15, B), ret (1-15, B), value[:-1] (1-15, B)
 
 
 if __name__ == "__main__":
-    expected = np.array([
-        0.0 + 0.9 * 1.0 + 0.9 ** 2 * 2.0 + 0.9 ** 3 * 3.0,
-        1.0 + 0.9 * 2.0 + 0.9 ** 2 * 3.0,
-        2.0 + 0.9 * 3.0,
-        3.0,
-    ])
-    print("expected:", expected)
-    print("actual:")
-    print(_rllib_discounted_return_to_go(
-        np.array([0.0, 1.0, 2.0, 3.0]),
-        0.9,
-    ))
-
-    r = np.array([
-        [99.0,  1.0,  2.0,  3.0,  4.0,  5.0],
+    r = np.array(
+        [[99.0],  [1.0],  [2.0],  [3.0],  [4.0],  [5.0]],
         #[1.0, 1.0, 1.0, 1.0, 1.0],
-    ])
-    c = np.array([
-        [ 1.0,  1.0,  0.0,  1.0,  1.0,  1.0],
+    )
+    c = np.array(
+        [ [1.0],  [1.0],  [0.0],  [1.0],  [1.0],  [1.0]],
         #[1.0,  0.0, 1.0, 1.0, 1.0],
-    ])
-    vf = np.array([
-        [ 3.0,  2.0, 15.0, 12.0,  8.0,  3.0],  # naive sum of future rewards
+    )
+    vf = np.array(
+        [ [3.0],  [2.0], [15.0], [12.0],  [8.0],  [3.0]],  # naive sum of future rewards
         #[7.0, 6.0, 5.0, 4.0, 3.0, 2.0],  # naive sum of future rewards
-    ])
+    )
     #last_r = vf[:, -1]
     gamma = 1.0#0.99
     lambda_ = 1.0#0.7
 
     # my GAE:
-    print(compute_value_targets(r, c, vf, gamma, lambda_))
+    print(compute_value_targets(
+        rewards_H_BxT=r,
+        continues_H_BxT=c,
+        value_predictions_H_BxT=vf,
+        gamma=gamma,
+        lambda_=lambda_,
+    ))
     # RLlib GAE
     #print(_rllib_gae(r, vf[:, -1], last_r, gamma, lambda_))

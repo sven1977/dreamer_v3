@@ -15,6 +15,7 @@ from models.components.mlp import MLP
 from models.components.representation_layer import RepresentationLayer
 from models.components.reward_predictor import RewardPredictor
 from models.components.sequence_model import SequenceModel
+from utils.model_sizes import get_dense_hidden_units, get_gru_units
 from utils.symlog import symlog
 
 
@@ -76,6 +77,9 @@ class WorldModel(tf.keras.Model):
         self.posterior_mlp = MLP(
             model_dimension=self.model_dimension,
             output_layer_size=None,
+            # TODO: In Danijar's code, the posterior predictor only has a single layer,
+            #  no matter the model size.
+            num_dense_layers=1,
         )
         self.posterior_representation_layer = RepresentationLayer()
 
@@ -83,11 +87,25 @@ class WorldModel(tf.keras.Model):
         self.dynamics_predictor = DynamicsPredictor(
             model_dimension=self.model_dimension
         )
+
+        # Initial state learner.
+        self.num_gru_units = get_gru_units(
+            model_dimension=self.model_dimension,
+            override=num_gru_units,
+        )
+        self.initial_h = tf.Variable(
+            tf.zeros(shape=(1, self.num_gru_units,), dtype=tf.float32),
+            trainable=True,
+        )
+        # -> tanh(self.initial_h) -> deterministic state
+        # Use our Dynamics predictor for initial stochastic state, BUT with greedy
+        # (mode) instead of sampling.
+
         # Sequence Model (h-1, a-1, z-1 -> h).
         self.sequence_model = SequenceModel(
             model_dimension=self.model_dimension,
             action_space=action_space,
-            num_gru_units=num_gru_units,
+            num_gru_units=self.num_gru_units,
         )
 
         # Reward Predictor.
@@ -100,11 +118,25 @@ class WorldModel(tf.keras.Model):
         # Decoder (h, z -> x^).
         self.decoder = decoder
 
+    def get_initial_state(self, batch_size_B):
+        # No batch dim at all.
+        if batch_size_B == 0:
+            shape = (self.sequence_model.gru_unit.units,)
+        # Use provided batch dim (B).
+        else:
+            shape = (batch_size_B, self.sequence_model.gru_unit.units)
+        h = tf.repeat(tf.math.tanh(self.initial_h), batch_size_B, axis=0)
+        # Use the mode, NOT a sample for the initial z-state.
+        _, z_probs = self.dynamics_predictor(h, return_z_probs=True)
+        z = tf.argmax(z_probs, axis=-1)
+        z = tf.one_hot(z, depth=z_probs.shape[-1])
+        return {"h": h, "z": z}
+
     def call(self, inputs, *args, **kwargs):
         return self.forward_inference(inputs, *args, **kwargs)
 
     @tf.function
-    def forward_inference(self, observations, actions, initial_h, training=None):
+    def forward_inference(self, previous_state, previous_actions, observations, training=None):#, actions, initial_h, training=None):
         """Performs a forward step for inference.
 
         Works analogous to `forward_train`, except that all inputs are provided
@@ -124,24 +156,15 @@ class WorldModel(tf.keras.Model):
         Returns:
             The next deterministic h-state (h(t+1)) as predicted by the sequence model.
         """
-        z_t = self.compute_posterior_z(observations=observations, initial_h=initial_h)
+        # Compute new states.
+        previous_h, previous_z = previous_state["h"], previous_state["z"]
+        h = self.sequence_model(z=previous_z, a=previous_actions, h=previous_h)
+        z = self.compute_posterior_z(observations=observations, initial_h=h)
 
-        # Compute next h using action and state.
-        h_tp1 = self.sequence_model(
-            # actions and z must have a T dimension.
-            z=tf.expand_dims(z_t, axis=1),
-            a=tf.expand_dims(actions, axis=1),
-            h=initial_h,  # Initial state must NOT have a T dimension.
-        )
-        # Generate state from h and z.
-        #state = tf.concat([h, z], axis=-1)
-        # Compute predicted rewards and continue flags.
-        #rewards = self.reward_predictor(h=h_tp1, z=?? <- z needs to be zt+1 here (from the encoder, NOT the dynamics model): "First, an encoder maps sensory inputs xt to stochastic representations zt. Then, a sequence model with recurrent state ht predicts the sequence of these representations given past actions at−1. The concate- nation of ht and zt forms the model state from which we predict rewards rt and episode continuation flags ct ∈ {0, 1} and reconstruct the inputs to ensure informative representations:")
-        #continues = self.continue_predictor(h=h_tp1, z=z)
         # TODO: Probably should return predicted z^ (from dynamics model) here as well.
         #  As well as predicted rewards and continue flags (these are all part of the
         #  world model).
-        return h_tp1
+        return {"h": h, "z": z}
 
     @tf.function
     def forward_train(self, observations, actions, initial_h=None, training=None):
@@ -288,15 +311,15 @@ class WorldModel(tf.keras.Model):
         z_t = self.posterior_representation_layer(repr_input, return_z_probs=False)
         return z_t
 
-    @tf.function
-    def _get_initial_h(self, batch_size: int):
-        # No batch dim at all.
-        if batch_size == 0:
-            shape = (self.sequence_model.gru_unit.units,)
-        # Use provided batch dim (B).
-        else:
-            shape = (batch_size, self.sequence_model.gru_unit.units)
-        return tf.zeros(shape=shape, dtype=tf.float32)
+    #@tf.function
+    #def _get_initial_h(self, batch_size: int):
+    #    # No batch dim at all.
+    #    if batch_size == 0:
+    #        shape = (self.sequence_model.gru_unit.units,)
+    #    # Use provided batch dim (B).
+    #    else:
+    #        shape = (batch_size, self.sequence_model.gru_unit.units)
+    #    return tf.zeros(shape=shape, dtype=tf.float32)
 
 
 if __name__ == "__main__":

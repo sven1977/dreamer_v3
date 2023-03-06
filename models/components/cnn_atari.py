@@ -34,21 +34,21 @@ class CNNAtari(tf.keras.Model):
                 kernel_size=3,
                 strides=(2, 2),
                 padding="same",
-                activation=tf.nn.silu,
+                activation=None,#tf.nn.silu,
             ),
             tf.keras.layers.Conv2D(
                 filters=2 * cnn_multiplier,
                 kernel_size=3,
                 strides=(2, 2),
                 padding="same",
-                activation=tf.nn.silu,
+                activation=None,#tf.nn.silu,
             ),
             tf.keras.layers.Conv2D(
                 filters=4 * cnn_multiplier,
                 kernel_size=3,
                 strides=(2, 2),
                 padding="same",
-                activation=tf.nn.silu,
+                activation=None,#tf.nn.silu,
             ),
             # .. until output is 4 x 4 x [num_filters].
             tf.keras.layers.Conv2D(
@@ -56,7 +56,7 @@ class CNNAtari(tf.keras.Model):
                 kernel_size=3,
                 strides=(2, 2),
                 padding="same",
-                activation=tf.nn.silu,
+                activation=None,#tf.nn.silu,
             ),
         ]
         self.layer_normalizations = []
@@ -71,7 +71,7 @@ class CNNAtari(tf.keras.Model):
             inputs = tf.expand_dims(inputs, -1)
         out = inputs
         for conv_2d, layer_norm in zip(self.conv_layers, self.layer_normalizations):
-            out = layer_norm(inputs=conv_2d(out))
+            out = tf.nn.silu(layer_norm(inputs=conv_2d(out)))
         assert out.shape[1] == 4 and out.shape[2] == 4
         return self.flatten_layer(out)
 

@@ -75,7 +75,7 @@ gc_frequency_train_steps = config.get("gc_frequency_train_steps", 100)
 evaluation_frequency_main_iters = config.get("evaluation_frequency_main_iters", 0)
 evaluation_num_episodes = config["evaluation_num_episodes"]
 # Every how many (main) iterations (sample + N train steps) do we save our model?
-model_save_frequency_main_iters = config.get("model_save_frequency_main_iters", 100)
+model_save_frequency_main_iters = config.get("model_save_frequency_main_iters", 0)
 
 # Set batch size and -length according to [1]:
 batch_size_B = 16
@@ -248,12 +248,12 @@ if num_pretrain_iterations > 0:
 
         # Update h_states in buffer after the world model (sequential model)
         # forward pass.
-        h_BxT = forward_train_outs["h_states_BxT"]
-        h_B_t2_to_Tp1 = tf.concat([tf.reshape(
-            h_BxT,
-            shape=(batch_size_B, batch_length_T) + h_BxT.shape[1:],
-        )[:, 1:], tf.expand_dims(h_states_training, axis=1)], axis=1)
-        buffer.update_h_states(h_B_t2_to_Tp1.numpy(), sample["indices"].numpy())
+        #h_BxT = forward_train_outs["h_states_BxT"]
+        #h_B_t2_to_Tp1 = tf.concat([tf.reshape(
+        #    h_BxT,
+        #    shape=(batch_size_B, batch_length_T) + h_BxT.shape[1:],
+        #)[:, 1:], tf.expand_dims(h_states_training, axis=1)], axis=1)
+        #buffer.update_h_states(h_B_t2_to_Tp1.numpy(), sample["indices"].numpy())
 
         # Summarize world model.
         if iteration == 0:
@@ -408,12 +408,12 @@ for iteration in range(1000000):
 
         # Update h_states in buffer after the world model (sequential model)
         # forward pass.
-        h_BxT = forward_train_outs["h_states_BxT"]
-        h_B_t2_to_Tp1 = tf.concat([tf.reshape(
-            h_BxT,
-            shape=(batch_size_B, batch_length_T) + h_BxT.shape[1:],
-        )[:, 1:], tf.expand_dims(h_states_training, axis=1)], axis=1)
-        buffer.update_h_states(h_B_t2_to_Tp1.numpy(), sample["indices"].numpy())
+        #h_BxT = forward_train_outs["h_states_BxT"]
+        #h_B_t2_to_Tp1 = tf.concat([tf.reshape(
+        #    h_BxT,
+        #    shape=(batch_size_B, batch_length_T) + h_BxT.shape[1:],
+        #)[:, 1:], tf.expand_dims(h_states_training, axis=1)], axis=1)
+        #buffer.update_h_states(h_B_t2_to_Tp1.numpy(), sample["indices"].numpy())
 
         # Summarize world model.
         if iteration == 0 and sub_iter == 0 and num_pretrain_iterations == 0:
@@ -620,6 +620,7 @@ for iteration in range(1000000):
             f"EVAL_episode_video" + ("_best" if len(sorted_episodes) > 1 else ""),
             np.expand_dims(sorted_episodes[-1].render_images, axis=0),
             global_step=total_env_steps,
+            fps=10,
             dataformats="NTHWC",
         )
         if len(sorted_episodes) > 1:
@@ -627,11 +628,14 @@ for iteration in range(1000000):
                 f"EVAL_episode_video_worst",
                 np.expand_dims(sorted_episodes[0].render_images, axis=0),
                 global_step=total_env_steps,
+                fps=10,
                 dataformats="NTHWC",
             )
 
     # Save the model every N iterations (but not after the very first).
-    if iteration != 0 and iteration % model_save_frequency_main_iters == 0:
+    if iteration != 0 and model_save_frequency_main_iters and (
+        iteration % model_save_frequency_main_iters == 0
+    ):
         dreamer_model.save(f"checkpoints/dreamer_model_{iteration}")
 
     # Try trick from https://medium.com/dive-into-ml-ai/dealing-with-memory-leak-

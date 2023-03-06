@@ -96,14 +96,17 @@ class EpisodeReplayBuffer:
         observations = [[] for _ in range(batch_size_B)]
         actions = [[] for _ in range(batch_size_B)]
         rewards = [[] for _ in range(batch_size_B)]
-        continues = [[] for _ in range(batch_size_B)]
-        h_states = [[] for _ in range(batch_size_B)]
+        is_first = [[False] * batch_length_T for _ in range(batch_size_B)]
+        is_last = [[False] * batch_length_T for _ in range(batch_size_B)]
+        is_terminated = [[False] * batch_length_T for _ in range(batch_size_B)]
+        #h_states = [[] for _ in range(batch_size_B)]
         # Sampled indices. Each index is a tuple: episode-idx + ts-idx.
-        indices = [[] for _ in range(batch_size_B)]
+        #indices = [[] for _ in range(batch_size_B)]
 
         B = 0
+        T = 0
         idx_cursor = 0
-        episode_h_states = False
+        #episode_h_states = False
         while B < batch_size_B:
             # Ran out of uniform samples -> Sample new set.
             if len(index_tuples_idx) <= idx_cursor:
@@ -116,51 +119,68 @@ class EpisodeReplayBuffer:
                 index_tuple[0] - self._num_episodes_ejected, index_tuple[1]
             )
             episode = self.episodes[episode_idx]
-            episode_len = len(episode)
-            episode_h_states = len(episode.h_states) > 0
+            #episode_len = len(episode)
+            #episode_h_states = len(episode.h_states) > 0
+
+            # Starting a new chunk, set continue to False.
+            is_first[B][T] = True
+
             # Begin of new batch item (row).
             if len(rewards[B]) == 0:
-                # And we are at the start of an episode: Set rewards and h_state to
-                # zeros; continue to False.
+                # And we are at the start of an episode: Set reward to 0.0.
                 if episode_ts == 0:
                     rewards[B].append(0.0)
-                    if episode_h_states:
-                        h_states[B].append(np.zeros_like(episode.h_states[0]))
-                    continues[B].append(False)
+                    #if episode_h_states:
+                    #    h_states[B].append(np.zeros_like(episode.h_states[0]))
+                    #continues[B].append(False)
                 # We are in the middle of an episode: Set reward and h_state to
-                # the previous timestep's values; continue to True.
+                # the previous timestep's values.
                 else:
                     rewards[B].append(episode.rewards[episode_ts - 1])
-                    if episode_h_states:
-                        h_states[B].append(episode.h_states[episode_ts - 1])
-                    continues[B].append(True)
+                    #if episode_h_states:
+                    #    h_states[B].append(episode.h_states[episode_ts - 1])
+                    #continues[B].append(True)
             # We are in the middle of a batch item (row). Concat next episode to this
             # row from the episode's beginning. In other words, we never concat
             # a middle of an episode to another truncated one.
             else:
                 episode_ts = 0
+                rewards[B].append(0.0)
 
-            observations[B].extend(episode.observations[episode_ts:-1])
-            actions[B].extend(episode.actions[episode_ts:])
+            observations[B].extend(episode.observations[episode_ts:])
+            # Repeat last action to have the same number of actions than observations.
+            actions[B].extend(episode.actions[episode_ts:] + [episode.actions[-1]])
+            # Number of rewards are also the same as observations b/c we have the
+            # initial 0.0 one.
             rewards[B].extend(episode.rewards[episode_ts:])
-            if episode_h_states:
-                h_states[B].extend(episode.h_states[episode_ts:])
-            continues[B].extend([True] * (episode_len - episode_ts))
-            continues[B][-1] = False
-            indices[B].extend([[index_tuple[0], episode_ts + i] for i in range(episode_len - episode_ts)])
+            #if episode_h_states:
+            #    h_states[B].extend(episode.h_states[episode_ts:])
+            #continues[B].extend([True] * (episode_len - episode_ts))
+            #continues[B][-1] = False
+            #indices[B].extend([[index_tuple[0], episode_ts + i] for i in range(episode_len - episode_ts)])
+
+            T = min(len(observations[B]), batch_length_T)
+
+            # Set is_last=True.
+            is_last[B][T-1] = True
+            # If episode is terminated and we have reached the end of it, set
+            # is_terminated=True.
+            if episode.is_terminated and T == len(observations[B]):
+                is_terminated[B][T-1] = True
 
             # We are done with this batch row.
-            if len(observations[B]) >= batch_length_T:
+            if T == batch_length_T:
                 # We may have overfilled this row: Clip trajectory at the end.
                 observations[B] = observations[B][:batch_length_T]
                 actions[B] = actions[B][:batch_length_T]
                 rewards[B] = rewards[B][:batch_length_T]
-                if episode_h_states:
-                    h_states[B] = h_states[B][:batch_length_T]
-                continues[B] = continues[B][:batch_length_T]
-                indices[B] = indices[B][:batch_length_T]
+                #if episode_h_states:
+                #    h_states[B] = h_states[B][:batch_length_T]
+                #continues[B] = continues[B][:batch_length_T]
+                #indices[B] = indices[B][:batch_length_T]
                 # Start filling the next row.
                 B += 1
+                T = 0
 
             # Use next sampled episode/ts pair to fill the row.
             idx_cursor += 1
@@ -169,26 +189,29 @@ class EpisodeReplayBuffer:
             "obs": np.array(observations),
             "actions": np.array(actions),
             "rewards": np.array(rewards),
-            "continues": np.array(continues),
-            "indices": np.array(indices),
+            "is_first": np.array(is_first),
+            "is_last": np.array(is_last),
+            "is_terminated": np.array(is_terminated),
+            #"continues": np.array(continues),
+            #"indices": np.array(indices),
         }
-        if episode_h_states:
-            ret["h_states"] = np.array(h_states)
+        #if episode_h_states:
+        #    ret["h_states"] = np.array(h_states)
 
         return ret
 
-    def update_h_states(self, h_states, indices):
-        # Loop through batch items (rows).
-        for i, idxs in enumerate(indices):
-            # Loop through timesteps.
-            for j, index_tuple in enumerate(idxs):
-                # Find the correct episode and the timestep therein and update
-                # the h-value at that very position.
-                episode_idx, episode_ts = (
-                    index_tuple[0] - self._num_episodes_ejected, index_tuple[1]
-                )
-                episode = self.episodes[episode_idx]
-                episode.h_states[episode_ts] = h_states[i][j]
+    #def update_h_states(self, h_states, indices):
+    #    # Loop through batch items (rows).
+    #    for i, idxs in enumerate(indices):
+    #        # Loop through timesteps.
+    #        for j, index_tuple in enumerate(idxs):
+    #            # Find the correct episode and the timestep therein and update
+    #            # the h-value at that very position.
+    #            episode_idx, episode_ts = (
+    #                index_tuple[0] - self._num_episodes_ejected, index_tuple[1]
+    #            )
+    #            episode = self.episodes[episode_idx]
+    #            episode.h_states[episode_ts] = h_states[i][j]
 
     def get_num_episodes(self):
         return len(self.episodes)
@@ -208,7 +231,7 @@ if __name__ == "__main__":
         for t in range(ts):
             eps.add_timestep(
                 observation=float(t + 1),
-                action=int(t + 1),
+                action=int(t),
                 reward=0.1 * (t + 1),
             )
         eps.is_terminated = np.random.random() > 0.5
@@ -222,13 +245,25 @@ if __name__ == "__main__":
         sample = buffer.sample(
             batch_size_B=16, batch_length_T=64
         )
-        obs, actions, rewards, continues = sample["obs"], sample["actions"], sample["rewards"], sample["continues"]
+        obs, actions, rewards, is_first, is_last, is_terminated = (
+            sample["obs"], sample["actions"], sample["rewards"],
+            sample["is_first"], sample["is_last"], sample["is_terminated"]
+        )
+        # Make sure, is_first and is_last are trivially correct.
+        assert np.all(is_last[:, -1])
+        assert np.all(is_first[:, 0])
+
         # All fields have same shape.
-        assert obs.shape == rewards.shape == actions.shape == continues.shape
-        # All rewards match obs, except when done.
-        assert np.all(np.where(continues, np.equal(obs * 0.1, rewards), True))
-        # All actions are always one larger than their obs, except when done.
-        assert np.all(np.where(continues, np.equal(obs + 1.0, actions), True))
-        # All ts=0 episode rewards should be 0.0 iff at beginning of a batch row.
-        assert np.all(
-            np.where(np.logical_not(continues[:, 0]), rewards[:, 0] == 0.0, True))
+        assert obs.shape == rewards.shape == actions.shape == is_first.shape == is_last.shape == is_terminated.shape
+
+        # All rewards match obs.
+        assert np.all(np.equal(obs * 0.1, rewards))
+        # All actions are always the same as their obs, except when terminated (one
+        # less).
+        assert np.all(np.where(is_last, True, np.equal(obs, actions)))
+        # All actions on is_terminated=True must be the same as the previous ones
+        # (we repeat the action as the last one is a dummy one anyways (action
+        # picked in terminal observation/state)).
+        assert np.all(np.where(is_terminated[:, 1:], np.equal(actions[:,1:], actions[:,:-1]), True))
+        # Where is_terminated, the next rewards should always be 0.0 (reset rewards).
+        assert np.all(np.where(is_terminated[:, :-1], rewards[:, 1:] == 0.0, True))
