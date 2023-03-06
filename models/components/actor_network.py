@@ -6,6 +6,7 @@ https://arxiv.org/pdf/2301.04104v1.pdf
 from typing import Optional
 
 import gymnasium as gym
+from gymnasium.spaces import Box, Discrete
 import numpy as np
 import tensorflow as tf
 import tensorflow_probability as tfp
@@ -35,12 +36,16 @@ class ActorNetwork(tf.keras.Model):
         )
 
         self.action_space = action_space
-        # TODO: For now, limit to discrete actions.
-        assert isinstance(self.action_space, gym.spaces.Discrete)
+        if isinstance(action_space, Discrete):
+            self.output_layer_size = action_space.n
+        elif isinstance(action_space, Box):
+            self.output_layer_size = action_space.shape[0]
+        else:
+            raise ValueError(f"Invalid action space: {action_space}")
 
         self.mlp = MLP(
             model_dimension=self.model_dimension,
-            output_layer_size=self.action_space.n,
+            output_layer_size=self.output_layer_size,
         )
 
     def call(self, h, z, return_distribution=False):
@@ -67,10 +72,13 @@ class ActorNetwork(tf.keras.Model):
         # network, as mixtures of 1% uniform and 99% neural network output to ensure
         # a minimal amount of probability mass on every class and thus keep log
         # probabilities and KL divergences well behaved."
-        action_probs = 0.99 * action_probs + 0.01 * (1.0 / self.action_space.n)
+        action_probs = 0.99 * action_probs + 0.01 * (1.0 / self.output_layer_size)
 
         # Create the distribution object using the unimix'd probs.
-        distr = tfp.distributions.Categorical(probs=action_probs)
+        if isinstance(self.action_space, Discrete):
+            distr = tfp.distributions.Categorical(probs=action_probs)
+        elif isinstance(self.action_space, Box):
+            distr = tfp.distributions.TruncatedNormal(loc=action_probs)
 
         action = distr.sample()
 
@@ -81,6 +89,20 @@ class ActorNetwork(tf.keras.Model):
 
 if __name__ == "__main__":
     action_space = gym.spaces.Discrete(5)
+
+    h_dim = 8
+    h = np.random.random(size=(1, 8))
+    z = np.random.random(size=(1, 8, 8))
+
+    model = ActorNetwork(action_space=action_space, model_dimension="XS")
+
+    actions = model(h, z)
+    print(actions)
+
+    actions, distr = model(h, z, return_distribution=True)
+    print(actions, distr.sample(), distr.logits)
+
+    action_space = gym.spaces.Box(0, 1, (5,))
 
     h_dim = 8
     h = np.random.random(size=(1, 8))
