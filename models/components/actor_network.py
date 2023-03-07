@@ -13,6 +13,20 @@ import tensorflow_probability as tfp
 
 from models.components.mlp import MLP
 
+class ReparametrizedCategorical(tfp.distributions.Categorical):
+    def sample(self, sample_shape=(), seed=None):
+        action = super().sample(sample_shape, seed)
+        # Convert from integer to onehot
+        action = tf.one_hot(action, depth=len(self.probs), axis=-1)
+        # Add reparamtrized probs to actions; will compute straight-through gradients
+        reparam = tf.cast(
+            self.probs - tf.stop_gradient(self.probs), action.dtype
+        )
+        action = tf.stop_gradient(action) + reparam
+        # Convert from onehot to integer
+        action = tf.argmax(action, axis=-1)
+        return action
+
 
 class ActorNetwork(tf.keras.Model):
     def __init__(
@@ -85,16 +99,8 @@ class ActorNetwork(tf.keras.Model):
             action_probs = 0.99 * action_probs + 0.01 * (1.0 / self.action_space.n)
 
             # Create the distribution object using the unimix'd probs.
-            distr = tfp.distributions.OneHotCategorical(probs=action_probs)
-            # Note: This distribution is reparametrized in the original implementation
-            # tfp.distributions.Categorical is NOT reparametrized by default
+            distr = ReparametrizedCategorical(probs=action_probs)
             action = distr.sample()
-            reparam = tf.cast(
-                action_probs - tf.stop_gradient(action_probs), action.dtype
-            )
-            action = tf.stop_gradient(action) + reparam
-            # Convert from onehot to integer
-            action = tf.argmax(action, axis=-1)
 
         elif isinstance(self.action_space, Box):
             std_logits = self.std_mlp(out)
@@ -125,7 +131,7 @@ if __name__ == "__main__":
 
     actions, distr = model(h, z, return_distribution=True)
     print(actions, distr.sample())
-    print(distr.logits)
+    print(distr.probs)
 
     action_space = gym.spaces.Box(0, 1, (5,))
     print("action space: ", action_space)

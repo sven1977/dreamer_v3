@@ -28,8 +28,7 @@ def actor_loss(
     actions_dreamed = dream_data["actions_dreamed_t0_to_H_B"][:-1]
     # Log(p)s of all possible actions in the dream.
     # Note that when we create the Categorical action distributions, we compute
-    # unimix probs, then math.log these and provide these log(p) as "logits" to the
-    # Categorical. So here, we'll continue to work with log(p)s (not really "logits")!
+    # unimix probs
     logp_actions_t0_to_Hm1_B = tf.stack(
         [dist.logits
          for dist in dream_data["actions_dreamed_distributions_t0_to_H_B"][:-1]
