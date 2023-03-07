@@ -17,12 +17,10 @@ class ReparametrizedCategorical(tfp.distributions.Categorical):
     def sample(self, sample_shape=(), seed=None):
         action = super().sample(sample_shape, seed)
         # Convert from integer to onehot
-        action = tf.one_hot(action, depth=len(self.probs), axis=-1)
+        action = tf.one_hot(action, depth=len(self.logits), axis=-1)
         # Add reparamtrized probs to actions; will compute straight-through gradients
-        reparam = tf.cast(
-            self.probs - tf.stop_gradient(self.probs), action.dtype
-        )
-        action = tf.stop_gradient(action) + reparam
+        probs = tf.exp(self.logits)
+        action = tf.stop_gradient(action) + tf.cast(probs - tf.stop_gradient(probs), action.dtype)
         # Convert from onehot to integer
         action = tf.argmax(action, axis=-1)
         return action
@@ -99,7 +97,8 @@ class ActorNetwork(tf.keras.Model):
             action_probs = 0.99 * action_probs + 0.01 * (1.0 / self.action_space.n)
 
             # Create the distribution object using the unimix'd probs.
-            distr = ReparametrizedCategorical(probs=action_probs)
+            action_logits = tf.math.log(action_probs)
+            distr = ReparametrizedCategorical(logits=action_logits)
             action = distr.sample()
 
         elif isinstance(self.action_space, Box):
@@ -131,7 +130,7 @@ if __name__ == "__main__":
 
     actions, distr = model(h, z, return_distribution=True)
     print(actions, distr.sample())
-    print(distr.probs)
+    print(distr.logits)
 
     action_space = gym.spaces.Box(0, 1, (5,))
     print("action space: ", action_space)
