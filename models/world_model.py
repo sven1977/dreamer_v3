@@ -304,12 +304,12 @@ class WorldModel(tf.keras.Model):
         _, obs_distribution = self.decoder(h=h_BxT, z=z_BxT)
 
         # Compute (predicted) reward distributions.
-        _, reward_distribution = self.reward_predictor(
-            h=h_BxT, z=z_BxT, return_distribution=True
+        rewards, reward_logits = self.reward_predictor(
+            h=h_BxT, z=z_BxT, return_logits=True
         )
 
         # Compute (predicted) continue distributions.
-        _, continue_distribution = self.continue_predictor(
+        continues, continue_distribution = self.continue_predictor(
             h=h_BxT, z=z_BxT, return_distribution=True
         )
 
@@ -318,8 +318,10 @@ class WorldModel(tf.keras.Model):
         return {
             "sampled_obs_symlog_BxT": observations,
             "obs_distribution_BxT": obs_distribution,
-            "reward_distribution_BxT": reward_distribution,
+            "reward_logits_BxT": reward_logits,
+            "rewards_BxT": rewards,
             "continue_distribution_BxT": continue_distribution,
+            "continues_BxT": continues,
             "z_probs_encoder_BxT": z_probs_encoder,
             "z_probs_dynamics_BxT": z_probs_dynamics,
             # Deterministic, continuous h-states (t1 to T).

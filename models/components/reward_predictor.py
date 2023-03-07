@@ -33,7 +33,7 @@ class RewardPredictor(tf.keras.Model):
             upper_bound=upper_bound,
         )
 
-    def call(self, h, z, return_distribution=False):
+    def call(self, h, z, return_logits=False):
         """TODO
 
         Args:
@@ -50,7 +50,7 @@ class RewardPredictor(tf.keras.Model):
         # Send h-cat-z through MLP.
         out = self.mlp(out)
         # Return reward OR (reward, weighted bucket values).
-        return self.reward_layer(out, return_distribution=return_distribution)
+        return self.reward_layer(out, return_logits=return_logits)
 
 
 if __name__ == "__main__":

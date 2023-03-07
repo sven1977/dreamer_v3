@@ -39,12 +39,18 @@ def critic_loss(
         shape=[Hm1, B, value_symlog_targets_two_hot_HxB.shape[-1]],
     )
     # Get (B x T x probs) tensor from return distributions.
-    value_symlog_probs_HxB = dream_data["values_symlog_dreamed_distributions_t0_to_HxB"].probs
+    value_symlog_logits_HxB = dream_data["values_symlog_dreamed_logits_t0_to_HxB"]
     # Unfold time rank and cut last time index to match value targets.
-    value_symlog_probs_t0_to_Hm1_B = tf.reshape(
-        value_symlog_probs_HxB,
-        shape=[H, B, value_symlog_probs_HxB.shape[-1]],
+    value_symlog_logits_t0_to_Hm1_B = tf.reshape(
+        value_symlog_logits_HxB,
+        shape=[H, B, value_symlog_logits_HxB.shape[-1]],
     )[:-1]
+
+    values_log_pred_Hm1_B = value_symlog_logits_t0_to_Hm1_B - tf.math.reduce_logsumexp(value_symlog_logits_t0_to_Hm1_B, axis=-1, keepdims=True)
+    # Multiply with two-hot targets and neg.
+    value_loss_two_hot_H_B = - tf.reduce_sum(values_log_pred_Hm1_B * value_symlog_targets_two_hot_t0_to_Hm1_B, axis=-1)
+    ## Unfold time rank back in.
+    #value_symlog_neg_logp_target_t0_to_Hm1_B = tf.reshape(value_loss_two_hot_HxB, (Hm1, B))
 
     # Vector product to reduce over return-buckets. See [1] eq. 10.
     #value_symlog_logp_B_H = tf.reduce_sum(
@@ -54,13 +60,13 @@ def critic_loss(
     #    ),
     #    axis=-1,
     #)
-    value_symlog_neg_logp_target_t0_to_Hm1_B = - tf.math.log(tf.reduce_sum(
-        tf.multiply(
-            tf.stop_gradient(value_symlog_targets_two_hot_t0_to_Hm1_B),
-            value_symlog_probs_t0_to_Hm1_B,
-        ),
-        axis=-1,
-    ))
+    #value_symlog_neg_logp_target_t0_to_Hm1_B = - tf.math.log(tf.reduce_sum(
+    #    tf.multiply(
+    #        tf.stop_gradient(value_symlog_targets_two_hot_t0_to_Hm1_B),
+    #        value_symlog_probs_t0_to_Hm1_B,
+    #    ),
+    #    axis=-1,
+    #))
     #value_symlog_neg_logp_target_H_B = tf.reshape(
     #    value_symlog_neg_logp_target_HxB,
     #    shape=[H, B],# + value_symlog_probs_HxB.shape[-1],
@@ -75,7 +81,7 @@ def critic_loss(
     # Unfold time rank.
     value_symlog_ema_two_hot_t0_to_Hm1_B = tf.reshape(
         value_symlog_ema_two_hot_HxB,
-        shape=[H-1, B, value_symlog_ema_two_hot_HxB.shape[-1]],
+        shape=[Hm1, B, value_symlog_ema_two_hot_HxB.shape[-1]],
     )
 
     # Compute ema regularizer loss.
@@ -84,13 +90,19 @@ def critic_loss(
     # So we follow Dani's repo here: `reg = -dist.log_prob(sg(self.slow(traj).mean()))`
     # with a weight of 1.0, where dist is the bucket'ized distribution output by the
     # fast critic. sg=stop gradient; mean() -> use the expected EMA values.
-    ema_regularization_loss_t0_to_Hm1_B = - tf.math.log(tf.reduce_sum(
-        tf.multiply(
-            tf.stop_gradient(value_symlog_ema_two_hot_t0_to_Hm1_B),
-            value_symlog_probs_t0_to_Hm1_B,
-        ),
-        axis=-1,
-    ))
+    #values_log_pred_HxB = value_symlog_logits_t0_to_Hm1_B - tf.math.reduce_logsumexp(value_symlog_logits_t0_to_Hm1_B, axis=-1, keepdims=True)
+    # Multiply with two-hot targets and neg.
+    ema_regularization_loss_H_B = - tf.reduce_sum(values_log_pred_Hm1_B * value_symlog_ema_two_hot_t0_to_Hm1_B, axis=-1)
+    ## Unfold time rank back in.
+    #ema_regularization_loss_t0_to_Hm1_B = tf.reshape(ema_regularization_loss_HxB, (Hm1, B))
+
+    #ema_regularization_loss_t0_to_Hm1_B = - tf.math.log(tf.reduce_sum(
+    #    tf.multiply(
+    #        tf.stop_gradient(value_symlog_ema_two_hot_t0_to_Hm1_B),
+    #        value_symlog_probs_t0_to_Hm1_B,
+    #    ),
+    #    axis=-1,
+    #))
     # Unfold time rank.
     #ema_regularization_loss_H_B = tf.reshape(
     #    ema_regularization_loss_HxB,
@@ -108,7 +120,7 @@ def critic_loss(
     #L_critic_ema_regularization = tf.reduce_mean(ema_regularization_loss_B_H)
 
     L_critic_H_B = (
-        value_symlog_neg_logp_target_t0_to_Hm1_B + ema_regularization_loss_t0_to_Hm1_B
+        value_loss_two_hot_H_B + ema_regularization_loss_H_B
     )
 
     # Mask out everything that goes beyond a predicted continue=False boundary.
@@ -124,9 +136,9 @@ def critic_loss(
         "value_symlog_targets_H_B": value_symlog_targets_t0_to_Hm1_B,
         #"value_probs_B_H": value_probs_B_H,
         #"L_critic_neg_logp_target": L_critic_neg_logp_target,
-        "L_critic_neg_logp_target_H_B": value_symlog_neg_logp_target_t0_to_Hm1_B,
+        "L_critic_neg_logp_target_H_B": value_loss_two_hot_H_B,
         #"L_critic_ema_regularization": L_critic_ema_regularization,
-        "L_critic_ema_regularization_H_B": ema_regularization_loss_t0_to_Hm1_B,
+        "L_critic_ema_regularization_H_B": ema_regularization_loss_H_B,
     }
 
 

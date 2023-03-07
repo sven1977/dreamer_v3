@@ -21,6 +21,7 @@ from tensorboardX import SummaryWriter
 
 from ray.rllib.algorithms.algorithm_config import AlgorithmConfig
 
+import examples.debug_img_env  # to trigger DebugImgEnv import and registration
 from models.components.cnn_atari import CNNAtari
 from models.components.conv_transpose_atari import ConvTransposeAtari
 from models.components.mlp import MLP
@@ -136,16 +137,17 @@ if from_checkpoint is not None:
     dreamer_model = tf.keras.models.load_model(from_checkpoint)
 else:
     model_dimension = config["model_dimension"]
+    img_space = config["is_atari"] or config["env"] == "DebugImgEnv-v0"
     world_model = WorldModel(
         model_dimension=model_dimension,
         action_space=env_runner.env.single_action_space,
         batch_length_T=batch_length_T,
         num_gru_units=config.get("num_gru_units"),
-        encoder=CNNAtari(model_dimension=model_dimension) if config["is_atari"] else MLP(model_dimension=model_dimension),
+        encoder=CNNAtari(model_dimension=model_dimension) if img_space else MLP(model_dimension=model_dimension),
         decoder=ConvTransposeAtari(
             model_dimension=model_dimension,
             gray_scaled=False,
-        ) if config["is_atari"] else VectorDecoder(
+        ) if img_space else VectorDecoder(
             model_dimension=model_dimension,
             observation_space=env_runner.env.single_observation_space,
         ),
@@ -466,13 +468,13 @@ for iteration in range(1000000):
                 dreamer_model.critic(
                     h=forward_train_outs["h_states_BxT"],
                     z=forward_train_outs["z_states_BxT"],
-                    return_distribution=True,
+                    return_logits=True,
                 )
                 # Forward pass for EMA-weights critic.
                 dreamer_model.critic(
                     h=forward_train_outs["h_states_BxT"],
                     z=forward_train_outs["z_states_BxT"],
-                    return_distribution=False,
+                    return_logits=False,
                     use_ema=True,
                 )
                 dreamer_model.critic.init_ema()
