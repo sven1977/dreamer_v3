@@ -17,7 +17,7 @@ class ReparametrizedCategorical(tfp.distributions.Categorical):
     def sample(self, sample_shape=(), seed=None):
         action = super().sample(sample_shape, seed)
         # Convert from integer to onehot
-        action = tf.one_hot(action, depth=len(self.logits), axis=-1)
+        action = tf.one_hot(action, depth=self.logits.shape[-1], axis=-1)
         # Add reparamtrized probs to actions; will compute straight-through gradients
         probs = tf.exp(self.logits)
         action = tf.stop_gradient(action) + tf.cast(probs - tf.stop_gradient(probs), action.dtype)
@@ -119,9 +119,10 @@ if __name__ == "__main__":
     action_space = gym.spaces.Discrete(5)
     print("action space: ", action_space)
 
+    b_dim = 2
     h_dim = 8
-    h = np.random.random(size=(1, 8))
-    z = np.random.random(size=(1, 8, 8))
+    h = np.random.random(size=(b_dim, h_dim))
+    z = np.random.random(size=(b_dim, h_dim, h_dim))
 
     model = ActorNetwork(action_space=action_space, model_dimension="XS")
 
@@ -134,10 +135,6 @@ if __name__ == "__main__":
 
     action_space = gym.spaces.Box(0, 1, (5,))
     print("action space: ", action_space)
-
-    h_dim = 8
-    h = np.random.random(size=(1, 8))
-    z = np.random.random(size=(1, 8, 8))
 
     model = ActorNetwork(action_space=action_space, model_dimension="XS")
 
