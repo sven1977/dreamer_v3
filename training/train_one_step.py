@@ -16,7 +16,6 @@ from losses.world_model_losses import (
 def train_world_model_one_step(
     *,
     sample,
-    initial_h,
     batch_size_B,
     batch_length_T,
     grad_clip,
@@ -28,18 +27,16 @@ def train_world_model_one_step(
         # Compute forward (train) data.
         forward_train_outs = world_model.forward_train(
             observations=sample["obs"],
-            actions=sample["actions"],
-            initial_h=initial_h,#TEST:sample["h_states"][:, 0],
+            actions_one_hot=sample["actions_one_hot"],
+            is_first=sample["is_first"],
         )
 
         prediction_losses = world_model_prediction_losses(
-            observations=sample["obs"],
             rewards=sample["rewards"],
-            continues=sample["continues"],
+            continues=(1.0 - sample["is_terminated"]),
             B=tf.convert_to_tensor(batch_size_B),
             T=tf.convert_to_tensor(batch_length_T),
             forward_train_outs=forward_train_outs,
-            symlog_obs=world_model.symlog_obs,
         )
 
         L_dyn_B_T, L_rep_B_T = world_model_dynamics_and_representation_loss(
@@ -69,6 +66,9 @@ def train_world_model_one_step(
         L_dyn = tf.reduce_mean(L_dyn_B_T)
 
         L_rep = tf.reduce_mean(L_rep_B_T)
+
+        # Make sure values for L_rep and L_dyn are the same (they only differ in their gradients).
+        tf.assert_equal(L_dyn, L_rep)
 
         # Compute the actual total loss using fixed weights described in [1] eq. 4.
         L_world_model_total_B_T = 1.0 * L_pred_B_T + 0.5 * L_dyn_B_T + 0.1 * L_rep_B_T
@@ -124,6 +124,7 @@ def train_world_model_one_step(
 def train_actor_and_critic_one_step(
     *,
     forward_train_outs,
+    is_terminated,
     horizon_H,
     gamma,
     lambda_,
@@ -141,15 +142,19 @@ def train_actor_and_critic_one_step(
         # Dream trajectories starting in all internal states (h+z) that were
         # computed during world model training.
         dream_data = dreamer_model.dream_trajectory(
-            h=forward_train_outs["h_states_BxT"],
-            z=forward_train_outs["z_states_BxT"],
-            timesteps=horizon_H,
+            start_states={
+                "h": forward_train_outs["h_states_BxT"],
+                "z": forward_train_outs["z_states_BxT"],
+            },
+            start_is_terminated=is_terminated,
+            timesteps_H=horizon_H,
+            gamma=gamma,
         )
         critic_loss_results = critic_loss(dream_data, gamma=gamma, lambda_=lambda_)
         if train_actor:
             actor_loss_results = actor_loss(
                 dream_data=dream_data,
-                value_targets=critic_loss_results["value_targets_B_H"],
+                value_targets=critic_loss_results["value_targets_H_B"],
                 actor=dreamer_model.actor,
                 entropy_scale=entropy_scale,
                 return_normalization_decay=return_normalization_decay

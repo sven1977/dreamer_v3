@@ -9,6 +9,7 @@ import gymnasium as gym
 import numpy as np
 import tensorflow as tf
 
+from models.components.mlp import MLP
 from utils.model_sizes import get_gru_units
 
 
@@ -30,10 +31,18 @@ class SequenceModel(tf.keras.Model):
         num_gru_units = get_gru_units(model_dimension, override=num_gru_units)
 
         self.action_space = action_space
+        # TODO: In Danijar's code, there is an additional layer (units=[model_size])
+        #  prior to the GRU (but always only with 1 layer).
+        self.pre_gru_layer = MLP(
+            num_dense_layers=1,
+            model_dimension=model_dimension,
+            output_layer_size=None,
+        )
         self.gru_unit = tf.keras.layers.GRU(
             num_gru_units,
             return_sequences=False,
             return_state=False,
+            time_major=True,
             # Note: Changing these activations is most likely a bad idea!
             # In experiments, setting one of both of them to silu deteriorated
             # performance significantly.
@@ -43,29 +52,30 @@ class SequenceModel(tf.keras.Model):
         # Add layer norm after the GRU output.
         #self.layer_norm = tf.keras.layers.LayerNormalization()
 
-    def call(self, z, a, h=None):
+    def call(self, z, a_one_hot, h=None):
         """
 
         Args:
-            z: The sequence of stochastic discrete representations of the original
-                observation input. Note: `z` is not used for the dynamics predictor
-                model (which predicts z from h).
-            a: The sequence of previous action, discrete components will be
-                one-hot encoded.
+            z: The previous stochastic discrete representations of the original
+                observation input. (B, num_categoricals, num_classes_per_categorical).
+            a_one_hot: The previous action (already one-hot'd if applicable). (B, ...).
             h: The previous deterministic hidden state of the sequence model.
+                (B, num_gru_units)
         """
         # Discrete int actions -> one_hot
-        if isinstance(self.action_space, gym.spaces.Discrete):
-            a = tf.one_hot(a, depth=self.action_space.n)
+        #if isinstance(self.action_space, gym.spaces.Discrete):
+        #    a = tf.one_hot(a, depth=self.action_space.n)
         # Flatten last two dims of z.
-        assert len(z.shape) == 4
-        z_shape = tf.shape(z)
-        z = tf.reshape(tf.cast(z, tf.float32), shape=(z_shape[0], z_shape[1], -1))
         assert len(z.shape) == 3
-        assert len(a.shape) == 3
-        out = tf.concat([z, a], axis=-1)
-        # Pass through GRU.
-        out = self.gru_unit(out, initial_state=h)
+        z_shape = tf.shape(z)
+        z = tf.reshape(tf.cast(z, tf.float32), shape=(z_shape[0], -1))
+        assert len(z.shape) == 2
+        assert len(a_one_hot.shape) == 2
+        out = tf.concat([z, a_one_hot], axis=-1)
+        # Pass through pre-GRU layer.
+        out = self.pre_gru_layer(out)
+        # Pass through (time-major) GRU.
+        out = self.gru_unit(tf.expand_dims(out, axis=0), initial_state=h)
         # Pass through LayerNorm and return both non-normed and normed h-states.
         return out #self.layer_norm(out)
         #return out, self.layer_norm(out)

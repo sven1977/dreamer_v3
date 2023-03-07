@@ -40,7 +40,7 @@ class ConvTransposeAtari(tf.keras.Model):
         # to 4 × 4 × C and then inverts the encoder architecture. ..."
         self.dense_layer = tf.keras.layers.Dense(
             units=int(np.prod(self.input_dims)),
-            activation=tf.nn.silu,
+            activation=None,#tf.nn.silu,
         )
         # Inverse conv2d stack. See cnn_atari.py for Conv2D stack.
         self.conv_transpose_layers = [
@@ -66,18 +66,15 @@ class ConvTransposeAtari(tf.keras.Model):
                 activation=tf.nn.silu,
             ),
         ]
-        # Create one LayerNorm layer for each of the Conv2DTranspose
-        # plus the initial dense layer.
+        # Create one LayerNorm layer for each of the Conv2DTranspose.
         self.layer_normalizations = []
-        for _ in range(len(self.conv_transpose_layers) + 1):
+        for _ in range(len(self.conv_transpose_layers)):
             self.layer_normalizations.append(tf.keras.layers.LayerNormalization())
 
         # .. until output is 64 x 64 x 3.
 
         # Important! No activation or layer norm for last layer as the outputs of
         # this one go directly into the diag-gaussian as parameters.
-        # This distribution then outputs symlog'd images, which need to be
-        # inverse-symlog'd to become actual RGB-images.
         self.output_conv2d_transpose = tf.keras.layers.Conv2DTranspose(
             filters=1 if self.gray_scaled else 3,
             kernel_size=3,
@@ -113,6 +110,7 @@ class ConvTransposeAtari(tf.keras.Model):
             out = layer_norm(inputs=conv_transpose_2d(out))
         # Last output conv2d-transpose layer:
         out = self.output_conv2d_transpose(out)
+        out += 0.5  # See Danijar's code
         out_shape = tf.shape(out)
 
         # Interpret output as means of a diag-Gaussian with std=1.0:

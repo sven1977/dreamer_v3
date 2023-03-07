@@ -12,6 +12,7 @@ import argparse
 import gc
 import os
 import yaml
+from pprint import pprint
 
 import numpy as np
 import tree  # pip install dm_tree
@@ -56,7 +57,8 @@ args = parser.parse_args()
 print(f"Trying to open config file {args.config} ...")
 with open(args.config, "r") as f:
     config = yaml.safe_load(f)
-print(f"Running with the following config:\n{config}")
+print(f"Running with the following config:")
+pprint(config)
 assert len(config) == 1, "Only one experiment allowed in config yaml!"
 config = next(iter(config.values()))
 
@@ -75,16 +77,16 @@ gc_frequency_train_steps = config.get("gc_frequency_train_steps", 100)
 evaluation_frequency_main_iters = config.get("evaluation_frequency_main_iters", 0)
 evaluation_num_episodes = config["evaluation_num_episodes"]
 # Every how many (main) iterations (sample + N train steps) do we save our model?
-model_save_frequency_main_iters = config.get("model_save_frequency_main_iters", 100)
+model_save_frequency_main_iters = config.get("model_save_frequency_main_iters", 0)
 
 # Set batch size and -length according to [1]:
-batch_size_B = 16
-batch_length_T = 64
+batch_size_B = config.get("batch_size_B", 16)
+batch_length_T = config.get("batch_length_T", 64)
 # The number of timesteps we use to "initialize" (burn-in) a dream_trajectory run.
 # For this many timesteps, the posterior (actual observation data) will be used
 # to compute z, after that, only the prior (dynamics network) will be used.
 burn_in_T = 5
-horizon_H = 15
+horizon_H = config.get("horizon_H", 15)
 
 # Whether to symlog the observations or not.
 symlog_obs = not config.get("is_atari", False)
@@ -154,11 +156,6 @@ else:
         action_space=env_runner.env.single_action_space,
         world_model=world_model,
     )
-
-# TEST: Keep h-states "looping" during training forever, w/o ever resetting them (even
-# if there is a boundary or a new sample from the replay buffer).
-# The replay buffer's h-states don't matter and are ignored.
-h_states_training = dreamer_model.world_model._get_initial_h(batch_size=batch_size_B)
 
 # TODO: ugly hack (resulting from the insane fact that you cannot know
 #  an env's spaces prior to actually constructing an instance of it) :(
@@ -236,7 +233,6 @@ if num_pretrain_iterations > 0:
         # Perform one world-model training step.
         world_model_train_results = train_world_model_one_step(
             sample=sample,
-            initial_h=h_states_training,
             batch_size_B=tf.convert_to_tensor(batch_size_B),
             batch_length_T=tf.convert_to_tensor(batch_length_T),
             grad_clip=tf.convert_to_tensor(world_model_grad_clip),
@@ -244,16 +240,15 @@ if num_pretrain_iterations > 0:
             optimizer=world_model_optimizer,
         )
         forward_train_outs = world_model_train_results["forward_train_outs"]
-        h_states_training = forward_train_outs["h_B_Tp1"]
 
         # Update h_states in buffer after the world model (sequential model)
         # forward pass.
-        h_BxT = forward_train_outs["h_states_BxT"]
-        h_B_t2_to_Tp1 = tf.concat([tf.reshape(
-            h_BxT,
-            shape=(batch_size_B, batch_length_T) + h_BxT.shape[1:],
-        )[:, 1:], tf.expand_dims(h_states_training, axis=1)], axis=1)
-        buffer.update_h_states(h_B_t2_to_Tp1.numpy(), sample["indices"].numpy())
+        #h_BxT = forward_train_outs["h_states_BxT"]
+        #h_B_t2_to_Tp1 = tf.concat([tf.reshape(
+        #    h_BxT,
+        #    shape=(batch_size_B, batch_length_T) + h_BxT.shape[1:],
+        #)[:, 1:], tf.expand_dims(h_states_training, axis=1)], axis=1)
+        #buffer.update_h_states(h_B_t2_to_Tp1.numpy(), sample["indices"].numpy())
 
         # Summarize world model.
         if iteration == 0:
@@ -392,11 +387,17 @@ for iteration in range(1000000):
 
         # Convert samples (numpy) to tensors.
         sample = tree.map_structure(lambda v: tf.convert_to_tensor(v), sample)
+        # Do some other conversions.
+        sample["is_first"] = tf.cast(sample["is_first"], tf.float32)
+        sample["is_last"] = tf.cast(sample["is_last"], tf.float32)
+        sample["is_terminated"] = tf.cast(sample["is_terminated"], tf.float32)
+        sample["actions_one_hot"] = tf.one_hot(
+            sample["actions"], depth=env_runner.env.single_action_space.n
+        )
 
         # Perform one world-model training step.
         world_model_train_results = train_world_model_one_step(
             sample=sample,
-            initial_h=h_states_training,
             batch_size_B=tf.convert_to_tensor(batch_size_B),
             batch_length_T=tf.convert_to_tensor(batch_length_T),
             grad_clip=tf.convert_to_tensor(world_model_grad_clip),
@@ -404,24 +405,26 @@ for iteration in range(1000000):
             optimizer=world_model_optimizer,
         )
         forward_train_outs = world_model_train_results["forward_train_outs"]
-        h_states_training = forward_train_outs["h_B_Tp1"]
 
         # Update h_states in buffer after the world model (sequential model)
         # forward pass.
-        h_BxT = forward_train_outs["h_states_BxT"]
-        h_B_t2_to_Tp1 = tf.concat([tf.reshape(
-            h_BxT,
-            shape=(batch_size_B, batch_length_T) + h_BxT.shape[1:],
-        )[:, 1:], tf.expand_dims(h_states_training, axis=1)], axis=1)
-        buffer.update_h_states(h_B_t2_to_Tp1.numpy(), sample["indices"].numpy())
+        #h_BxT = forward_train_outs["h_states_BxT"]
+        #h_B_t2_to_Tp1 = tf.concat([tf.reshape(
+        #    h_BxT,
+        #    shape=(batch_size_B, batch_length_T) + h_BxT.shape[1:],
+        #)[:, 1:], tf.expand_dims(h_states_training, axis=1)], axis=1)
+        #buffer.update_h_states(h_B_t2_to_Tp1.numpy(), sample["indices"].numpy())
 
         # Summarize world model.
         if iteration == 0 and sub_iter == 0 and num_pretrain_iterations == 0:
             # Dummy forward pass to be able to produce summary.
             world_model(
+                {
+                    "h": forward_train_outs["h_states_BxT"][:batch_size_B],
+                    "z": forward_train_outs["z_states_BxT"][:batch_size_B],
+                    "a_one_hot": sample["actions_one_hot"][:, 0],
+                },
                 sample["obs"][:, 0],
-                sample["actions"][:, 0],
-                sample["h_states"][:, 0],
             )
             world_model.summary()
 
@@ -475,6 +478,7 @@ for iteration in range(1000000):
 
             actor_critic_train_results = train_actor_and_critic_one_step(
                 forward_train_outs=forward_train_outs,
+                is_terminated=tf.reshape(sample["is_terminated"], [-1]),
                 horizon_H=horizon_H,
                 gamma=discount_gamma,
                 lambda_=gae_lambda,
@@ -497,13 +501,13 @@ for iteration in range(1000000):
                 # Dummy forward pass to be able to produce summary.
                 if train_actor:
                     dreamer_model.actor(
-                        dream_data["h_states_t1_to_Hp1"][:, 0],
-                        dream_data["z_states_prior_t1_to_H"][:, 0],
+                        dream_data["h_states_t0_to_H_B"][0],
+                        dream_data["z_states_prior_t0_to_H_B"][0],
                     )
                     dreamer_model.actor.summary()
                 dreamer_model.critic(
-                    dream_data["h_states_t1_to_Hp1"][:, 0],
-                    dream_data["z_states_prior_t1_to_H"][:, 0],
+                    dream_data["h_states_t0_to_H_B"][0],
+                    dream_data["z_states_prior_t0_to_H_B"][0],
                 )
                 dreamer_model.critic.summary()
 
@@ -516,27 +520,27 @@ for iteration in range(1000000):
                 #TODO: Make this work with any renderable env.
                 if env_runner.config.env in ["CartPoleDebug-v0", "CartPole-v1", "FrozenLake-v1"]:
                     from utils.cartpole_debug import create_cartpole_dream_image, create_frozenlake_dream_image
-                    dreamed_obs_B_H = reconstruct_obs_from_h_and_z(
-                        h_t1_to_Tp1=dream_data["h_states_t1_to_Hp1"],
-                        z_t1_to_T=dream_data["z_states_prior_t1_to_H"],
+                    dreamed_obs_H_B = reconstruct_obs_from_h_and_z(
+                        h_t0_to_H=dream_data["h_states_t0_to_H_B"],
+                        z_t0_to_H=dream_data["z_states_prior_t0_to_H_B"],
                         dreamer_model=dreamer_model,
                         obs_dims_shape=sample["obs"].shape[2:],
                     )
                     # Take 0th dreamed trajectory and produce series of images.
-                    for t in range(len(dreamed_obs_B_H[0])):
+                    for t in range(len(dreamed_obs_H_B) - 1):
                         func = create_cartpole_dream_image if env_runner.config.env.startswith("CartPole") else create_frozenlake_dream_image
                         img = func(
-                            dreamed_obs=dreamed_obs_B_H[0][t],
-                            dreamed_V=dream_data["values_dreamed_t1_to_Hp1"][0][t],
-                            dreamed_a=dream_data["actions_dreamed_t1_to_H"][0][t],
-                            dreamed_r_tp1=dream_data["rewards_dreamed_t1_to_Hp1"][0][t+1],
-                            dreamed_c_tp1=dream_data["continues_dreamed_t1_to_Hp1"][0][t+1],
-                            value_target=actor_critic_train_results["value_targets_B_H"][0][t],
-                            initial_h=dream_data["h_states_t1_to_Hp1"][0][t],
+                            dreamed_obs=dreamed_obs_H_B[t][0],
+                            dreamed_V=dream_data["values_dreamed_t0_to_H_B"][t][0],
+                            dreamed_a=dream_data["actions_dreamed_t0_to_H_B"][t][0],
+                            dreamed_r_tp1=dream_data["rewards_dreamed_t0_to_H_B"][t+1][0],
+                            dreamed_c_tp1=dream_data["continues_dreamed_t0_to_H_B"][t+1][0],
+                            value_target=actor_critic_train_results["value_targets_H_B"][t][0],
+                            initial_h=dream_data["h_states_t0_to_H_B"][t][0],
                             as_tensor=True,
                         )
                         tbx_writer.add_images(
-                            f"dreamed_trajectories_for_critic_actor_learning[B=0,T={t}]",
+                            f"dreamed_trajectories_for_critic_actor_learning[T={t},B=0]",
                             tf.expand_dims(img, axis=0).numpy(),
                             dataformats="NHWC",
                             global_step=total_env_steps,
@@ -573,7 +577,7 @@ for iteration in range(1000000):
         # Dream a trajectory using the samples from the buffer and compare obs,
         # rewards, continues to the actually observed trajectory.
         dreamed_T = horizon_H
-        print(f"\tDreaming trajectories (H={dreamed_T}) from all 1st timesteps drawn from buffer ...")
+        print(f"\tDreaming trajectories (burn-in={burn_in_T}; H={dreamed_T}) from all 1st timesteps drawn from buffer ...")
         dream_data = dreamer_model.dream_trajectory_with_burn_in(
             observations=sample["obs"][:, :burn_in_T],  # use only first burn_in_T obs
             actions=sample["actions"][:, :burn_in_T + dreamed_T],  # use all actions from 0 to T (no actor)
@@ -620,6 +624,7 @@ for iteration in range(1000000):
             f"EVAL_episode_video" + ("_best" if len(sorted_episodes) > 1 else ""),
             np.expand_dims(sorted_episodes[-1].render_images, axis=0),
             global_step=total_env_steps,
+            fps=10,
             dataformats="NTHWC",
         )
         if len(sorted_episodes) > 1:
@@ -627,11 +632,14 @@ for iteration in range(1000000):
                 f"EVAL_episode_video_worst",
                 np.expand_dims(sorted_episodes[0].render_images, axis=0),
                 global_step=total_env_steps,
+                fps=10,
                 dataformats="NTHWC",
             )
 
     # Save the model every N iterations (but not after the very first).
-    if iteration != 0 and iteration % model_save_frequency_main_iters == 0:
+    if iteration != 0 and model_save_frequency_main_iters and (
+        iteration % model_save_frequency_main_iters == 0
+    ):
         dreamer_model.save(f"checkpoints/dreamer_model_{iteration}")
 
     # Try trick from https://medium.com/dive-into-ml-ai/dealing-with-memory-leak-

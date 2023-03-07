@@ -44,8 +44,12 @@ class MLP(tf.keras.Model):
             self.dense_layers.append(
                 tf.keras.layers.Dense(
                     dense_hidden_units,
-                    activation=tf.nn.silu,
                     trainable=trainable,
+                    # Danijar's code uses no biases iff there is LayerNormalization
+                    # (which there always is), and performs the activation after(!)
+                    # the layer norm, not before.
+                    activation=None,#tf.nn.silu,
+                    use_bias=False,
                 )
             )
 
@@ -70,7 +74,8 @@ class MLP(tf.keras.Model):
         out = input_
 
         for dense_layer, layer_norm in zip(self.dense_layers, self.layer_normalizations):
-            out = layer_norm(dense_layer(out))
+            # In this order: layer, normalization, activation.
+            out = tf.nn.silu(layer_norm(dense_layer(out)))
 
         if self.output_layer is not None:
             out = self.output_layer(out)
