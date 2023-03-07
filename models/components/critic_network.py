@@ -54,7 +54,7 @@ class CriticNetwork(tf.keras.Model):
             trainable=False,
         )
 
-    def call(self, h, z, return_distribution=False, use_ema=False):
+    def call(self, h, z, return_logits=False, use_ema=False):
         """TODO
 
         Args:
@@ -73,10 +73,10 @@ class CriticNetwork(tf.keras.Model):
             # Send h-cat-z through MLP.
             out = self.mlp(out)
             # Return expected return OR (expected return, probs of bucket values).
-            return self.return_layer(out, return_distribution=return_distribution)
+            return self.return_layer(out, return_logits=return_logits)
         else:
             out = self.mlp_ema(out)
-            return self.return_layer_ema(out, return_distribution=return_distribution)
+            return self.return_layer_ema(out, return_logits=return_logits)
 
     def init_ema(self):
         vars = self.mlp.trainable_variables + self.return_layer.trainable_variables

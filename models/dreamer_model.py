@@ -163,15 +163,15 @@ class DreamerModel(tf.keras.Model):
         dream_loss_weights_H_B = tf.math.cumprod(gamma * c_dreamed_H_B, axis=0) / gamma
 
         # Compute the value estimates.
-        v, v_symlog_dreamed_distributions_HxB = self.critic(
+        v, v_symlog_dreamed_logits_HxB = self.critic(
             h=h_states_HxB,
             z=z_states_prior_HxB,
-            return_distribution=True,
+            return_logits=True,
         )
         v_dreamed_HxB = inverse_symlog(v)
         v_dreamed_H_B = tf.reshape(v_dreamed_HxB, [timesteps_H+1, -1])
 
-        v_symlog_dreamed_ema_HxB = self.critic(h=h_states_HxB, z=z_states_prior_HxB, return_distribution=False, use_ema=True)
+        v_symlog_dreamed_ema_HxB = self.critic(h=h_states_HxB, z=z_states_prior_HxB, return_logits=False, use_ema=True)
         v_symlog_dreamed_ema_H_B = tf.reshape(v_symlog_dreamed_ema_HxB, [timesteps_H+1, -1])
 
         # Stack along T (horizon=H) axis.
@@ -186,9 +186,7 @@ class DreamerModel(tf.keras.Model):
             "actions_dreamed_t0_to_H_B": a_dreamed_H_B,
             "actions_dreamed_distributions_t0_to_H_B": a_dreamed_distributions_t0_to_H,
             "values_dreamed_t0_to_H_B": v_dreamed_H_B,
-            "values_symlog_dreamed_distributions_t0_to_HxB": (
-                v_symlog_dreamed_distributions_HxB
-            ),
+            "values_symlog_dreamed_logits_t0_to_HxB": v_symlog_dreamed_logits_HxB,
 
             # EMA outputs should also be stop gradient'd.
             "v_symlog_dreamed_ema_t0_to_H_B": tf.stop_gradient(

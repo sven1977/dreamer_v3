@@ -76,7 +76,7 @@ def summarize_forward_train_outs_vs_samples(
         symlog_obs=symlog_obs,
     )
     predicted_rewards = tf.reshape(
-        inverse_symlog(forward_train_outs["reward_distribution_BxT"].mean()),
+        inverse_symlog(forward_train_outs["rewards_BxT"]),
         shape=(batch_size_B, batch_length_T),
     )
     _summarize_rewards(
@@ -97,7 +97,7 @@ def summarize_forward_train_outs_vs_samples(
     )
 
     predicted_continues = tf.reshape(
-        forward_train_outs["continue_distribution_BxT"].mode(),
+        forward_train_outs["continues_BxT"],
         shape=(batch_size_B, batch_length_T),
     )
     _summarize_continues(
@@ -221,6 +221,11 @@ def summarize_world_model_losses(*, tbx_writer, step, world_model_train_results)
         lambda s: s.numpy() if tf.is_tensor(s) else s,
         world_model_train_results,
     )
+    tbx_writer.add_scalar("WM_initial_h_sum_abs", tf.reduce_sum(
+        tf.math.abs(world_model_train_results["learned_initial_h"])
+    ).numpy(), global_step=step)
+    tbx_writer.add_histogram("WM_initial_h", world_model_train_results["learned_initial_h"], global_step=step)
+
     tbx_writer.add_histogram("L_pred_B_T", world_model_train_results["L_pred_B_T"], global_step=step)
     tbx_writer.add_scalar("L_pred", world_model_train_results["L_pred"], global_step=step)
 
@@ -240,12 +245,12 @@ def summarize_world_model_losses(*, tbx_writer, step, world_model_train_results)
     # TEST: Out of interest, compare with simplge -log(p) loss for individual
     # rewards using the FiniteDiscrete distribution. This should be very close
     # to the two-hot reward loss.
-    tbx_writer.add_histogram(
-        "L_reward_logp_B_T", world_model_train_results["L_reward_logp_B_T"], global_step=step
-    )
-    tbx_writer.add_scalar(
-        "L_reward_logp", world_model_train_results["L_reward_logp"], global_step=step
-    )
+    #tbx_writer.add_histogram(
+    #    "L_reward_logp_B_T", world_model_train_results["L_reward_logp_B_T"], global_step=step
+    #)
+    #tbx_writer.add_scalar(
+    #    "L_reward_logp", world_model_train_results["L_reward_logp"], global_step=step
+    #)
 
     tbx_writer.add_histogram(
         "L_continue_B_T",

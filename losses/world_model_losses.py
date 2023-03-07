@@ -40,7 +40,7 @@ def world_model_prediction_losses(
 
     # The FiniteDiscrete reward bucket distribution computed by our reward predictor.
     # [B x num_buckets].
-    reward_distr = forward_train_outs["reward_distribution_BxT"]
+    reward_logits_BxT = forward_train_outs["reward_logits_BxT"]
     # Learn to produce symlog'd reward predictions.
     rewards = symlog(rewards)
     # Fold time dim.
@@ -50,17 +50,20 @@ def world_model_prediction_losses(
     two_hot_rewards = two_hot(rewards)
     # two_hot_rewards=[B*T, num_buckets]
     #predicted_reward_log_probs = tf.math.log(reward_distr.probs)
-    predicted_reward_probs = reward_distr.probs
+    #predicted_reward_probs = reward_distr.probs
     # predicted_reward_log_probs=[B*T, num_buckets]
     #reward_loss_two_hot = - tf.reduce_sum(tf.multiply(two_hot_rewards, predicted_reward_log_probs), axis=-1)
-    reward_loss_two_hot_BxT = - tf.math.log(tf.reduce_sum(tf.multiply(two_hot_rewards, predicted_reward_probs), axis=-1))
+    #reward_loss_two_hot_BxT = - tf.math.log(tf.reduce_sum(tf.multiply(two_hot_rewards, predicted_reward_probs), axis=-1))
+    reward_log_pred_BxT = reward_logits_BxT - tf.math.reduce_logsumexp(reward_logits_BxT, axis=-1, keepdims=True)
+    # Multiply with two-hot targets and neg.
+    reward_loss_two_hot_BxT = - tf.reduce_sum(reward_log_pred_BxT * two_hot_rewards, axis=-1)
     # Unfold time rank back in.
     reward_loss_two_hot_B_T = tf.reshape(reward_loss_two_hot_BxT, (B, T))
 
     # B) Simple neg log(p) on distribution, NOT using two-hot.
-    reward_loss_logp_BxT = - reward_distr.log_prob(rewards)
-    # Unfold time rank back in.
-    reward_loss_logp_B_T = tf.reshape(reward_loss_logp_BxT, (B, T))
+    #reward_loss_logp_BxT = - reward_distr.log_prob(rewards)
+    ## Unfold time rank back in.
+    #reward_loss_logp_B_T = tf.reshape(reward_loss_logp_BxT, (B, T))
 
     # Probabilities that episode continues, computed by our continue predictor.
     # [B]
@@ -75,7 +78,7 @@ def world_model_prediction_losses(
     return {
         "decoder_loss_B_T": decoder_loss_B_T,
         "reward_loss_two_hot_B_T": reward_loss_two_hot_B_T,
-        "reward_loss_logp_B_T": reward_loss_logp_B_T,
+        #"reward_loss_logp_B_T": reward_loss_logp_B_T,
         "continue_loss_B_T": continue_loss_B_T,
         "prediction_loss_B_T": decoder_loss_B_T + reward_loss_two_hot_B_T + continue_loss_B_T,
     }

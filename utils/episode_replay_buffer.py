@@ -256,7 +256,7 @@ if __name__ == "__main__":
         assert np.all(is_first[:, 0])
 
         # All fields have same shape.
-        assert obs.shape == rewards.shape == actions.shape == is_first.shape == is_last.shape == is_terminated.shape
+        assert obs.shape[:2] == rewards.shape == actions.shape == is_first.shape == is_last.shape == is_terminated.shape
 
         # All rewards match obs.
         assert np.all(np.equal(obs * 0.1, rewards))

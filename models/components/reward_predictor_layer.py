@@ -65,15 +65,14 @@ class RewardPredictorLayer(tf.keras.layers.Layer):
             (self.upper_bound - self.lower_bound) / self.num_buckets
         )
 
-    def call(self, inputs_, return_distribution=False):
+    def call(self, inputs_, return_logits=False):
         """Computes a distribution over N equal sized buckets of possible reward values.
 
         Args:
             inputs_: The input tensor for the layer, which computes the reward bucket
                 weights (logits). [B, dim].
-            return_distribution: Whether to return the FiniteDiscrete reward
-                distribution object as a second return value (besides the expected
-                reward).
+            return_logits: Whether to return the logits over the reward buckets
+                as a second return value (besides the expected reward).
 
         Returns:
             The expected reward OR a tuple consisting of the expected reward and the
@@ -82,13 +81,13 @@ class RewardPredictorLayer(tf.keras.layers.Layer):
         """
         # Compute the `num_buckets` weights.
         assert len(inputs_.shape) == 2
-        out = self.reward_buckets_layer(inputs_)
+        logits = self.reward_buckets_layer(inputs_)
         # out=[B, `num_buckets`]
 
         # Compute the expected(!) reward using [softmax vectordot possible_outcomes].
         # [2]: "The mean of the reward predictor pφ(ˆrt | zˆt) is used as reward
         # sequence rˆ1:H."
-        probs = tf.nn.softmax(out)
+        probs = tf.nn.softmax(logits)
         possible_outcomes = tf.linspace(
             self.lower_bound,
             self.upper_bound,
@@ -100,19 +99,16 @@ class RewardPredictorLayer(tf.keras.layers.Layer):
         expected_rewards = tf.reduce_sum(probs * possible_outcomes, axis=-1)
         # expected_rewards=[B]
 
-        distr = tfp.distributions.FiniteDiscrete(
-            outcomes=possible_outcomes,
-            probs=probs,
-            # Make the tolerance exactly half of the bucket delta.
-            # This way, we should be able to compute the log_prob of any arbitrary
-            # continuous value, even if it's not exactly an `outcomes` value.
-            atol=self.bucket_delta / 2.0,
-        )
-        # Note: In order to get the actually expected value, just do this with the
-        # returned distribution:
-        # `distr.mean()` OR `tf.reduce_sum(distr.probs * distr.outcomes)`
-        if return_distribution:
-            return expected_rewards, distr
+        #distr = tfp.distributions.FiniteDiscrete(
+        #    outcomes=possible_outcomes,
+        #    probs=probs,
+        #    # Make the tolerance exactly half of the bucket delta.
+        #    # This way, we should be able to compute the log_prob of any arbitrary
+        #    # continuous value, even if it's not exactly an `outcomes` value.
+        #    atol=self.bucket_delta / 2.0,
+        #)
+        if return_logits:
+            return expected_rewards, logits
         return expected_rewards
 
 
@@ -126,5 +122,5 @@ if __name__ == "__main__":
     out = model(inputs_)
     print(out)
 
-    out = model(inputs_, return_weighted_values=True)
+    out = model(inputs_, return_logits=True)
     print(out)

@@ -57,8 +57,8 @@ def train_world_model_one_step(
         # TEST: Out of interest, compare with simplge -log(p) loss for individual
         # rewards using the FiniteDiscrete distribution. This should be very close
         # to the two-hot reward loss.
-        L_reward_logp_B_T = prediction_losses["reward_loss_logp_B_T"]
-        L_reward_logp = tf.reduce_mean(L_reward_logp_B_T)
+        #L_reward_logp_B_T = prediction_losses["reward_loss_logp_B_T"]
+        #L_reward_logp = tf.reduce_mean(L_reward_logp_B_T)
 
         L_continue_B_T = prediction_losses["continue_loss_B_T"]
         L_continue = tf.reduce_mean(L_continue_B_T)
@@ -88,7 +88,7 @@ def train_world_model_one_step(
     return {
         # Forward train results.
         "forward_train_outs": forward_train_outs,
-
+        "learned_initial_h": world_model.initial_h,
         # Prediction losses.
         # Total.
         "L_pred_B_T": L_pred_B_T,
@@ -100,8 +100,8 @@ def train_world_model_one_step(
         "L_reward_two_hot_B_T": L_reward_two_hot_B_T,
         "L_reward_two_hot": L_reward_two_hot,
         # Reward (neg logp).
-        "L_reward_logp_B_T": L_reward_logp_B_T,
-        "L_reward_logp": L_reward_logp,
+        #"L_reward_logp_B_T": L_reward_logp_B_T,
+        #"L_reward_logp": L_reward_logp,
         # Continues.
         "L_continue_B_T": L_continue_B_T,
         "L_continue": L_continue,
