@@ -69,8 +69,12 @@ class ActorNetwork(tf.keras.Model):
         # probabilities and KL divergences well behaved."
         action_probs = 0.99 * action_probs + 0.01 * (1.0 / self.action_space.n)
 
-        # Create the distribution object using the unimix'd probs.
-        distr = tfp.distributions.Categorical(probs=action_probs)
+        # Danijar's code does: distr = [Distr class](logits=tf.log(probs)).
+        # Not sure why we don't directly use the already available probs instead.
+        action_logits = tf.math.log(action_probs)
+
+        # Create the distribution object using the unimix'd logits.
+        distr = tfp.distributions.Categorical(logits=action_logits)
 
         action = distr.sample()
 

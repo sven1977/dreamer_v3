@@ -5,29 +5,29 @@ from utils.symlog import inverse_symlog
 
 
 def reconstruct_obs_from_h_and_z(
-    h_t1_to_Tp1,
-    z_t1_to_T,
+    h_t0_to_H,
+    z_t0_to_H,
     dreamer_model,
     obs_dims_shape,
 ):
     """Returns """
-    shape = tf.shape(z_t1_to_T)
-    B = shape[0]
-    T = shape[1]
+    shape = tf.shape(h_t0_to_H)
+    T = shape[0]  # inputs are time-major
+    B = shape[1]
     # Compute actual observations using h and z and the decoder net.
     # Note that the last h-state (T+1) is NOT used here as it's already part of
     # a new trajectory.
-    _, reconstructed_obs_distr_BxT = dreamer_model.world_model.decoder(
+    _, reconstructed_obs_distr_TxB = dreamer_model.world_model.decoder(
         # Fold time rank.
-        h=tf.reshape(h_t1_to_Tp1[:, :-1], shape=(B * T, -1)),
-        z=tf.reshape(z_t1_to_T, shape=(B * T,) + z_t1_to_T.shape[2:]),
+        h=tf.reshape(h_t0_to_H, shape=(T * B, -1)),
+        z=tf.reshape(z_t0_to_H, shape=(T * B,) + z_t0_to_H.shape[2:]),
     )
     # Use mean() of the Gaussian, no sample!
-    loc = reconstructed_obs_distr_BxT.loc
+    loc = reconstructed_obs_distr_TxB.loc
     # Unfold time rank again.
-    reconstructed_obs_B_T = tf.reshape(loc, shape=(B, T) + obs_dims_shape)
+    reconstructed_obs_T_B = tf.reshape(loc, shape=(T, B) + obs_dims_shape)
     # Return inverse symlog'd (real env obs space) reconstructed observations.
-    return reconstructed_obs_B_T
+    return reconstructed_obs_T_B
 
 
 def summarize_forward_train_outs_vs_samples(
@@ -104,7 +104,7 @@ def summarize_forward_train_outs_vs_samples(
         tbx_writer=tbx_writer,
         step=step,
         computed_continues_B_T=predicted_continues,
-        sampled_continues_B_T=sample["continues"],
+        sampled_continues_B_T=(1.0 - sample["is_terminated"]),
         B=batch_size_B,
         T=batch_length_T,
         descr_prefix="WORLD_MODEL_TRAIN",
@@ -117,16 +117,17 @@ def summarize_actor_losses(*, tbx_writer, step, actor_critic_train_results):
         lambda s: s.numpy() if tf.is_tensor(s) else s,
         actor_critic_train_results,
     )
+
     tbx_writer.add_scalar("L_actor", results["L_actor"], global_step=step)
     tbx_writer.add_scalar("L_actor_action_entropy", results["action_entropy"], global_step=step)
-    tbx_writer.add_scalar("L_actor_reinforce_term", results["L_actor_reinforce_term"], global_step=step)
-    tbx_writer.add_scalar(
-        "L_actor_action_entropy_term", results["L_actor_action_entropy_term"], global_step=step
-    )
+    #tbx_writer.add_scalar("L_actor_reinforce_term", results["L_actor_reinforce_term"], global_step=step)
+    #tbx_writer.add_scalar(
+    #    "L_actor_action_entropy_term", results["L_actor_action_entropy_term"], global_step=step
+    #)
     tbx_writer.add_histogram(
-        "L_actor_scaled_value_targets_B_H", results["scaled_value_targets_B_H"], global_step=step
+        "L_actor_scaled_value_targets_H_B", results["scaled_value_targets_H_B"], global_step=step
     )
-    tbx_writer.add_histogram("L_actor_logp_loss_B_H", results["logp_loss_B_H"], global_step=step)
+    tbx_writer.add_histogram("L_actor_logp_loss_H_B", results["logp_loss_H_B"], global_step=step)
     tbx_writer.add_scalar(
         "L_actor_ema_value_target_pct95", results["L_actor_ema_value_target_pct95"], global_step=step
     )
@@ -140,19 +141,20 @@ def summarize_critic_losses(*, tbx_writer, step, actor_critic_train_results):
         lambda s: s.numpy() if tf.is_tensor(s) else s,
         actor_critic_train_results,
     )
+
     tbx_writer.add_scalar("L_critic", results["L_critic"], global_step=step)
-    tbx_writer.add_histogram("L_critic_value_targets", results["value_targets_B_H"], global_step=step)
-    tbx_writer.add_scalar(
-        "L_critic_neg_logp_target", results["L_critic_neg_logp_target"], global_step=step
-    )
+    tbx_writer.add_histogram("L_critic_value_targets_H_B", results["value_targets_H_B"], global_step=step)
+    #tbx_writer.add_scalar(
+    #    "L_critic_neg_logp_target", results["L_critic_neg_logp_target"], global_step=step
+    #)
     tbx_writer.add_histogram(
-        "L_critic_neg_logp_target_B_H", results["L_critic_neg_logp_target_B_H"], global_step=step
+        "L_critic_neg_logp_target_H_B", results["L_critic_neg_logp_target_H_B"], global_step=step
     )
-    tbx_writer.add_scalar(
-        "L_critic_ema_regularization", results["L_critic_ema_regularization"], global_step=step
-    )
+    #tbx_writer.add_scalar(
+    #    "L_critic_ema_regularization", results["L_critic_ema_regularization"], global_step=step
+    #)
     tbx_writer.add_histogram(
-        "L_critic_ema_regularization_B_H", results["L_critic_ema_regularization_B_H"], global_step=step
+        "L_critic_ema_regularization_H_B", results["L_critic_ema_regularization_H_B"], global_step=step
     )
 
 
@@ -205,7 +207,7 @@ def summarize_dreamed_eval_trajectory_vs_samples(
         tbx_writer=tbx_writer,
         step=step,
         computed_continues_B_T=dream_data["continues_dreamed_t1_to_T"],
-        sampled_continues_B_T=sample["continues"][:, burn_in_T:burn_in_T + dreamed_T],
+        sampled_continues_B_T=(1.0 - sample["is_terminated"])[:, burn_in_T:burn_in_T + dreamed_T],
         B=batch_size_B,
         T=dreamed_T,
         descr_prefix="EVAL",

@@ -149,10 +149,12 @@ class EpisodeReplayBuffer:
 
             observations[B].extend(episode.observations[episode_ts:])
             # Repeat last action to have the same number of actions than observations.
-            actions[B].extend(episode.actions[episode_ts:] + [episode.actions[-1]])
+            actions[B].extend(episode.actions[episode_ts:])
+            actions[B].append(episode.actions[-1])
             # Number of rewards are also the same as observations b/c we have the
             # initial 0.0 one.
             rewards[B].extend(episode.rewards[episode_ts:])
+            assert len(observations[B]) == len(actions[B]) == len(rewards[B])
             #if episode_h_states:
             #    h_states[B].extend(episode.h_states[episode_ts:])
             #continues[B].extend([True] * (episode_len - episode_ts))

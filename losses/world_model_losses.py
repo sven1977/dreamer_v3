@@ -13,27 +13,27 @@ from utils.two_hot import two_hot
 
 @tf.function
 def world_model_prediction_losses(
-        observations,
         rewards,
         continues,
         B,
         T,
         forward_train_outs,
-        symlog_obs: bool = True,
 ):
-    if symlog_obs:
-        observations = symlog(observations)
-
-    obs_distr = forward_train_outs["obs_distribution_BxT"]
     # Learn to produce symlog'd observation predictions.
+    # If symlog is disabled (e.g. for uint8 image inputs), `obs_symlog_BxT` is the same
+    # as `obs_BxT`.
+    obs_BxT = forward_train_outs["sampled_obs_symlog_BxT"]
+    obs_distr = forward_train_outs["obs_distribution_BxT"]
     # Fold time dim and flatten all other (image?) dims.
-    observations = tf.reshape(observations, shape=[-1, int(np.prod(observations.shape.as_list()[2:]))])
+    obs_BxT = tf.reshape(
+        obs_BxT, shape=[-1, int(np.prod(obs_BxT.shape.as_list()[1:]))]
+    )
 
     # Neg logp loss.
     #decoder_loss = - obs_distr.log_prob(observations)
     #decoder_loss /= observations.shape.as_list()[1]
     # Squared diff loss w/ sum(!) over all (already folded) obs dims.
-    decoder_loss_BxT = tf.reduce_sum(tf.math.square(obs_distr.loc - observations), axis=-1)
+    decoder_loss_BxT = tf.reduce_sum(tf.math.square(obs_distr.loc - obs_BxT), axis=-1)
 
     # Unfold time rank back in.
     decoder_loss_B_T = tf.reshape(decoder_loss_BxT, (B, T))

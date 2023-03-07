@@ -15,6 +15,7 @@ import gymnasium as gym
 import numpy as np
 from supersuit.generic_wrappers import resize_v1, color_reduction_v0
 import tensorflow as tf
+import tree  # pip install dm_tree
 
 from ray.rllib.algorithms.algorithm_config import AlgorithmConfig
 from ray.rllib.env.wrappers.atari_wrappers import NoopResetEnv, MaxAndSkipEnv
@@ -178,59 +179,69 @@ class EnvRunnerV2:
 
         # Get initial states for all rows.
         if self.model is not None:
-            zero_h_states = self.model._get_initial_h(
-                batch_size=self.num_envs
-            ).numpy()
+            initial_states = tree.map_structure(
+                lambda s: s.numpy(),
+                self.model.get_initial_state(
+                    batch_size_B=self.num_envs
+                ),
+            )
         else:
-            zero_h_states = np.array([0.0] * self.num_envs)
+            raise NotImplementedError
+            initial_states = np.array([0.0] * self.num_envs)
 
         # Have to reset the env (on all vector sub-envs).
         if force_reset or self.needs_initial_reset:
             obs, _ = self.env.reset()
 
             self.episodes = [Episode() for _ in range(self.num_envs)]
-            h_states = zero_h_states
+            states = initial_states
+            is_first = np.ones((self.num_envs,), dtype=np.float32)
             self.needs_initial_reset = False
 
             for i, o in enumerate(self._split_by_env(obs)):
                 self.episodes[i].add_initial_observation(
                     initial_observation=o,
-                    initial_h_state=h_states[i],
+                    initial_state={k: s[i] for k, s in states.items()},
                 )
         # Don't reset existing envs; continue in already started episodes.
         else:
             obs = np.stack([eps.observations[-1] for eps in self.episodes])
-            h_states = np.stack([
-                zero_h_states[i] if len(eps.h_states) == 0 else eps.h_states[-1]
-                for i, eps in enumerate(self.episodes)
-            ])
+            states = {
+                k: np.stack(
+                    initial_states[k][i] if eps.states is None else eps.states[k]
+                    for i, eps in enumerate(self.episodes)
+                )
+                for k in initial_states.keys()
+            }
+            is_first = np.zeros((self.num_envs,), dtype=np.float32)
 
         ts = 0
 
         while True:
             if random_actions:
+                raise NotImplementedError
                 # TODO: hack; right now, our model (a world model) does not have an
                 #  actor head yet. Still perform a forward pass to get the next h-states.
                 actions = self.env.action_space.sample()
                 if self.model is not None:
-                    h_states = (
-                        self.model.world_model.forward_inference(
+                    states = (
+                        self.model.forward_inference(
                             obs,
                             actions,
-                            tf.convert_to_tensor(h_states),
+                            tf.convert_to_tensor(states),
                         )
                     ).numpy()
                 else:
-                    h_states = np.array([1.0] * self.num_envs)
+                    states = np.array([1.0] * self.num_envs)
             else:
                 # Sample.
                 if explore:
-                    a, h = self.model(
-                        obs,
-                        initial_h=tf.convert_to_tensor(h_states),
-                    )
-                    actions = a.numpy()
-                    h_states = h.numpy()
+                    actions, states = self.model(states, obs, is_first)
+                    #TEST
+                    assert np.all(tf.one_hot(actions, depth=self.env.single_action_space.n) == states["a_one_hot"])
+                    #END TEST
+                    actions = actions.numpy()
+                    states = tree.map_structure(lambda s: s.numpy(), states)
                 # Greedy.
                 else:
                     raise NotImplementedError
@@ -239,14 +250,15 @@ class EnvRunnerV2:
             obs, rewards, terminateds, truncateds, infos = self.env.step(actions)
             ts += self.num_envs
 
-            for i, (o, a, r, term, trunc, h) in enumerate(zip(
+            for i, (o, a, r, term, trunc) in enumerate(zip(
                 self._split_by_env(obs),
                 self._split_by_env(actions),
                 self._split_by_env(rewards),
                 self._split_by_env(terminateds),
                 self._split_by_env(truncateds),
-                self._split_by_env(h_states),
+                #self._split_by_env(states),
             )):
+                s = {k: s[i] for k, s in states.items()}
                 # The last entry in self.observations[i] is already the reset
                 # obs of the new episode.
                 if term or trunc:
@@ -254,26 +266,31 @@ class EnvRunnerV2:
                         infos["final_observation"][i],
                         a,
                         r,
-                        h_state=h,
+                        state=s,
                         is_terminated=True,
                     )
                     # Reset h-states to all zeros b/c we are starting a new episode.
                     if self.model is not None:
-                        h_states[i] = self.model._get_initial_h(batch_size=0).numpy()
+                        states[i] = tree.map_structure(
+                            lambda s: s.numpy(),
+                            self.model.get_initial_state(batch_size_B=0),
+                        )
                     else:
-                        h_states[i] = 0.0
-
+                        raise NotImplementedError
+                        #states[i] = 0.0
+                    is_first[i] = True
                     done_episodes_to_return.append(self.episodes[i])
 
-                    self.episodes[i] = Episode(initial_observation=o, initial_h_state=h)
+                    self.episodes[i] = Episode(initial_observation=o, initial_state=s)
                 else:
                     self.episodes[i].add_timestep(
                         o,
                         a,
                         r,
-                        h_state=h,
+                        state=s,
                         is_terminated=False,
                     )
+                    is_first[i] = False
 
             if ts >= num_timesteps:
                 break
@@ -288,7 +305,7 @@ class EnvRunnerV2:
             Episode(
                 id_=eps.id_,
                 initial_observation=eps.observations[-1],
-                initial_h_state=eps.h_states[-1],
+                initial_state=eps.states,
             )
             for eps in self.episodes
         ]
@@ -325,11 +342,13 @@ class EnvRunnerV2:
         episodes = [Episode() for _ in range(self.num_envs)]
 
         if self.model is not None:
-            h_states = self.model._get_initial_h(
-                batch_size=self.num_envs
-            ).numpy()
+            states = tree.map_structure(
+                lambda s: s.numpy(),
+                self.model.get_initial_states(batch_size=self.num_envs),
+            )
         else:
-            h_states = np.array([0.0] * self.num_envs)
+            raise NotImplementedError
+            states = np.array([0.0] * self.num_envs)
 
         render_images = [None] * self.num_envs
         if with_render_data:
@@ -338,7 +357,7 @@ class EnvRunnerV2:
         for i, o in enumerate(self._split_by_env(obs)):
             episodes[i].add_initial_observation(
                 initial_observation=o,
-                initial_h_state=h_states[i],
+                initial_state={k: s[i] for k, s in states.items()},
                 initial_render_image=render_images[i],
             )
 
@@ -346,29 +365,31 @@ class EnvRunnerV2:
 
         while True:
             if random_actions:
+                raise NotImplementedError
                 # TODO: hack; right now, our model (a world model) does not have an
                 #  actor head yet. Still perform a forward pass to get the next h-states.
                 actions = self.env.action_space.sample()
                 #print(f"took action {actions}")
                 if self.model is not None:
-                    h_states = (
-                        self.model.world_model.forward_inference(
+                    states = (
+                        self.model.forward_inference(
                             obs,
                             actions,
-                            tf.convert_to_tensor(h_states),
+                            tf.convert_to_tensor(states),
                         )
                     ).numpy()
                 else:
-                    h_states = np.array([1.0 for _ in range(self.num_envs)])
+                    raise NotImplementedError
+                    #states = np.array([1.0 for _ in range(self.num_envs)])
             else:
                 # Sample.
                 if explore:
                     a, h = self.model(
                         obs,
-                        initial_h=tf.convert_to_tensor(h_states),
+                        initial_h=tf.convert_to_tensor(states),
                     )
                     actions = a.numpy()
-                    h_states = h.numpy()
+                    states = h.numpy()
                 # Greedy.
                 else:
                     raise NotImplementedError
@@ -378,13 +399,12 @@ class EnvRunnerV2:
             if with_render_data:
                 render_images = [e.render() for e in self.env.envs]
 
-            for i, (o, a, r, term, trunc, h) in enumerate(zip(
+            for i, (o, a, r, term, trunc) in enumerate(zip(
                 self._split_by_env(obs),
                 self._split_by_env(actions),
                 self._split_by_env(rewards),
                 self._split_by_env(terminateds),
                 self._split_by_env(truncateds),
-                self._split_by_env(h_states),
             )):
                 # The last entry in self.observations[i] is already the reset
                 # obs of the new episode.
@@ -395,21 +415,24 @@ class EnvRunnerV2:
                         infos["final_observation"][i],
                         a,
                         r,
-                        h_state=h,
+                        state={k: s[i] for k, s in states.items()},
                         is_terminated=True,
                     )
                     # Reset h-states to all zeros b/c we are starting a new episode.
                     if self.model is not None:
-                        h_states[i] = self.model._get_initial_h(
-                            batch_size=0).numpy()
+                        states[i] = tree.map_structure(
+                            lambda s: s.numpy(),
+                            self.model.get_initial_states(batch_size=0),
+                        )
                     else:
-                        h_states[i] = 0.0
+                        raise NotImplementedError
+                        #states[i] = 0.0
 
                     done_episodes_to_return.append(episodes[i])
 
                     episodes[i] = Episode(
                         initial_observation=o,
-                        initial_h_state=h_states[i],
+                        initial_state=states[i],
                         initial_render_image=render_images[i],
                     )
                 else:
@@ -417,7 +440,7 @@ class EnvRunnerV2:
                         o,
                         a,
                         r,
-                        h_state=h,
+                        state=s,
                         is_terminated=False,
                         render_image=render_images[i],
                     )

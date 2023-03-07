@@ -76,18 +76,17 @@ class RepresentationLayer(tf.keras.layers.Layer):
         # probabilities and KL divergences well behaved."
         probs = 0.99 * probs + 0.01 * (1.0 / self.num_classes_per_categorical)
 
-        # Create the distribution object using the unimix'd probs.
-        #distribution = tfp.distributions.Categorical(probs=probs)
+        # Danijar's code does: distr = [Distr class](logits=tf.log(probs)).
+        # Not sure why we don't directly use the already available probs instead.
+        logits = tf.math.log(probs)
+
+        # Create the distribution object using the unimix'd logits.
         distribution = tfp.distributions.Independent(
-            tfp.distributions.OneHotCategorical(probs=probs),
+            tfp.distributions.OneHotCategorical(logits=logits),
             reinterpreted_batch_ndims=1,
         )
 
         # Draw a one-hot sample (B, num_categoricals, num_classes).
-        #sample = tf.one_hot(
-        #    distribution.sample(),
-        #    depth=self.num_classes_per_categorical,
-        #)
         sample = tf.cast(distribution.sample(), tf.float32)
         # Make sure we can take gradients "straight-through" the sampling step
         # by adding the probs and subtracting the sg(probs). Note that `sample`

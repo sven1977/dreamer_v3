@@ -68,6 +68,7 @@ class WorldModel(tf.keras.Model):
         self.model_dimension = model_dimension
         self.batch_length_T = batch_length_T
         self.symlog_obs = symlog_obs
+        self.action_space = action_space
 
         # RSSM (Recurrent State-Space Model)
         # Encoder + z-generator (x, h -> z).
@@ -104,7 +105,7 @@ class WorldModel(tf.keras.Model):
         # Sequence Model (h-1, a-1, z-1 -> h).
         self.sequence_model = SequenceModel(
             model_dimension=self.model_dimension,
-            action_space=action_space,
+            action_space=self.action_space,
             num_gru_units=self.num_gru_units,
         )
 
@@ -119,24 +120,21 @@ class WorldModel(tf.keras.Model):
         self.decoder = decoder
 
     def get_initial_state(self, batch_size_B):
-        # No batch dim at all.
-        if batch_size_B == 0:
-            shape = (self.sequence_model.gru_unit.units,)
-        # Use provided batch dim (B).
-        else:
-            shape = (batch_size_B, self.sequence_model.gru_unit.units)
-        h = tf.repeat(tf.math.tanh(self.initial_h), batch_size_B, axis=0)
+        h = tf.repeat(tf.math.tanh(self.initial_h), batch_size_B or 1, axis=0)
         # Use the mode, NOT a sample for the initial z-state.
         _, z_probs = self.dynamics_predictor(h, return_z_probs=True)
         z = tf.argmax(z_probs, axis=-1)
         z = tf.one_hot(z, depth=z_probs.shape[-1])
-        return {"h": h, "z": z}
+        if batch_size_B > 0:
+            return {"h": h, "z": z}
+        else:
+            return {"h": tf.squeeze(h, 0), "z": tf.squeeze(z, 0)}
 
     def call(self, inputs, *args, **kwargs):
         return self.forward_inference(inputs, *args, **kwargs)
 
     @tf.function
-    def forward_inference(self, previous_state, previous_actions, observations, training=None):#, actions, initial_h, training=None):
+    def forward_inference(self, previous_states, observations, is_first, training=None):
         """Performs a forward step for inference.
 
         Works analogous to `forward_train`, except that all inputs are provided
@@ -156,18 +154,30 @@ class WorldModel(tf.keras.Model):
         Returns:
             The next deterministic h-state (h(t+1)) as predicted by the sequence model.
         """
+        initial_states = self.get_initial_state(batch_size_B=observations.shape[0])
+
+        # If first, mask it with initial state/actions.
+        previous_h = self._mask(previous_states["h"], 1.0 - is_first)  # zero out
+        previous_h = previous_h + self._mask(initial_states["h"], is_first)  # add init
+
+        previous_z = self._mask(previous_states["z"], 1.0 - is_first)  # zero out
+        previous_z = previous_z + self._mask(initial_states["z"], is_first)  # add init
+
+        # Zero out actions (no special learnt initial state).
+        previous_a_one_hot = self._mask(previous_states["a_one_hot"], 1.0 - is_first)
+
         # Compute new states.
-        previous_h, previous_z = previous_state["h"], previous_state["z"]
-        h = self.sequence_model(z=previous_z, a=previous_actions, h=previous_h)
+        h = self.sequence_model(
+            z=previous_z,
+            a_one_hot=previous_a_one_hot,
+            h=previous_h,
+        )
         z = self.compute_posterior_z(observations=observations, initial_h=h)
 
-        # TODO: Probably should return predicted z^ (from dynamics model) here as well.
-        #  As well as predicted rewards and continue flags (these are all part of the
-        #  world model).
         return {"h": h, "z": z}
 
     @tf.function
-    def forward_train(self, observations, actions, initial_h=None, training=None):
+    def forward_train(self, observations, actions_one_hot, is_first, training=None):
         """Performs a forward step for training.
 
         1) Forwards all observations [B, T, ...] through the encoder network to yield
@@ -188,11 +198,21 @@ class WorldModel(tf.keras.Model):
                 (which then can compute the z-states).
             actions: The batch (B, T, ...) of actions to be used in combination with
                 h-states and computed z-states to yield the next h-states.
-            initial_h: The initial h-states (B, ...) (no time dimension!) h(t) to be
-                used in combination with the first observation (o(t)) to yield
-                z(t) and then - in combination with the first action (a(t)) and z(t)
-                to yield the next h-state (h(t+1)) via the RSSM.
+            is_first: The batch (B, T) of `is_first` flags.
         """
+        #embed = self.encoder(data)
+        #prev_latent, prev_action = state
+        #prev_actions = jnp.concatenate([
+        #    prev_action[:, None], data['action'][:, :-1]], 1)
+        #post, prior = self.rssm.observe(
+        #    embed, prev_actions, data['is_first'], prev_latent)
+        #dists = {}
+        #feats = {**post, 'embed': embed}
+        #for name, head in self.heads.items():
+        #    out = head(feats if name in self.config.grad_heads else sg(feats))
+        #    out = out if isinstance(out, dict) else {name: out}
+        #    dists.update(out)
+
         if self.symlog_obs:
             observations = symlog(observations)
 
@@ -204,19 +224,44 @@ class WorldModel(tf.keras.Model):
         encoder_out = self.encoder(observations)
         # Unfold time dimension.
         encoder_out = tf.reshape(encoder_out, shape=[B, T] + encoder_out.shape.as_list()[1:])
-        # encoder_out=[B, T, ...]
+        # Make time major for faster upcoming loop.
+        encoder_out = tf.transpose(encoder_out, perm=[1, 0] + list(range(2, len(encoder_out.shape.as_list()))))
+        # encoder_out=[T, B, ...]
+
+        initial_states = self.get_initial_state(batch_size_B=B)
+
+        # Make actions and `is_first` time-major.
+        actions_one_hot = tf.transpose(actions_one_hot, perm=[1, 0] + list(range(2, len(actions_one_hot.shape.as_list()))))
+        #actions_one_hot = tf.one_hot(actions, depth=self.action_space.n)
+        is_first = tf.transpose(is_first, perm=[1, 0])
 
         # Loop through the T-axis of our samples and perform one computation step at
         # a time. This is necessary because the sequence model's output (h(t+1)) depends
         # on the current z(t), but z(t) depends on the current sequence model's output
         # h(t).
-        z_t1_to_T = []
+        z_t0_to_T = [initial_states["z"]]
         z_probs_encoder = []
         z_probs_dynamics = []
-        h_t1_to_T = [initial_h if initial_h is not None else self._get_initial_h(batch_size=B)]
+        h_t0_to_T = [initial_states["h"]]
         for t in range(self.batch_length_T):
-            h_t = h_t1_to_T[-1]
-            posterior_mlp_input = tf.concat([encoder_out[:, t], h_t], axis=-1)
+            # If first, mask it with initial state/actions.
+            h_tm1 = self._mask(h_t0_to_T[-1], 1.0 - is_first[t])  # zero out
+            h_tm1 = h_tm1 + self._mask(initial_states["h"], is_first[t])  # add init
+            #h_tm1 = tf.where(is_first[t], initial_states["h"], h_t0_to_T[-1])
+
+            z_tm1 = self._mask(z_t0_to_T[-1], 1.0 - is_first[t])  # zero out
+            z_tm1 = z_tm1 + self._mask(initial_states["z"], is_first[t])  # add init
+            #z_tm1 = tf.where(is_first[t], initial_states["z"], z_t0_to_T[-1])
+
+            # Zero out actions (no special learnt initial state).
+            a_one_hot_tm1 = self._mask(actions_one_hot[t - 1], 1.0 - is_first[t])
+            #a_one_hot_tm1 = tf.where(is_first[t], initial_states["a_one_hot"], actions_one_hot[t - 1])
+
+            # Perform one RSSM (sequence model) step to get the current h.
+            h_t = self.sequence_model(z=z_tm1, a_one_hot=a_one_hot_tm1, h=h_tm1)
+            h_t0_to_T.append(h_t)
+
+            posterior_mlp_input = tf.concat([encoder_out[t], h_t], axis=-1)
             repr_input = self.posterior_mlp(posterior_mlp_input)
             # Draw one z-sample (z(t)) and also get the z-distribution for dynamics and
             # representation loss computations.
@@ -226,27 +271,16 @@ class WorldModel(tf.keras.Model):
             )
             # z_t=[B, num_categoricals, num_classes]
             z_probs_encoder.append(z_probs)
-            z_t1_to_T.append(z_t)
+            z_t0_to_T.append(z_t)
 
             # Compute the predicted z_t (z^) using the dynamics model.
             _, z_probs = self.dynamics_predictor(h_t, return_z_probs=True)
             z_probs_dynamics.append(z_probs)
 
-            # Compute h(t+1).
-            # Make sure z- and action inputs to sequence model are sequences.
-            # Expand to T=1:
-            h_tp1 = self.sequence_model(
-                z=tf.expand_dims(z_t, axis=1),
-                a=actions[:, t:t+1],  # Make sure actions also has a T dimension.
-                h=h_t,  # Initial state must NOT have a T dimension.
-            )
-            # Not needed for the last time step.
-            if t < self.batch_length_T - 1:
-                h_t1_to_T.append(h_tp1)
-
         # Stack at time dimension to yield: [B, T, ...].
-        h_t1_to_T = tf.stack(h_t1_to_T, axis=1)
-        z_t1_to_T = tf.stack(z_t1_to_T, axis=1)
+        h_t1_to_T = tf.stack(h_t0_to_T[1:], axis=1)
+        z_t1_to_T = tf.stack(z_t0_to_T[1:], axis=1)
+
         # Fold time axis to retrieve the final (loss ready) Independent distribution
         # (over `num_categoricals` Categoricals).
         z_probs_encoder = tf.stack(z_probs_encoder, axis=1)
@@ -254,7 +288,6 @@ class WorldModel(tf.keras.Model):
             z_probs_encoder,
             shape=[-1] + z_probs_encoder.shape.as_list()[2:],
         )
-        #z_distribution_encoder = tfp.distributions.Categorical(probs=z_probs_encoder)
         # Fold time axis to retrieve the final (loss ready) Independent distribution
         # (over `num_categoricals` Categoricals).
         z_probs_dynamics = tf.stack(z_probs_dynamics, axis=1)
@@ -262,7 +295,6 @@ class WorldModel(tf.keras.Model):
             z_probs_dynamics,
             shape=[-1] + z_probs_dynamics.shape.as_list()[2:],
         )
-        #z_distribution_dynamics = tfp.distributions.Categorical(probs=z_probs_dynamics)
 
         # Fold time dimension for parallelization of all dependent predictions:
         # observations (reproduction via decoder), rewards, continues.
@@ -284,6 +316,7 @@ class WorldModel(tf.keras.Model):
         # Return outputs for loss computation.
         # Note that all shapes are [B, ...] (no time axis).
         return {
+            "sampled_obs_symlog_BxT": observations,
             "obs_distribution_BxT": obs_distribution,
             "reward_distribution_BxT": reward_distribution,
             "continue_distribution_BxT": continue_distribution,
@@ -293,8 +326,8 @@ class WorldModel(tf.keras.Model):
             "h_states_BxT": h_BxT,
             # Sampled, discrete z-states (t1 to T).
             "z_states_BxT": z_BxT,
-            # Next deterministic, continuous h-state (h(T+1)).
-            "h_B_Tp1": h_tp1,
+            ## Next deterministic, continuous h-state (h(T+1)).
+            #"h_B_Tp1": h_tp1,
         }
 
     @tf.function
@@ -305,21 +338,17 @@ class WorldModel(tf.keras.Model):
         if self.symlog_obs:
             observations = symlog(observations)
         encoder_out = self.encoder(observations)
+        # Concat encoder outs with the h-states.
         posterior_mlp_input = tf.concat([encoder_out, initial_h], axis=-1)
+        # Compute z.
         repr_input = self.posterior_mlp(posterior_mlp_input)
         # Draw one z-sample (no need to return the distribution here).
         z_t = self.posterior_representation_layer(repr_input, return_z_probs=False)
         return z_t
 
-    #@tf.function
-    #def _get_initial_h(self, batch_size: int):
-    #    # No batch dim at all.
-    #    if batch_size == 0:
-    #        shape = (self.sequence_model.gru_unit.units,)
-    #    # Use provided batch dim (B).
-    #    else:
-    #        shape = (batch_size, self.sequence_model.gru_unit.units)
-    #    return tf.zeros(shape=shape, dtype=tf.float32)
+    @staticmethod
+    def _mask(value, mask):
+        return tf.einsum("b...,b->b...", value, tf.cast(mask, value.dtype))
 
 
 if __name__ == "__main__":
