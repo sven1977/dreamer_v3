@@ -427,7 +427,7 @@ for iteration in range(1000000):
                     "a_one_hot": sample["actions_one_hot"][:, 0],
                 },
                 sample["obs"][:, 0],
-                is_first=sample["is_first"][:, 0],
+                sample["is_first"][:, 0],
             )
             world_model.summary()
 
