@@ -16,6 +16,8 @@ def actor_loss(
     entropy_scale,
     return_normalization_decay,
 ):
+    # Note: `value_targets` are already stop_gradient'd. The returned
+    # `scaled_value_targets` as well.
     scaled_value_targets_t0_to_Hm1_B = compute_scaled_value_targets(
         value_targets=value_targets,  # targets are already [t0 to H-1, B]
         value_predictions=dream_data["values_dreamed_t0_to_H_B"][:-1],
@@ -24,7 +26,7 @@ def actor_loss(
     )
 
     # Actions actually taken in the dream.
-    actions_dreamed = dream_data["actions_dreamed_t0_to_H_B"][:-1]
+    actions_dreamed = tf.stop_gradient(dream_data["actions_dreamed_t0_to_H_B"][:-1])
     # Log(p)s of all possible actions in the dream.
     # Note that when we create the Categorical action distributions, we compute
     # unimix probs, then math.log these and provide these log(p) as "logits" to the
