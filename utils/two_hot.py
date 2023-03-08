@@ -41,7 +41,7 @@ def two_hot(
     # Tensor of batch indices: [0, B=batch size).
     batch_indices = tf.range(0, value.shape[0], dtype=tf.float32)
     # Calculate the step deltas (how much space between each bucket's central value?).
-    bucket_delta = (upper_bound - lower_bound) / num_buckets
+    bucket_delta = (upper_bound - lower_bound) / (num_buckets - 1)
     # Compute the float indices (might be non-int numbers: sitting between two buckets).
     idx = (-lower_bound + value) / bucket_delta
     # k
@@ -51,6 +51,11 @@ def two_hot(
     # In case k == kp1 (idx is exactly on the bucket boundary), move kp1 up by 1.0.
     # Otherwise, this would result in a NaN in the returned two-hot tensor.
     kp1 = tf.where(k == kp1, kp1 + 1.0, kp1)
+    # Iff `kp1` is one beyond our last index (because incoming value is larger than
+    # `upper_bound`), move it to one before k (kp1's weight is going to be 0.0 anyways,
+    # so it doesn't matter where it points to; we are just avoiding an index error
+    # with this).
+    kp1 = tf.where(kp1 == num_buckets, kp1 - 2.0, kp1)
     # The actual values found at k and k+1 inside the set of buckets.
     values_k = lower_bound + k * bucket_delta
     values_kp1 = lower_bound + kp1 * bucket_delta
@@ -69,7 +74,7 @@ def two_hot(
     return tf.scatter_nd(
         tf.cast(indices, tf.int32),
         updates,
-        shape=(value.shape[0], num_buckets + 1),
+        shape=(value.shape[0], num_buckets),
     )
 
 
@@ -79,9 +84,10 @@ if __name__ == "__main__":
     print(two_hot(tf.convert_to_tensor([0.0]), 10, -5.0, 5.0))
 
     # Test violating the boundaries (upper and lower).
-    print(two_hot(tf.convert_to_tensor([-20.5, 50.0, 150.0, -20.00001])))
+    print(two_hot(tf.convert_to_tensor([20.1, 50.0, 150.0, -20.00001])))
 
     # Test other cases.
+    print(two_hot(tf.convert_to_tensor([2.5]), 11, -5.0, 5.0))
     print(two_hot(tf.convert_to_tensor([2.5, 0.1]), 10, -5.0, 5.0))
     print(two_hot(tf.convert_to_tensor([0.1]), 4, -1.0, 1.0))
     print(two_hot(tf.convert_to_tensor([-0.5, -1.2]), 9, -6.0, 3.0))

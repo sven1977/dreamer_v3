@@ -28,35 +28,44 @@ class CNNAtari(tf.keras.Model):
         # SiLU as the activation function. For better framework support, we use
         # same-padded convolutions with stride 2 and kernel size 3 instead of
         # valid-padded convolutions with larger kernels ..."
+        # HOWEVER: In the author's DreamerV3 repo, they use kernel size=4.
         self.conv_layers = [
             tf.keras.layers.Conv2D(
                 filters=1 * cnn_multiplier,
-                kernel_size=3,
+                kernel_size=4,
                 strides=(2, 2),
                 padding="same",
-                activation=None,#tf.nn.silu,
+                # No bias or activation due to layernorm.
+                activation=None,
+                use_bias=False,
             ),
             tf.keras.layers.Conv2D(
                 filters=2 * cnn_multiplier,
-                kernel_size=3,
+                kernel_size=4,
                 strides=(2, 2),
                 padding="same",
-                activation=None,#tf.nn.silu,
+                # No bias or activation due to layernorm.
+                activation=None,
+                use_bias=False,
             ),
             tf.keras.layers.Conv2D(
                 filters=4 * cnn_multiplier,
-                kernel_size=3,
+                kernel_size=4,
                 strides=(2, 2),
                 padding="same",
-                activation=None,#tf.nn.silu,
+                # No bias or activation due to layernorm.
+                activation=None,
+                use_bias=False,
             ),
             # .. until output is 4 x 4 x [num_filters].
             tf.keras.layers.Conv2D(
                 filters=8 * cnn_multiplier,
-                kernel_size=3,
+                kernel_size=4,
                 strides=(2, 2),
                 padding="same",
-                activation=None,#tf.nn.silu,
+                # No bias or activation due to layernorm.
+                activation=None,
+                use_bias=False,
             ),
         ]
         self.layer_normalizations = []
