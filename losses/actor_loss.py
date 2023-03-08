@@ -30,6 +30,7 @@ def actor_loss(
     actions_dreamed = tf.stop_gradient(dream_data["actions_dreamed_t0_to_H_B"][:-1])
     # Compute Log(p)s of all possible actions in the dream.
     dist_actions_t0_to_Hm1_B = dream_data["actions_dreamed_distributions_t0_to_H_B"][:-1]
+    # TODO (Rohan138, Sven): Figure out how to vectorize this instead!
     logp_actions_dreamed_t0_to_Hm1_B = tf.stack([
         dist.log_prob(action) for dist, action in 
         zip(dist_actions_t0_to_Hm1_B, actions_dreamed)
