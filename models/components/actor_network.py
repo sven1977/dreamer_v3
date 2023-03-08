@@ -102,11 +102,16 @@ class ActorNetwork(tf.keras.Model):
             action = distr.sample()
 
         elif isinstance(self.action_space, Box):
+            # Send h-cat-z through MLP to compute stddev logits for Normal dist
             std_logits = self.std_mlp(out)
+            # minstd, maxstd taken from [1] from configs.yaml
             minstd = 0.1
             maxstd = 1.0
+            # squash std_logits from (-inf, inf) to (minstd, maxstd)
             std_logits = (maxstd - minstd) * tf.sigmoid(std_logits + 2.0) + minstd
+            # Compute Normal distribution from action_logits and std_logits
             distr = tfp.distributions.Normal(tf.tanh(action_logits), std_logits)
+            # If action_space is a box with multiple dims, make individual dims independent
             distr = tfp.distributions.Independent(distr, len(self.action_space.shape))
             action = distr.sample()
 
@@ -131,6 +136,7 @@ if __name__ == "__main__":
 
     actions, distr = model(h, z, return_distribution=True)
     print(actions, distr.sample())
+    print(distr.log_prob(actions))
     print(distr.logits)
 
     action_space = gym.spaces.Box(0, 1, (5,))
@@ -143,4 +149,16 @@ if __name__ == "__main__":
 
     actions, distr = model(h, z, return_distribution=True)
     print(actions, distr.sample())
+    print(distr.log_prob(actions))
     print(distr.distribution.loc, distr.distribution.scale)
+
+    print("Test log_prob computation used in actor_loss.py")
+    h2 = np.random.random(size=(b_dim, h_dim))
+    z2 = np.random.random(size=(b_dim, h_dim, h_dim))
+    actions2, distr2 = model(h, z, return_distribution=True)
+
+    actions = [actions, actions2]
+    distr = [distr, distr2]
+
+    log_probs = tf.stack([dist.log_prob(action) for dist, action in zip(distr, actions)])
+    print(log_probs)

@@ -28,23 +28,13 @@ def actor_loss(
 
     # Actions actually taken in the dream.
     actions_dreamed = tf.stop_gradient(dream_data["actions_dreamed_t0_to_H_B"][:-1])
-    # Log(p)s of all possible actions in the dream.
-    # Note that when we create the Categorical action distributions, we compute
-    # unimix probs, then math.log these and provide these log(p) as "logits" to the
-    # Categorical. So here, we'll continue to work with log(p)s (not really "logits")!
-    logp_actions_t0_to_Hm1_B = tf.stack(
-        [dist.logits
-         for dist in dream_data["actions_dreamed_distributions_t0_to_H_B"][:-1]
-         ],
-        axis=0,
-    )
-    num_actions = logp_actions_t0_to_Hm1_B.shape[-1]
-    actions_dreamed_one_hot = tf.one_hot(actions_dreamed, depth=num_actions)
-    # Log probs of actions actually taken in the dream.
-    logp_actions_dreamed_t0_to_Hm1_B = tf.reduce_sum(
-        actions_dreamed_one_hot * logp_actions_t0_to_Hm1_B,
-        axis=-1,
-    )
+    # Compute Log(p)s of all possible actions in the dream.
+    dist_actions_t0_to_Hm1_B = dream_data["actions_dreamed_distributions_t0_to_H_B"][:-1]
+    logp_actions_dreamed_t0_to_Hm1_B = tf.stack([
+        dist.log_prob(action) for dist, action in 
+        zip(dist_actions_t0_to_Hm1_B, actions_dreamed)
+        ])
+    
     # First term of loss function.
     # [1] eq. 11.
     if isinstance(actor.action_space, Discrete):
@@ -135,4 +125,4 @@ def compute_scaled_value_targets(
     scaled_value_targets_H_B = (value_targets_H_B - offset) / invscale
     scaled_value_predictions_H_B = (value_predictions_H_B - offset) / invscale
     # Return advantages.
-    return tf.stop_gradient(scaled_value_targets_H_B - scaled_value_predictions_H_B)
+    return scaled_value_targets_H_B - scaled_value_predictions_H_B
