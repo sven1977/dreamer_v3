@@ -2,7 +2,7 @@ atari-pong-xxs-experiment:
   env: ALE/Pong-v5
   is_atari: true
 
-  model_dimension: XXS
+  model_dimension: XS
 
   training_ratio: 32
 

@@ -183,7 +183,11 @@ def compute_value_targets(
     targets = tf.stack(list(reversed(Rs))[:-1], axis=0)
     # targets.shape=[t0 to H-1,BxT]
 
-    return targets
+    # Value targets should not be backpropped through.
+    # They are used for critic learning (making the value function predict
+    # these targets over time) and actor learning (for computing the "scaled value
+    # targets", which are used for the advanatges with which we weigh the actions).
+    return tf.stop_gradient(targets)
 
     # Danijar's code:
     # Note: All shapes are time-major: H=16, B=1024(==BxT), ...

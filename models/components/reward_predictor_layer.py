@@ -47,7 +47,7 @@ class RewardPredictorLayer(tf.keras.layers.Layer):
         self.lower_bound = lower_bound
         self.upper_bound = upper_bound
         self.reward_buckets_layer = tf.keras.layers.Dense(
-            units=self.num_buckets + 1,  # num_outcomes=num_buckets+1
+            units=self.num_buckets,
             activation=None,
             # From [1]:
             # "We further noticed that the randomly initialized reward predictor and
@@ -61,9 +61,9 @@ class RewardPredictorLayer(tf.keras.layers.Layer):
             name=f"reward-{self.num_buckets}buckets-predictor-layer"
         )
         # Size of each reward bucket.
-        self.bucket_delta = (
-            (self.upper_bound - self.lower_bound) / self.num_buckets
-        )
+        # self.bucket_delta = (
+        #    (self.upper_bound - self.lower_bound) / self.num_buckets
+        # )
 
     def call(self, inputs_, return_logits=False):
         """Computes a distribution over N equal sized buckets of possible reward values.
@@ -91,7 +91,7 @@ class RewardPredictorLayer(tf.keras.layers.Layer):
         possible_outcomes = tf.linspace(
             self.lower_bound,
             self.upper_bound,
-            self.num_buckets + 1,
+            self.num_buckets,
         )
         # probs=possible_outcomes=[B, `num_buckets`]
 

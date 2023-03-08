@@ -125,7 +125,7 @@ class WorldModel(tf.keras.Model):
         _, z_probs = self.dynamics_predictor(h, return_z_probs=True)
         z = tf.argmax(z_probs, axis=-1)
         z = tf.one_hot(z, depth=z_probs.shape[-1])
-        if batch_size_B > 0:
+        if batch_size_B is None or batch_size_B > 0:
             return {"h": h, "z": z}
         else:
             return {"h": tf.squeeze(h, 0), "z": tf.squeeze(z, 0)}
