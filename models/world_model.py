@@ -120,7 +120,10 @@ class WorldModel(tf.keras.Model):
         self.decoder = decoder
 
     def get_initial_state(self, batch_size_B):
-        h = tf.repeat(tf.math.tanh(self.initial_h), batch_size_B or 1, axis=0)
+        if batch_size_B > 0:
+            h = tf.repeat(tf.math.tanh(self.initial_h), batch_size_B, axis=0)
+        else:
+            h = tf.repeat(tf.math.tanh(self.initial_h), 1, axis=0)
         # Use the mode, NOT a sample for the initial z-state.
         _, z_probs = self.dynamics_predictor(h, return_z_probs=True)
         z = tf.argmax(z_probs, axis=-1)
@@ -154,7 +157,7 @@ class WorldModel(tf.keras.Model):
         Returns:
             The next deterministic h-state (h(t+1)) as predicted by the sequence model.
         """
-        initial_states = self.get_initial_state(batch_size_B=observations.shape[0])
+        initial_states = self.get_initial_state(batch_size_B=tf.shape(observations)[0])
 
         # If first, mask it with initial state/actions.
         previous_h = self._mask(previous_states["h"], 1.0 - is_first)  # zero out
