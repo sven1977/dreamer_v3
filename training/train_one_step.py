@@ -81,7 +81,7 @@ def train_world_model_one_step(
     # Clip all gradients.
     clipped_gradients = []
     for grad in gradients:
-        clipped_gradients.append(tf.clip_by_value(grad, -grad_clip, grad_clip))
+        clipped_gradients.append(tf.clip_by_norm(grad, grad_clip))
     # Apply gradients to our model.
     optimizer.apply_gradients(zip(clipped_gradients, world_model.trainable_variables))
 
@@ -184,12 +184,12 @@ def train_actor_and_critic_one_step(
         clipped_actor_gradients = []
         for grad in actor_gradients:
             clipped_actor_gradients.append(
-                tf.clip_by_value(grad, -actor_grad_clip, actor_grad_clip)
+                tf.clip_by_norm(grad, actor_grad_clip)
             )
     clipped_critic_gradients = []
     for grad in critic_gradients:
         clipped_critic_gradients.append(
-            tf.clip_by_value(grad, -critic_grad_clip, critic_grad_clip)
+            tf.clip_by_norm(grad, critic_grad_clip)
         )
     # Apply gradients to our models.
     if train_actor:
