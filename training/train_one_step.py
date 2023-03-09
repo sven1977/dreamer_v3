@@ -88,36 +88,44 @@ def train_world_model_one_step(
 
     return {
         # Forward train results.
-        "forward_train_outs": forward_train_outs,
-        "learned_initial_h": world_model.initial_h,
+        "WORLD_MODEL_forward_train_outs": forward_train_outs,
+        "WORLD_MODEL_learned_initial_h": world_model.initial_h,
+
         # Prediction losses.
+        # Decoder (obs) loss.
+        "WORLD_MODEL_L_decoder_B_T": L_decoder_B_T,
+        "WORLD_MODEL_L_decoder": L_decoder,
+        # Reward loss.
+        "WORLD_MODEL_L_reward_B_T": L_reward_two_hot_B_T,
+        "WORLD_MODEL_L_reward": L_reward_two_hot,
+        # Continue loss.
+        "WORLD_MODEL_L_continue_B_T": L_continue_B_T,
+        "WORLD_MODEL_L_continue": L_continue,
         # Total.
-        "L_pred_B_T": L_pred_B_T,
-        "L_pred": L_pred,
-        # Decoder.
-        "L_decoder_B_T": L_decoder_B_T,
-        "L_decoder": L_decoder,
-        # Reward (two-hot).
-        "L_reward_two_hot_B_T": L_reward_two_hot_B_T,
-        "L_reward_two_hot": L_reward_two_hot,
-        # Reward (neg logp).
-        #"L_reward_logp_B_T": L_reward_logp_B_T,
-        #"L_reward_logp": L_reward_logp,
-        # Continues.
-        "L_continue_B_T": L_continue_B_T,
-        "L_continue": L_continue,
+        "WORLD_MODEL_L_prediction_B_T": L_pred_B_T,
+        "WORLD_MODEL_L_prediction": L_pred,
 
         # Dynamics loss.
-        "L_dyn_B_T": L_dyn_B_T,
-        "L_dyn": L_dyn,
+        "WORLD_MODEL_L_dynamics_B_T": L_dyn_B_T,
+        "WORLD_MODEL_L_dynamics": L_dyn,
 
-        # Reproduction loss.
-        "L_rep_B_T": L_rep_B_T,
-        "L_rep": L_rep,
+        # Representation loss.
+        "WORLD_MODEL_L_representation_B_T": L_rep_B_T,
+        "WORLD_MODEL_L_representation": L_rep,
 
         # Total loss.
-        "L_world_model_total_B_T": L_world_model_total_B_T,
-        "L_world_model_total": L_world_model_total,
+        "WORLD_MODEL_L_total_B_T": L_world_model_total_B_T,
+        "WORLD_MODEL_L_total": L_world_model_total,
+
+        # Gradient stats.
+        #"WORLD_MODEL_gradients": gradients,
+        "WORLD_MODEL_gradients_maxabs": (
+            tf.reduce_max([tf.reduce_max(tf.math.abs(g)) for g in gradients])
+        ),
+        #"WORLD_MODEL_gradients_clipped_by_glob_norm": clipped_gradients,
+        "WORLD_MODEL_gradients_clipped_by_glob_norm_maxabs": (
+            tf.reduce_max([tf.reduce_max(tf.math.abs(g)) for g in clipped_gradients])
+        ),
     }
 
 
@@ -186,6 +194,10 @@ def train_actor_and_critic_one_step(
         clipped_actor_gradients, _ = tf.clip_by_global_norm(
             actor_gradients, actor_grad_clip
         )
+        #results["ACTOR_gradients"] = actor_gradients
+        results["ACTOR_gradients_maxabs"] = tf.reduce_max([tf.reduce_max(tf.math.abs(g)) for g in actor_gradients])
+        #results["ACTOR_gradients_clipped_by_glob_norm"] = clipped_actor_gradients
+        results["ACTOR_gradients_clipped_by_glob_norm_maxabs"] = tf.reduce_max([tf.reduce_max(tf.math.abs(g)) for g in clipped_actor_gradients])
         #clipped_actor_gradients = []
         #for grad in actor_gradients:
         #    clipped_actor_gradients.append(
@@ -196,6 +208,10 @@ def train_actor_and_critic_one_step(
     clipped_critic_gradients, _ = tf.clip_by_global_norm(
         critic_gradients, critic_grad_clip
     )
+    #results["CRITIC_gradients"] = critic_gradients
+    results["CRITIC_gradients_maxabs"] = tf.reduce_max([tf.reduce_max(tf.math.abs(g)) for g in critic_gradients])
+    #results["CRITIC_gradients_clipped_by_glob_norm"] = clipped_critic_gradients
+    results["CRITIC_gradients_clipped_by_glob_norm_maxabs"] = tf.reduce_max([tf.reduce_max(tf.math.abs(g)) for g in clipped_critic_gradients])
     #clipped_critic_gradients = []
     #for grad in critic_gradients:
     #    clipped_critic_gradients.append(

@@ -84,15 +84,15 @@ def critic_loss(
     L_critic = tf.reduce_mean(L_critic_H_B)
 
     return {
-        "L_critic": L_critic,
-        "L_critic_H_B": L_critic_H_B,
-        "value_targets_H_B": value_targets_t0_to_Hm1_B,
-        "value_symlog_targets_H_B": value_symlog_targets_t0_to_Hm1_B,
+        "CRITIC_L_total": L_critic,
+        "CRITIC_L_total_H_B": L_critic_H_B,
+        "VALUE_TARGETS_H_B": value_targets_t0_to_Hm1_B,
+        "VALUE_TARGETS_symlog_H_B": value_symlog_targets_t0_to_Hm1_B,
         #"value_probs_B_H": value_probs_B_H,
         #"L_critic_neg_logp_target": L_critic_neg_logp_target,
-        "L_critic_neg_logp_target_H_B": value_loss_two_hot_H_B,
+        "CRITIC_L_neg_logp_of_value_targets_H_B": value_loss_two_hot_H_B,
         #"L_critic_ema_regularization": L_critic_ema_regularization,
-        "L_critic_ema_regularization_H_B": ema_regularization_loss_H_B,
+        "CRITIC_L_slow_critic_regularization_H_B": ema_regularization_loss_H_B,
     }
 
 

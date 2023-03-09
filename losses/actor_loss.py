@@ -68,20 +68,20 @@ def actor_loss(
     L_actor = tf.reduce_mean(L_actor_H_B)
 
     return {
-        "L_actor_H_B": L_actor_H_B,
-        "L_actor": L_actor,
-        "logp_actions_dreamed_H_B": logp_actions_dreamed_t0_to_Hm1_B,
-        "scaled_value_targets_H_B": scaled_value_targets_t0_to_Hm1_B,
-        "L_actor_ema_value_target_pct95": actor.ema_value_target_pct95,
-        "L_actor_ema_value_target_pct5": actor.ema_value_target_pct5,
-        "logp_loss_H_B": logp_loss_H_B,
-        "action_entropy_B_H": entropy_H_B,
-        "action_entropy": entropy,
+        "ACTOR_L_total_H_B": L_actor_H_B,
+        "ACTOR_L_total": L_actor,
+        "ACTOR_logp_actions_dreamed_H_B": logp_actions_dreamed_t0_to_Hm1_B,
+        "ACTOR_scaled_value_targets_H_B": scaled_value_targets_t0_to_Hm1_B,
+        "ACTOR_value_targets_pct95_ema": actor.ema_value_target_pct95,
+        "ACTOR_value_targets_pct5_ema": actor.ema_value_target_pct5,
+        #"logp_loss_H_B": logp_loss_H_B,
+        "ACTOR_action_entropy_H_B": entropy_H_B,
+        "ACTOR_action_entropy": entropy,
 
-        #"L_actor_reinforce_term_B_H": L_actor_reinforce_term_B_H,
-        #"L_actor_reinforce_term": tf.reduce_mean(L_actor_reinforce_term_B_H),
-        #"L_actor_action_entropy_term_B_H": L_actor_action_entropy_term_B_H,
-        #"L_actor_action_entropy_term": tf.reduce_mean(L_actor_action_entropy_term_B_H),
+        "ACTOR_L_reinforce_term_H_B": L_actor_reinforce_term_H_B,
+        "ACTOR_L_reinforce_term": tf.reduce_mean(L_actor_reinforce_term_H_B),
+        "ACTOR_L_entropy_term_H_B": L_actor_action_entropy_term_H_B,
+        "ACTOR_L_entropy_term": tf.reduce_mean(L_actor_action_entropy_term_H_B),
     }
 
 

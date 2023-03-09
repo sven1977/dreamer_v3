@@ -4,6 +4,19 @@ import tree  # pip install dm_tree
 from utils.symlog import inverse_symlog
 
 
+def _summarize(tbx_writer, step, keys_to_log, results):
+    results = tree.map_structure(
+        lambda s: s.numpy() if tf.is_tensor(s) else s,
+        results,
+    )
+
+    for k in keys_to_log:
+        if results[k].shape == ():
+            tbx_writer.add_scalar(k, results[k], global_step=step)
+        if results[k].shape == ():
+            tbx_writer.add_histogram(k, results[k], global_step=step)
+
+
 def reconstruct_obs_from_h_and_z(
     h_t0_to_H,
     z_t0_to_H,
@@ -69,9 +82,7 @@ def summarize_forward_train_outs_vs_samples(
             shape=(batch_size_B, batch_length_T) + sample["obs"].shape[2:],
         ),
         sampled_obs_B_T_dims=sample["obs"],
-        B=batch_size_B,
-        T=batch_length_T,
-        descr_prefix="WORLD_MODEL_TRAIN",
+        descr_prefix="WORLD_MODEL",
         descr_obs=f"predicted_posterior_T{batch_length_T}",
         symlog_obs=symlog_obs,
     )
@@ -84,9 +95,7 @@ def summarize_forward_train_outs_vs_samples(
         step=step,
         computed_rewards_B_T=predicted_rewards,
         sampled_rewards_B_T=sample["rewards"],
-        B=batch_size_B,
-        T=batch_length_T,
-        descr_prefix="WORLD_MODEL_TRAIN",
+        descr_prefix="WORLD_MODEL",
         descr_reward="predicted_posterior",
     )
     tbx_writer.add_histogram(
@@ -105,57 +114,43 @@ def summarize_forward_train_outs_vs_samples(
         step=step,
         computed_continues_B_T=predicted_continues,
         sampled_continues_B_T=(1.0 - sample["is_terminated"]),
-        B=batch_size_B,
-        T=batch_length_T,
-        descr_prefix="WORLD_MODEL_TRAIN",
+        descr_prefix="WORLD_MODEL",
         descr_cont="predicted_posterior",
     )
 
 
-def summarize_actor_losses(*, tbx_writer, step, actor_critic_train_results):
-    results = tree.map_structure(
-        lambda s: s.numpy() if tf.is_tensor(s) else s,
-        actor_critic_train_results,
-    )
+def summarize_actor_train_results(*, tbx_writer, step, actor_critic_train_results):
+    keys_to_log = [
+        "ACTOR_L_total",
+        "ACTOR_action_entropy",
+        "ACTOR_L_reinforce_term",
+        "ACTOR_L_entropy_term",
+        "ACTOR_scaled_value_targets_H_B",
+        "ACTOR_L_logp_H_B",
+        "ACTOR_value_targets_pct95_ema",
+        "ACTOR_value_targets_pct5_ema",
+        "ACTOR_gradients_maxabs",
+        "ACTOR_gradients_clipped_by_glob_norm_maxabs",
+    ]
 
-    tbx_writer.add_scalar("L_actor", results["L_actor"], global_step=step)
-    tbx_writer.add_scalar("L_actor_action_entropy", results["action_entropy"], global_step=step)
-    #tbx_writer.add_scalar("L_actor_reinforce_term", results["L_actor_reinforce_term"], global_step=step)
-    #tbx_writer.add_scalar(
-    #    "L_actor_action_entropy_term", results["L_actor_action_entropy_term"], global_step=step
-    #)
-    tbx_writer.add_histogram(
-        "L_actor_scaled_value_targets_H_B", results["scaled_value_targets_H_B"], global_step=step
-    )
-    tbx_writer.add_histogram("L_actor_logp_loss_H_B", results["logp_loss_H_B"], global_step=step)
-    tbx_writer.add_scalar(
-        "L_actor_ema_value_target_pct95", results["L_actor_ema_value_target_pct95"], global_step=step
-    )
-    tbx_writer.add_scalar(
-        "L_actor_ema_value_target_pct5", results["L_actor_ema_value_target_pct5"], global_step=step
-    )
+    _summarize(tbx_writer, step, keys_to_log, actor_critic_train_results)
 
 
-def summarize_critic_losses(*, tbx_writer, step, actor_critic_train_results):
-    results = tree.map_structure(
-        lambda s: s.numpy() if tf.is_tensor(s) else s,
-        actor_critic_train_results,
-    )
+def summarize_critic_train_results(*, tbx_writer, step, actor_critic_train_results):
+    keys_to_log = [
+        # TODO: Move this to generic function as value targets are also important for actor
+        #  loss.
+        "VALUE_TARGETS_H_B",
+        "VALUE_TARGETS_symlog_H_B",
 
-    tbx_writer.add_scalar("L_critic", results["L_critic"], global_step=step)
-    tbx_writer.add_histogram("L_critic_value_targets_H_B", results["value_targets_H_B"], global_step=step)
-    #tbx_writer.add_scalar(
-    #    "L_critic_neg_logp_target", results["L_critic_neg_logp_target"], global_step=step
-    #)
-    tbx_writer.add_histogram(
-        "L_critic_neg_logp_target_H_B", results["L_critic_neg_logp_target_H_B"], global_step=step
-    )
-    #tbx_writer.add_scalar(
-    #    "L_critic_ema_regularization", results["L_critic_ema_regularization"], global_step=step
-    #)
-    tbx_writer.add_histogram(
-        "L_critic_ema_regularization_H_B", results["L_critic_ema_regularization_H_B"], global_step=step
-    )
+        "CRITIC_L_total",
+        "CRITIC_L_neg_logp_of_value_targets_H_B",
+        "CRITIC_L_slow_critic_regularization_H_B",
+        "CRITIC_gradients_maxabs",
+        "CRITIC_gradients_clipped_by_glob_norm_maxabs",
+    ]
+
+    _summarize(tbx_writer, step, keys_to_log, actor_critic_train_results)
 
 
 def summarize_dreamed_eval_trajectory_vs_samples(
@@ -183,8 +178,6 @@ def summarize_dreamed_eval_trajectory_vs_samples(
         step=step,
         computed_float_obs_B_T_dims=dreamed_obs,
         sampled_obs_B_T_dims=sample["obs"][:, burn_in_T:burn_in_T + dreamed_T],
-        B=batch_size_B,
-        T=dreamed_T,
         descr_prefix="EVAL",
         descr_obs=f"dreamed_prior_H{dreamed_T}",
         symlog_obs=symlog_obs,
@@ -196,8 +189,6 @@ def summarize_dreamed_eval_trajectory_vs_samples(
         step=step,
         computed_rewards_B_T=dream_data["rewards_dreamed_t1_to_T"],
         sampled_rewards_B_T=sample["rewards"][:, burn_in_T:burn_in_T + dreamed_T],
-        B=batch_size_B,
-        T=dreamed_T,
         descr_prefix="EVAL",
         descr_reward=f"dreamed_prior_H{dreamed_T}",
     )
@@ -208,74 +199,47 @@ def summarize_dreamed_eval_trajectory_vs_samples(
         step=step,
         computed_continues_B_T=dream_data["continues_dreamed_t1_to_T"],
         sampled_continues_B_T=(1.0 - sample["is_terminated"])[:, burn_in_T:burn_in_T + dreamed_T],
-        B=batch_size_B,
-        T=dreamed_T,
         descr_prefix="EVAL",
         descr_cont=f"dreamed_prior_H{dreamed_T}",
     )
     return mse_sampled_vs_dreamed_obs
 
 
-def summarize_world_model_losses(*, tbx_writer, step, world_model_train_results):
-    world_model_train_results = tree.map_structure(
-        lambda s: s.numpy() if tf.is_tensor(s) else s,
-        world_model_train_results,
-    )
-    tbx_writer.add_scalar("WM_initial_h_sum_abs", tf.reduce_sum(
-        tf.math.abs(world_model_train_results["learned_initial_h"])
+def summarize_world_model_train_results(*, tbx_writer, step, world_model_train_results):
+    # TODO: Move to returned train_one_step results.
+    tbx_writer.add_scalar("WORLD_MODEL_initial_h_sum_abs", tf.reduce_sum(
+        tf.math.abs(world_model_train_results["WORLD_MODEL_learned_initial_h"].numpy())
     ).numpy(), global_step=step)
-    tbx_writer.add_histogram("WM_initial_h", world_model_train_results["learned_initial_h"], global_step=step)
 
-    tbx_writer.add_histogram("L_pred_B_T", world_model_train_results["L_pred_B_T"], global_step=step)
-    tbx_writer.add_scalar("L_pred", world_model_train_results["L_pred"], global_step=step)
+    keys_to_log = [
+        # Learned initial state.
+        "WORLD_MODEL_learned_initial_h",
 
-    tbx_writer.add_histogram(
-        "L_decoder_B_T",
-        world_model_train_results["L_decoder_B_T"], global_step=step
-    )
-    tbx_writer.add_scalar("L_decoder", world_model_train_results["L_decoder"], global_step=step)
+        # Losses.
+        "WORLD_MODEL_L_prediction_B_T",
+        "WORLD_MODEL_L_prediction",
+        "WORLD_MODEL_L_decoder_B_T",
+        "WORLD_MODEL_L_decoder",
+        "WORLD_MODEL_L_reward_B_T",
+        "WORLD_MODEL_L_reward",
+        "WORLD_MODEL_L_continue_B_T",
+        "WORLD_MODEL_L_continue",
 
-    # Two-hot reward loss.
-    tbx_writer.add_histogram(
-        "L_reward_two_hot_B_T", world_model_train_results["L_reward_two_hot_B_T"], global_step=step
-    )
-    tbx_writer.add_scalar(
-        "L_reward_two_hot", world_model_train_results["L_reward_two_hot"], global_step=step
-    )
-    # TEST: Out of interest, compare with simplge -log(p) loss for individual
-    # rewards using the FiniteDiscrete distribution. This should be very close
-    # to the two-hot reward loss.
-    #tbx_writer.add_histogram(
-    #    "L_reward_logp_B_T", world_model_train_results["L_reward_logp_B_T"], global_step=step
-    #)
-    #tbx_writer.add_scalar(
-    #    "L_reward_logp", world_model_train_results["L_reward_logp"], global_step=step
-    #)
+        "WORLD_MODEL_L_dynamics_B_T",
+        "WORLD_MODEL_L_dynamics",
 
-    tbx_writer.add_histogram(
-        "L_continue_B_T",
-        world_model_train_results["L_continue_B_T"],
-        global_step=step,
-    )
-    tbx_writer.add_scalar("L_continue", world_model_train_results["L_continue"], global_step=step)
+        "WORLD_MODEL_L_representation_B_T",
+        "WORLD_MODEL_L_representation",
 
-    tbx_writer.add_histogram("L_dyn_B_T", world_model_train_results["L_dyn_B_T"], global_step=step)
-    tbx_writer.add_scalar("L_dyn", world_model_train_results["L_dyn"], global_step=step)
+        "WORLD_MODEL_L_total_B_T",
+        "WORLD_MODEL_L_total",
 
-    tbx_writer.add_histogram("L_rep_B_T", world_model_train_results["L_rep_B_T"], global_step=step)
-    tbx_writer.add_scalar("L_rep", world_model_train_results["L_rep"], global_step=step)
+        # Gradients.
+        "WORLD_MODEL_gradients_maxabs",
+        "WORLD_MODEL_gradients_clipped_by_glob_norm_maxabs",
+    ]
 
-    # Total loss.
-    tbx_writer.add_histogram(
-        "L_world_model_total_B_T",
-        world_model_train_results["L_world_model_total_B_T"],
-        global_step=step,
-    )
-    tbx_writer.add_scalar(
-        "L_world_model_total",
-        world_model_train_results["L_world_model_total"],
-        global_step=step,
-    )
+    _summarize(tbx_writer, step, keys_to_log, world_model_train_results)
 
 
 def _summarize_obs(
@@ -284,8 +248,6 @@ def _summarize_obs(
     step,
     computed_float_obs_B_T_dims,
     sampled_obs_B_T_dims,
-    B,
-    T,
     descr_prefix=None,
     descr_obs,
     symlog_obs,
@@ -317,7 +279,7 @@ def _summarize_obs(
     )
     mse_sampled_vs_computed_obs = tf.reduce_mean(mse_sampled_vs_computed_obs)
     tbx_writer.add_scalar(
-        f"{descr_prefix}MSE_sampled_vs_{descr_obs}_obs",
+        f"{descr_prefix}sampled_vs_{descr_obs}_obs_mse",
         mse_sampled_vs_computed_obs.numpy(),
         global_step=step,
     )
@@ -360,8 +322,6 @@ def _summarize_rewards(
     step,
     computed_rewards_B_T,
     sampled_rewards_B_T,
-    B,
-    T,
     descr_prefix=None,
     descr_reward,
 ):
@@ -374,7 +334,7 @@ def _summarize_rewards(
         tf.reduce_sum(mse_sampled_vs_computed_rewards, axis=1)
     )
     tbx_writer.add_scalar(
-        f"{descr_prefix}MSE_sampled_vs_{descr_reward}_rewards",
+        f"{descr_prefix}sampled_vs_{descr_reward}_rewards_mse",
         mse_sampled_vs_computed_rewards.numpy(),
         global_step=step,
     )
@@ -386,8 +346,6 @@ def _summarize_continues(
     step,
     computed_continues_B_T,
     sampled_continues_B_T,
-    B,
-    T,
     descr_prefix=None,
     descr_cont,
 ):
@@ -401,7 +359,7 @@ def _summarize_continues(
         tf.reduce_sum(mse_sampled_vs_computed_continues, axis=1)
     )
     tbx_writer.add_scalar(
-        f"{descr_prefix}MSE_sampled_vs_{descr_cont}_continues",
+        f"{descr_prefix}sampled_vs_{descr_cont}_continues_mse",
         mse_sampled_vs_computed_continues.numpy(),
         global_step=step,
     )

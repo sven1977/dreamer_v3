@@ -37,12 +37,12 @@ from utils.episode_replay_buffer import EpisodeReplayBuffer
 from utils.episode import Episode
 from utils.cartpole_debug import CartPoleDebug  # import registers `CartPoleDebug-v0`
 from utils.tensorboard import (
-    summarize_actor_losses,
-    summarize_critic_losses,
+    summarize_actor_train_results,
+    summarize_critic_train_results,
     summarize_dreamed_eval_trajectory_vs_samples,
     summarize_forward_train_outs_vs_samples,
     reconstruct_obs_from_h_and_z,
-    summarize_world_model_losses,
+    summarize_world_model_train_results,
 )
 
 parser = argparse.ArgumentParser()
@@ -272,7 +272,7 @@ if num_pretrain_iterations > 0:
                 batch_length_T=batch_length_T,
                 symlog_obs=symlog_obs,
             )
-            summarize_world_model_losses(
+            summarize_world_model_train_results(
                 tbx_writer=tbx_writer,
                 step=total_env_steps,
                 world_model_train_results=world_model_train_results,
@@ -406,7 +406,7 @@ for iteration in range(1000000):
             world_model=world_model,
             optimizer=world_model_optimizer,
         )
-        forward_train_outs = world_model_train_results["forward_train_outs"]
+        forward_train_outs = world_model_train_results["WORLD_MODEL_forward_train_outs"]
 
         # Update h_states in buffer after the world model (sequential model)
         # forward pass.
@@ -443,21 +443,21 @@ for iteration in range(1000000):
                 batch_length_T=batch_length_T,
                 symlog_obs=symlog_obs,
             )
-            summarize_world_model_losses(
+            summarize_world_model_train_results(
                 tbx_writer=tbx_writer,
                 step=total_env_steps,
                 world_model_train_results=world_model_train_results,
             )
 
         print(
-            f"\t\tL_world_model_total={world_model_train_results['L_world_model_total'].numpy():.5f} ("
-            f"L_pred={world_model_train_results['L_pred'].numpy():.5f} ("
-            f"decoder/obs={world_model_train_results['L_decoder'].numpy()} "
-            f"reward(two-hot)={world_model_train_results['L_reward_two_hot'].numpy()} "
-            f"cont={world_model_train_results['L_continue'].numpy()}"
+            f"\t\tWORLD_MODEL_L_total={world_model_train_results['WORLD_MODEL_L_total'].numpy():.5f} ("
+            f"L_pred={world_model_train_results['WORLD_MODEL_L_prediction'].numpy():.5f} ("
+            f"dec/obs={world_model_train_results['WORLD_MODEL_L_decoder'].numpy()} "
+            f"rew(two-hot)={world_model_train_results['WORLD_MODEL_L_reward'].numpy()} "
+            f"cont={world_model_train_results['WORLD_MODEL_L_continue'].numpy()}"
             "); "
-            f"L_dyn={world_model_train_results['L_dyn'].numpy():.5f}; "
-            f"L_rep={world_model_train_results['L_rep'].numpy():.5f})"
+            f"L_dyn={world_model_train_results['WORLD_MODEL_L_dynamics'].numpy():.5f}; "
+            f"L_rep={world_model_train_results['WORLD_MODEL_L_representation'].numpy():.5f})"
         )
 
         # Train critic and actor.
@@ -494,9 +494,9 @@ for iteration in range(1000000):
                 return_normalization_decay=return_normalization_decay,
                 train_actor=train_actor,
             )
-            L_critic = actor_critic_train_results["L_critic"]
+            L_critic = actor_critic_train_results["CRITIC_L_total"]
             if train_actor:
-                L_actor = actor_critic_train_results["L_actor"]
+                L_actor = actor_critic_train_results["ACTOR_L_total"]
             dream_data = actor_critic_train_results["dream_data"]
 
             # Summarize actor/critic models.
@@ -550,14 +550,14 @@ for iteration in range(1000000):
                         )
 
                 # Summarize actor-critic loss stats.
-                summarize_critic_losses(
+                summarize_critic_train_results(
                     tbx_writer = tbx_writer,
                     step=total_env_steps,
                     actor_critic_train_results = actor_critic_train_results,
                 )
 
                 if train_actor:
-                    summarize_actor_losses(
+                    summarize_actor_train_results(
                         tbx_writer=tbx_writer,
                         step=total_env_steps,
                         actor_critic_train_results=actor_critic_train_results,
