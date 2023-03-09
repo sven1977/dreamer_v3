@@ -1,4 +1,4 @@
-cartpole-debug-experiment:
+cartpole-debug:
   env: CartPoleDebug-v0
   is_atari: false
 

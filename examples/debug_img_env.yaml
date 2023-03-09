@@ -1,4 +1,4 @@
-debug-img-env-experiment:
+debug-img-env:
   env: DebugImgEnv-v0
   is_atari: false
 

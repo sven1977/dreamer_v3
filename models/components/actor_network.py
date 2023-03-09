@@ -76,13 +76,13 @@ class ActorNetwork(tf.keras.Model):
         # Create the distribution object using the unimix'd logits.
         distr = tfp.distributions.OneHotCategorical(logits=action_logits)
 
-        action = tf.cast(tf.stop_gradient(distr.sample()), tf.float32) + (
+        action_one_hot = tf.cast(tf.stop_gradient(distr.sample()), tf.float32) + (
             action_probs - tf.stop_gradient(action_probs)
         )
 
         if return_distribution:
-            return action, distr
-        return action
+            return action_one_hot, distr
+        return action_one_hot
 
 
 if __name__ == "__main__":

@@ -1,4 +1,4 @@
-atari-pong-experiment:
+atari-pong:
   env: ALE/Pong-v5
   is_atari: true
 

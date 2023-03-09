@@ -1,10 +1,10 @@
-cartpole-experiment:
+cartpole:
   env: CartPole-v1
   is_atari: false
 
-  model_dimension: XS
+  model_dimension: XXS
 
-  training_ratio: 1024
+  training_ratio: 4096
 
   summary_frequency_train_steps: 10
   evaluation_frequency_main_iters: 0

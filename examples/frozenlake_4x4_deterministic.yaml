@@ -6,9 +6,9 @@ frozenlake-4x4-experiment:
     map_name: 4x4
     is_slippery: false
 
-  model_dimension: XS
+  model_dimension: XXS
 
-  training_ratio: 1024
+  training_ratio: 8192
 
   summary_frequency_train_steps: 10
   evaluation_frequency_main_iters:  0

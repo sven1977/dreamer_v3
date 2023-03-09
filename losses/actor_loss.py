@@ -64,7 +64,7 @@ def actor_loss(
 
     L_actor_H_B = L_actor_reinforce_term_H_B + L_actor_action_entropy_term_H_B
     # Mask out everything that goes beyond a predicted continue=False boundary.
-    L_actor_H_B *= tf.stop_gradient(dream_data["dream_loss_weights_t0_to_H_B"][:-1])
+    L_actor_H_B *= tf.stop_gradient(dream_data["dream_loss_weights_t0_to_H_B"])[:-1]
     L_actor = tf.reduce_mean(L_actor_H_B)
 
     return {

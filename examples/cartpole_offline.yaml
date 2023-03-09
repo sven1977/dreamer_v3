@@ -1,4 +1,4 @@
-cartpole-experiment:
+cartpole-offline:
   env: CartPole-v0
   is_atari: false
 
