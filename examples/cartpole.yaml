@@ -2,9 +2,9 @@ cartpole:
   env: CartPole-v1
   is_atari: false
 
-  model_dimension: XXS
+  model_dimension: XS
 
-  training_ratio: 4096
+  training_ratio: 1024
 
   summary_frequency_train_steps: 10
   evaluation_frequency_main_iters: 0

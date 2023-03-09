@@ -78,10 +78,11 @@ def train_world_model_one_step(
 
     # Get the gradients from the tape.
     gradients = tape.gradient(L_world_model_total, world_model.trainable_variables)
-    # Clip all gradients.
-    clipped_gradients = []
-    for grad in gradients:
-        clipped_gradients.append(tf.clip_by_norm(grad, grad_clip))
+    # Clip all gradients by global norm.
+    clipped_gradients, _ = tf.clip_by_global_norm(gradients, grad_clip)
+    #clipped_gradients = []
+    #for grad in gradients:
+    #    clipped_gradients.append(tf.clip_by_norm(grad, grad_clip))
     # Apply gradients to our model.
     optimizer.apply_gradients(zip(clipped_gradients, world_model.trainable_variables))
 
@@ -181,16 +182,26 @@ def train_actor_and_critic_one_step(
 
     # Clip all gradients.
     if train_actor:
-        clipped_actor_gradients = []
-        for grad in actor_gradients:
-            clipped_actor_gradients.append(
-                tf.clip_by_norm(grad, actor_grad_clip)
-            )
-    clipped_critic_gradients = []
-    for grad in critic_gradients:
-        clipped_critic_gradients.append(
-            tf.clip_by_norm(grad, critic_grad_clip)
+        # Clip all gradients by global norm.
+        clipped_actor_gradients, _ = tf.clip_by_global_norm(
+            actor_gradients, actor_grad_clip
         )
+        #clipped_actor_gradients = []
+        #for grad in actor_gradients:
+        #    clipped_actor_gradients.append(
+        #        tf.clip_by_norm(grad, actor_grad_clip)
+        #    )
+
+    # Clip all gradients by global norm.
+    clipped_critic_gradients, _ = tf.clip_by_global_norm(
+        critic_gradients, critic_grad_clip
+    )
+    #clipped_critic_gradients = []
+    #for grad in critic_gradients:
+    #    clipped_critic_gradients.append(
+    #        tf.clip_by_norm(grad, critic_grad_clip)
+    #    )
+
     # Apply gradients to our models.
     if train_actor:
         actor_optimizer.apply_gradients(
