@@ -59,12 +59,13 @@ class DreamerModel(tf.keras.Model):
         )
 
         # Compute action using our actor network and the current states.
-        actions = self.actor(h=states["h"], z=states["z"])
+        actions_one_hot = self.actor(h=states["h"], z=states["z"])
+        actions = tf.argmax(actions_one_hot, axis=-1)
 
         return actions, {
             "h": states["h"],
             "z": states["z"],
-            "a_one_hot": tf.one_hot(actions, depth=self.action_space.n),
+            "a_one_hot": actions_one_hot,
         }
 
     @tf.function
@@ -94,12 +95,8 @@ class DreamerModel(tf.keras.Model):
                 batch,, we will branch off a dreamed trajectory of len `timesteps`.
             timesteps_H: The number of timesteps to dream for.
         """
-        #assert h.shape[0] == z.shape[0], (
-        #    "h- and z-shapes (batch size; 0th dim) must be the same!"
-        #)
-
         # Dreamed actions.
-        a_dreamed_t0_to_H = []
+        a_one_hot_dreamed_t0_to_H = []
         a_dreamed_distributions_t0_to_H = []
 
         h = start_states["h"]
@@ -112,18 +109,24 @@ class DreamerModel(tf.keras.Model):
 
         # Compute `a` using actor network (already the first step uses a dreamed action,
         # not a sampled one).
-        a, a_dist = self.actor(h=h, z=z, return_distribution=True)
+        a_one_hot, a_dist = self.actor(
+            # We have to stop the gradients through the states.
+            # TODO: why???
+            h=tf.stop_gradient(h),
+            z=tf.stop_gradient(z),
+            return_distribution=True,
+        )
         # TEST: Use random actions instead of actor-computed ones.
         # a = tf.random.uniform(tf.shape(h)[0:1], 0, self.action_space.n, tf.int64)
         # END TEST: random actions
-        a_dreamed_t0_to_H.append(a)
+        a_one_hot_dreamed_t0_to_H.append(a_one_hot)
         a_dreamed_distributions_t0_to_H.append(a_dist)
 
         for i in range(timesteps_H):
             # Move one step in the dream using the RSSM.
             h = self.world_model.sequence_model(
                 z=z,
-                a_one_hot=tf.one_hot(a, depth=self.action_space.n),
+                a_one_hot=a_one_hot,
                 h=h,
             )
             h_states_t0_to_H.append(h)
@@ -133,11 +136,15 @@ class DreamerModel(tf.keras.Model):
             z_states_prior_t0_to_H.append(z)
 
             # Compute `a` using actor network.
-            a, a_dist = self.actor(h=h, z=z, return_distribution=True)
+            a_one_hot, a_dist = self.actor(
+                h=tf.stop_gradient(h),
+                z=tf.stop_gradient(z),
+                return_distribution=True,
+            )
             # TEST: Use random actions instead of actor-computed ones.
             # a = tf.random.uniform(tf.shape(h)[0:1], 0, self.action_space.n, tf.int64)
             # END TEST: random actions
-            a_dreamed_t0_to_H.append(a)
+            a_one_hot_dreamed_t0_to_H.append(a_one_hot)
             a_dreamed_distributions_t0_to_H.append(a_dist)
 
         h_states_H_B = tf.stack(h_states_t0_to_H, axis=0)  # (T, B, ...)
@@ -146,7 +153,7 @@ class DreamerModel(tf.keras.Model):
         z_states_prior_H_B = tf.stack(z_states_prior_t0_to_H, axis=0)  # (T, B, ...)
         z_states_prior_HxB = tf.reshape(z_states_prior_H_B, [-1] + z_states_prior_H_B.shape.as_list()[2:])
 
-        a_dreamed_H_B = tf.stack(a_dreamed_t0_to_H, axis=0)  # (T, B, ...)
+        a_one_hot_dreamed_H_B = tf.stack(a_one_hot_dreamed_t0_to_H, axis=0)  # (T, B, ...)
 
         # Compute r using reward predictor.
         r_dreamed_HxB = (
@@ -174,26 +181,19 @@ class DreamerModel(tf.keras.Model):
         v_symlog_dreamed_ema_HxB = self.critic(h=h_states_HxB, z=z_states_prior_HxB, return_logits=False, use_ema=True)
         v_symlog_dreamed_ema_H_B = tf.reshape(v_symlog_dreamed_ema_HxB, [timesteps_H+1, -1])
 
-        # Stack along T (horizon=H) axis.
         ret = {
-            # Stop-gradient everything, except for the critic and action outputs.
-            "h_states_t0_to_H_B": tf.stop_gradient(h_states_H_B),
-            "z_states_prior_t0_to_H_B": tf.stop_gradient(z_states_prior_H_B),
-            "rewards_dreamed_t0_to_H_B": tf.stop_gradient(r_dreamed_H_B),
-            "continues_dreamed_t0_to_H_B": tf.stop_gradient(c_dreamed_H_B),
-
-            # Critic and action outputs are not grad-stopped for critic/actor learning.
-            "actions_dreamed_t0_to_H_B": a_dreamed_H_B,
+            "h_states_t0_to_H_B": h_states_H_B,
+            "z_states_prior_t0_to_H_B": z_states_prior_H_B,
+            "rewards_dreamed_t0_to_H_B": r_dreamed_H_B,
+            "continues_dreamed_t0_to_H_B": c_dreamed_H_B,
+            "actions_one_hot_dreamed_t0_to_H_B": a_one_hot_dreamed_t0_to_H,
+            "actions_dreamed_t0_to_H_B": tf.argmax(a_one_hot_dreamed_t0_to_H, axis=-1),
             "actions_dreamed_distributions_t0_to_H_B": a_dreamed_distributions_t0_to_H,
             "values_dreamed_t0_to_H_B": v_dreamed_H_B,
             "values_symlog_dreamed_logits_t0_to_HxB": v_symlog_dreamed_logits_HxB,
-
-            # EMA outputs should also be stop gradient'd.
-            "v_symlog_dreamed_ema_t0_to_H_B": tf.stop_gradient(
-                v_symlog_dreamed_ema_H_B
-            ),
+            "v_symlog_dreamed_ema_t0_to_H_B": v_symlog_dreamed_ema_H_B,
             # Loss weights for critic- and actor losses.
-            "dream_loss_weights_t0_to_H_B": tf.stop_gradient(dream_loss_weights_H_B),
+            "dream_loss_weights_t0_to_H_B": dream_loss_weights_H_B,
         }
 
         return ret
@@ -320,9 +320,9 @@ class DreamerModel(tf.keras.Model):
                 a = actions[:, actions_index]
             # Compute `a` using actor network.
             else:
-                #a = self.actor(h=h, z=z)
+                #a_one_hot = self.actor(h=h, z=z)
                 #TODO: compute actor-produced actions, instead of random actions
-                a = tf.random.uniform(tf.shape(r), 0, self.action_space.n, tf.int64)
+                a_one_hot = tf.random.uniform(tf.shape(r), 0, self.action_space.n, tf.int64)
                 #TODO: END: random actions
 
             a_dreamed_t1_to_T.append(a)

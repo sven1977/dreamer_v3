@@ -108,9 +108,6 @@ def world_model_dynamics_and_representation_loss(forward_train_outs, B, T):
         ),
         reinterpreted_batch_ndims=1,
     )
-    #sg_z_distr_encoder_BxT = tfp.distributions.Categorical(
-    #    probs=tf.stop_gradient(z_probs_encoder_BxT.probs)
-    #)
     # Stop gradient for dynamics model's z-outputs:
     sg_z_distr_dynamics_BxT = tfp.distributions.Independent(
         tfp.distributions.OneHotCategorical(
@@ -118,9 +115,6 @@ def world_model_dynamics_and_representation_loss(forward_train_outs, B, T):
         ),
         reinterpreted_batch_ndims=1,
     )
-    #sg_z_distr_dynamics_BxT = tfp.distributions.Categorical(
-    #    probs=tf.stop_gradient(z_distr_dynamics_BxT.probs)
-    #)
 
     # Implement free bits. According to [1]:
     # "To avoid a degenerate solution where the dynamics are trivial to predict but
