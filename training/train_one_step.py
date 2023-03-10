@@ -5,7 +5,7 @@ https://arxiv.org/pdf/2301.04104v1.pdf
 """
 import tensorflow as tf
 from losses.actor_loss import actor_loss
-from losses.critic_loss import critic_loss
+from losses.critic_loss import critic_loss, compute_value_targets
 from losses.world_model_losses import (
     world_model_dynamics_and_representation_loss,
     world_model_prediction_losses,
@@ -80,9 +80,6 @@ def train_world_model_one_step(
     gradients = tape.gradient(L_world_model_total, world_model.trainable_variables)
     # Clip all gradients by global norm.
     clipped_gradients, _ = tf.clip_by_global_norm(gradients, grad_clip)
-    #clipped_gradients = []
-    #for grad in gradients:
-    #    clipped_gradients.append(tf.clip_by_norm(grad, grad_clip))
     # Apply gradients to our model.
     optimizer.apply_gradients(zip(clipped_gradients, world_model.trainable_variables))
 
@@ -118,11 +115,9 @@ def train_world_model_one_step(
         "WORLD_MODEL_L_total": L_world_model_total,
 
         # Gradient stats.
-        #"WORLD_MODEL_gradients": gradients,
         "WORLD_MODEL_gradients_maxabs": (
             tf.reduce_max([tf.reduce_max(tf.math.abs(g)) for g in gradients])
         ),
-        #"WORLD_MODEL_gradients_clipped_by_glob_norm": clipped_gradients,
         "WORLD_MODEL_gradients_clipped_by_glob_norm_maxabs": (
             tf.reduce_max([tf.reduce_max(tf.math.abs(g)) for g in clipped_gradients])
         ),
@@ -159,30 +154,40 @@ def train_actor_and_critic_one_step(
             timesteps_H=horizon_H,
             gamma=gamma,
         )
-        critic_loss_results = critic_loss(dream_data, gamma=gamma, lambda_=lambda_)
+
+        value_targets = compute_value_targets(
+            # Learn critic in symlog'd space.
+            rewards_H_BxT=dream_data["rewards_dreamed_t0_to_H_B"],
+            continues_H_BxT=dream_data["continues_dreamed_t0_to_H_B"],
+            value_predictions_H_BxT=dream_data["values_dreamed_t0_to_H_B"],
+            gamma=gamma,
+            lambda_=lambda_,
+        )
+        critic_loss_results = critic_loss(dream_data, value_targets)
         if train_actor:
             actor_loss_results = actor_loss(
                 dream_data=dream_data,
-                value_targets=critic_loss_results["value_targets_H_B"],
+                value_targets=value_targets,
                 actor=dreamer_model.actor,
                 entropy_scale=entropy_scale,
                 return_normalization_decay=return_normalization_decay
             )
 
     results = critic_loss_results.copy()
-    if train_actor:
-        results.update(actor_loss_results)
-        L_actor = results["L_actor"]
+    results["VALUE_TARGETS_H_B"] = value_targets
 
     results["dream_data"] = dream_data
-    L_critic = results["L_critic"]
+    L_critic = results["CRITIC_L_total"]
 
     # Get the gradients from the tape.
     if train_actor:
+        results.update(actor_loss_results)
+        L_actor = results["ACTOR_L_total"]
         actor_gradients = tape.gradient(
             L_actor,
             dreamer_model.actor.trainable_variables,
         )
+
     critic_gradients = tape.gradient(
         L_critic,
         dreamer_model.critic.trainable_variables,
@@ -194,29 +199,15 @@ def train_actor_and_critic_one_step(
         clipped_actor_gradients, _ = tf.clip_by_global_norm(
             actor_gradients, actor_grad_clip
         )
-        #results["ACTOR_gradients"] = actor_gradients
         results["ACTOR_gradients_maxabs"] = tf.reduce_max([tf.reduce_max(tf.math.abs(g)) for g in actor_gradients])
-        #results["ACTOR_gradients_clipped_by_glob_norm"] = clipped_actor_gradients
         results["ACTOR_gradients_clipped_by_glob_norm_maxabs"] = tf.reduce_max([tf.reduce_max(tf.math.abs(g)) for g in clipped_actor_gradients])
-        #clipped_actor_gradients = []
-        #for grad in actor_gradients:
-        #    clipped_actor_gradients.append(
-        #        tf.clip_by_norm(grad, actor_grad_clip)
-        #    )
 
     # Clip all gradients by global norm.
     clipped_critic_gradients, _ = tf.clip_by_global_norm(
         critic_gradients, critic_grad_clip
     )
-    #results["CRITIC_gradients"] = critic_gradients
     results["CRITIC_gradients_maxabs"] = tf.reduce_max([tf.reduce_max(tf.math.abs(g)) for g in critic_gradients])
-    #results["CRITIC_gradients_clipped_by_glob_norm"] = clipped_critic_gradients
     results["CRITIC_gradients_clipped_by_glob_norm_maxabs"] = tf.reduce_max([tf.reduce_max(tf.math.abs(g)) for g in clipped_critic_gradients])
-    #clipped_critic_gradients = []
-    #for grad in critic_gradients:
-    #    clipped_critic_gradients.append(
-    #        tf.clip_by_norm(grad, critic_grad_clip)
-    #    )
 
     # Apply gradients to our models.
     if train_actor:
@@ -229,9 +220,5 @@ def train_actor_and_critic_one_step(
 
     # Update EMA weights of the critic.
     dreamer_model.critic.update_ema()
-
-    if train_actor:
-        results["actor_gradients"] = actor_gradients
-    results["critic_gradients"] = critic_gradients
 
     return results

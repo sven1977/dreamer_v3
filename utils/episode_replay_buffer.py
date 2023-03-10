@@ -33,6 +33,8 @@ class EpisodeReplayBuffer:
 
         # The size of the buffer in timesteps.
         self.size = 0
+        # How many timesteps have been sampled from the buffer in total?
+        self.sampled_timesteps = 0
 
     def add(self, episodes: Union[List[Episode], Episode]):
         if isinstance(episodes, Episode):
@@ -200,6 +202,9 @@ class EpisodeReplayBuffer:
         #if episode_h_states:
         #    ret["h_states"] = np.array(h_states)
 
+        # Update our sampled counter.
+        self.sampled_timesteps += batch_size_B * batch_length_T
+
         return ret
 
     #def update_h_states(self, h_states, indices):
@@ -220,6 +225,9 @@ class EpisodeReplayBuffer:
 
     def get_num_timesteps(self):
         return len(self._indices)
+
+    def get_sampled_timesteps(self):
+        return self.sampled_timesteps
 
 
 if __name__ == "__main__":

@@ -137,6 +137,7 @@ class EnvRunnerV2:
         self.episodes = [None for _ in range(self.num_envs)]
         self.done_episodes_for_metrics = []
         self.ongoing_episodes_for_metrics = defaultdict(list)
+        self.ts_since_last_metrics = 0
 
     def sample(self, explore: bool = True, random_actions: bool = False):
         if self.config.batch_mode == "complete_episodes":
@@ -312,6 +313,8 @@ class EnvRunnerV2:
         for eps in ongoing_episodes:
             self.ongoing_episodes_for_metrics[eps.id_].append(eps)
 
+        self.ts_since_last_metrics += ts
+
         return done_episodes_to_return, ongoing_episodes
 
     def sample_episodes(
@@ -448,25 +451,38 @@ class EnvRunnerV2:
             if eps >= num_episodes:
                 break
 
+        self.ts_since_last_metrics += sum(len(eps) for eps in done_episodes_to_return)
+
         return done_episodes_to_return
 
     def get_metrics(self):
-        metrics = {}
+        metrics = {
+            "ts_taken": self.ts_since_last_metrics,
+        }
+
+        # Compute per-episode metrics (only on already completed episodes).
         if self.done_episodes_for_metrics:
+            lengths = []
             returns = []
+            actions = []
             for eps in self.done_episodes_for_metrics:
+                lengths.append(len(eps))
                 returns.append(eps.get_return())
+                actions.append(eps.actions)
                 # Don't forget about the already returned chunks of this episode.
                 if eps.id_ in self.ongoing_episodes_for_metrics:
-                    returns[-1] += sum(
-                        eps2.get_return()
-                        for eps2 in self.ongoing_episodes_for_metrics[eps.id_]
-                    )
+                    for eps2 in self.ongoing_episodes_for_metrics[eps.id_]:
+                        lengths[-1] += len(eps2)
+                        returns[-1] += eps2.get_return()
+                        actions.append(eps2.actions)
                     del self.ongoing_episodes_for_metrics[eps.id_]
-            #mean_returns /= len(self.done_episodes_for_metrics)
+
+            metrics["episode_lengths"] = lengths
             metrics["episode_returns"] = returns
+            metrics["actions"] = np.concatenate(actions, axis=0)
 
         self.done_episodes_for_metrics.clear()
+        self.ts_since_last_metrics = 0
 
         return metrics
 

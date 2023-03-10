@@ -9,7 +9,6 @@ import tensorflow as tf
 
 from models.components.actor_network import ActorNetwork
 from models.components.critic_network import CriticNetwork
-from models.components.reward_predictor import RewardPredictor
 from utils.symlog import inverse_symlog
 
 
@@ -52,7 +51,7 @@ class DreamerModel(tf.keras.Model):
     @tf.function
     def forward_inference(self, previous_states, observations, is_first, training=None):
         """TODO"""
-        # Perform one step in the worl model (starting from `previous_state` and
+        # Perform one step in the world model (starting from `previous_state` and
         # using the observations to yield a current (posterior) state).
         states = self.world_model.forward_inference(
             previous_states, observations, is_first
@@ -110,8 +109,11 @@ class DreamerModel(tf.keras.Model):
         # Compute `a` using actor network (already the first step uses a dreamed action,
         # not a sampled one).
         a_one_hot, a_dist = self.actor(
-            # We have to stop the gradients through the states.
-            # TODO: why???
+            # We have to stop the gradients through the states. B/c we are using a
+            # differentiable Discrete action distribution (straight through gradients
+            # with `a = stop_gradient(sample(probs)) + probs - stop_gradient(probs)`,
+            # we otherwise would add dependencies of the `-log(pi(a|s))` REINFORCE loss
+            # term on actions further back in the trajectory.
             h=tf.stop_gradient(h),
             z=tf.stop_gradient(z),
             return_distribution=True,
@@ -164,9 +166,16 @@ class DreamerModel(tf.keras.Model):
         # Compute continues using continue predictor.
         c_dreamed_HxB = self.world_model.continue_predictor(h=h_states_HxB, z=z_states_prior_HxB)
         c_dreamed_H_B = tf.reshape(c_dreamed_HxB, [timesteps_H+1, -1])
-        # Force-set first cont. to [1.0-is_terminal].
+        # Force-set first continue to False iff `start_is_terminated`.
+        # Note: This will cause the loss-weights for this row in the batch to be
+        # completely zero'd out. In general, we don't use dreamed data past any
+        # predicted (or actual first) continue=False flags.
         c_dreamed_H_B = tf.concat([1.0 - tf.expand_dims(start_is_terminated, 0), c_dreamed_H_B[1:]], axis=0)
 
+        # Loss weights for each individual dreamed timestep. Zero-out all timesteps
+        # that lie past continue=False flags. B/c our world model does NOT learn how
+        # to skip terminal/reset episode boundaries, dreamed data crossing such a
+        # boundary should not be used for critic/actor learning either.
         dream_loss_weights_H_B = tf.math.cumprod(gamma * c_dreamed_H_B, axis=0) / gamma
 
         # Compute the value estimates.
@@ -186,8 +195,8 @@ class DreamerModel(tf.keras.Model):
             "z_states_prior_t0_to_H_B": z_states_prior_H_B,
             "rewards_dreamed_t0_to_H_B": r_dreamed_H_B,
             "continues_dreamed_t0_to_H_B": c_dreamed_H_B,
-            "actions_one_hot_dreamed_t0_to_H_B": a_one_hot_dreamed_t0_to_H,
-            "actions_dreamed_t0_to_H_B": tf.argmax(a_one_hot_dreamed_t0_to_H, axis=-1),
+            "actions_one_hot_dreamed_t0_to_H_B": a_one_hot_dreamed_H_B,
+            "actions_dreamed_t0_to_H_B": tf.argmax(a_one_hot_dreamed_H_B, axis=-1),
             "actions_dreamed_distributions_t0_to_H_B": a_dreamed_distributions_t0_to_H,
             "values_dreamed_t0_to_H_B": v_dreamed_H_B,
             "values_symlog_dreamed_logits_t0_to_HxB": v_symlog_dreamed_logits_HxB,
@@ -198,160 +207,107 @@ class DreamerModel(tf.keras.Model):
 
         return ret
 
-        # Danijar's code.
-        #first_cont = (1.0 - start['is_terminal']).astype(jnp.float32)
-        #keys = list(self.rssm.initial(1).keys())
-        #start = {k: v for k, v in start.items() if k in keys}
-        #start['action'] = policy(start)
-        #def step(prev, _):
-        #  prev = prev.copy()
-        #  state = self.rssm.img_step(prev, prev.pop('action'))
-        #  return {**state, 'action': policy(state)}
-        #traj = jaxutils.scan(
-        #    step, jnp.arange(horizon), start, self.config.imag_unroll)
-        #traj = {
-        #    k: jnp.concatenate([start[k][None], v], 0) for k, v in traj.items()}
-        #cont = self.heads['cont'](traj).mode()
-        #traj['cont'] = jnp.concatenate([first_cont[None], cont[1:]], 0)
-        #discount = 1 - 1 / self.config.horizon
-        #traj['weight'] = jnp.cumprod(discount * traj['cont'], 0) / discount
-        #return traj
-
-        #def img_step(self, prev_state, prev_action):
-        #    prev_stoch = prev_state['stoch']
-        #    prev_action = cast(prev_action)
-        #    if self._action_clip > 0.0:
-        #        prev_action *= sg(self._action_clip / jnp.maximum(
-        #            self._action_clip, jnp.abs(prev_action)))
-        #    if self._classes:
-        #        shape = prev_stoch.shape[:-2] + (self._stoch * self._classes,)
-        #        prev_stoch = prev_stoch.reshape(shape)
-        #    if len(prev_action.shape) > len(prev_stoch.shape):  # 2D actions.
-        #        shape = prev_action.shape[:-2] + (np.prod(prev_action.shape[-2:]),)
-        #        prev_action = prev_action.reshape(shape)
-        #    x = jnp.concatenate([prev_stoch, prev_action], -1)
-        #    x = self.get('img_in', Linear, **self._kw)(x)
-        #    x, deter = self._gru(x, prev_state['deter'])
-        #    x = self.get('img_out', Linear, **self._kw)(x)
-        #    stats = self._stats('img_stats', x)
-        #    dist = self.get_dist(stats)
-        #    stoch = dist.sample(seed=nj.rng())
-        #    prior = {'stoch': stoch, 'deter': deter, **stats}
-        #    return cast(prior)
-
-    @tf.function
+    #@tf.function
     def dream_trajectory_with_burn_in(
         self,
-        observations,
-        actions,
-        initial_h,
-        timesteps,
-        use_sampled_actions=False,
+        *,
+        start_states,
+        timesteps_burn_in,
+        timesteps_H,
+        observations,  # [B, >=timesteps_burn_in]
+        actions,  # [B, timesteps_burn_in (+timesteps_H)?]
+        use_sampled_actions_in_dream=False,
+        use_random_actions_in_dream=False,
     ):
-        """Dreams trajectory from N initial observations and an initial h-state.
+        """Dreams trajectory from N initial observations and initial states.
 
-        Uses all T observations and actions (B, T, ...) to get a most accurate
-        h-state to begin dreaming with (burn-in). After all N observations/actions are
-        "used up", starts producing z-states using the dynamics model and predicted
-        actions (instead of the encoder and the provided actions).
-
-        Args:
-            observations: The batch (B, T, ...) of observations to be passed through
-                the encoder network to yield the inputs to the
-                representation layer (which then can compute the first N z-states).
-            actions: The batch (B, T, ...) of actions to be passed through the sequence
-                model to yield the first N h-states.
-            initial_h: The initial h-states (B, ...) (no time dimension!) h(t) to be
-                used in combination with the first observation (o(t)) to yield
-                z(t) and then - in combination with the first action (a(t)) and z(t)
-                to yield the next h-state (h(t+1)) via the RSSM.
-            timesteps: The number of timesteps to dream for.
-            use_sampled_actions: Whether to use `actions` for the dreamed predictions
-                (rather than the actor network). If True, make sure that your
-                `actions` arg contains as many timesteps as `observations` plus
-                `timesteps` (b/c actions needs to cover both the burn-in phase
-                as well as the actual dreaming phase).
+        TODO: docstring
         """
-        #if use_sampled_actions:
-        #    assert actions.shape[1] == observations.shape[1] + timesteps, (
-        #        "Action timesteps provided ({actions.shape[1]}) seem wrong! Need "
-        #        f"exactly {observations.shape[1] + timesteps}."
-        #    )
-        #else:
-        #    assert actions.shape[1] == observations.shape[1], (
-        #        "Action timesteps provided ({actions.shape[1]}) seem wrong! Need "
-        #        f"exactly {observations.shape[1]}."
-        #    )
+        assert not (use_sampled_actions_in_dream and use_random_actions_in_dream)
+        actions_one_hot = tf.one_hot(actions, depth=self.action_space.n)
 
-        # Produce initial N internal states (burn-in):
-        h = initial_h
-        for i in range(observations.shape[1]):
-            h = self.world_model.forward_inference(
+        B, T = observations.shape[0], observations.shape[1]
+
+        # Produce initial N internal posterior states (burn-in) using the given
+        # observations:
+        states = start_states
+        for i in range(timesteps_burn_in):
+            states = self.world_model.forward_inference(
+                previous_states=states,
                 observations=observations[:, i],
-                actions=actions[:, i],
-                initial_h=h,
+                is_first=tf.fill((), 1.0 if i == 0 else 0.0),
             )
+            states["a_one_hot"] = actions_one_hot[:, i]
 
-        h_states_t1_to_Tp1 = [h]
-        z_states_prior_t1_to_T = []
-        a_dreamed_t1_to_T = []
-        r_dreamed_t1_to_T = []
-        r_symlog_dreamed_t1_to_T = []
-        c_dreamed_t1_to_T = []
-        for j in range(timesteps):
-            actions_index = observations.shape[1] + j
+        # Start producing the actual dream, using prior states and either the given
+        # actions, dreamed, or random ones.
+        h_states_t0_to_H = [states["h"]]
+        z_states_prior_t0_to_H = [states["z"]]
+        a_one_hot_t0_to_H = [states["a_one_hot"]]
 
+        for j in range(timesteps_H):
+            # Compute next h using sequence model.
+            h = self.world_model.sequence_model(
+                z=states["z"],
+                a_one_hot=states["a_one_hot"],
+                h=states["h"],
+            )
+            h_states_t0_to_H.append(h)
             # Compute z from h, using the dynamics model (we don't have an actual
             # observation at this timestep).
             z = self.world_model.dynamics_predictor(h=h)
-            z_states_prior_t1_to_T.append(z)
+            z_states_prior_t0_to_H.append(z)
 
-            # Compute r using reward predictor.
-            r = self.world_model.reward_predictor(h=h, z=z)
-            r_symlog_dreamed_t1_to_T.append(r)
-            r_dreamed_t1_to_T.append(inverse_symlog(r))
-
-            # Compute continues using continue predictor.
-            c = self.world_model.continue_predictor(h=h, z=z)
-            c_dreamed_t1_to_T.append(c)
-
-            # Use the actions given to us.
-            if use_sampled_actions:
-                a = actions[:, actions_index]
-            # Compute `a` using actor network.
+            # Compute next dreamed action or use sampled one or random one.
+            if use_sampled_actions_in_dream:
+                a_one_hot = actions[:, timesteps_burn_in + j]
+            elif use_random_actions_in_dream:
+                a = tf.random.randint((B,), 0, self.action_space.n, tf.int64)
+                a_one_hot = tf.one_hot(a, depth=self.action_space.n)
             else:
-                #a_one_hot = self.actor(h=h, z=z)
-                #TODO: compute actor-produced actions, instead of random actions
-                a_one_hot = tf.random.uniform(tf.shape(r), 0, self.action_space.n, tf.int64)
-                #TODO: END: random actions
+                a_one_hot = self.actor(h=h, z=z)
+            a_one_hot_t0_to_H.append(a_one_hot)
 
-            a_dreamed_t1_to_T.append(a)
+            states = {"h": h, "z": z, "a_one_hot": a_one_hot}
 
-            # Compute next h using sequence model.
-            h_tp1 = self.world_model.sequence_model(
-                # actions and z must have a T dimension.
-                z=tf.expand_dims(z, axis=1),
-                a_one_hot=tf.expand_dims(a, axis=1),
-                h=h,  # Initial state must NOT have a T dimension.
+        h_states_t0_to_H_B = tf.stack(h_states_t0_to_H, axis=0)
+        h_states_t0_to_HxB = tf.reshape(
+            h_states_t0_to_H_B, shape=[-1] + h_states_t0_to_H_B.shape.as_list()[2:]
+        )
+
+        z_states_prior_t0_to_H_B = tf.stack(z_states_prior_t0_to_H, axis=0)
+        z_states_prior_t0_to_HxB = tf.reshape(
+            z_states_prior_t0_to_H_B, shape=[-1] + z_states_prior_t0_to_H_B.shape.as_list()[2:]
+        )
+
+        a_one_hot_t0_to_H_B = tf.stack(a_one_hot_t0_to_H, axis=0)
+
+        # Compute r using reward predictor.
+        r_dreamed_t0_to_HxB = inverse_symlog(
+            self.world_model.reward_predictor(
+                h=h_states_t0_to_HxB,
+                z=z_states_prior_t0_to_HxB,
             )
-            h_states_t1_to_Tp1.append(h_tp1)
+        )
+        # Compute continues using continue predictor.
+        c_dreamed_t0_to_HxB = self.world_model.continue_predictor(
+            h=h_states_t0_to_HxB,
+            z=z_states_prior_t0_to_HxB,
+        )
 
-            h = h_tp1
-
-        # Stack along T axis.
         ret = {
-            # Note that h-states has one more entry as it includes the next h-state
-            # ("reaching into" the next chunk). This very last h-state can be used
-            # to start a new (dreamed) trajectory.
-            "h_states_t1_to_Tp1": tf.stack(h_states_t1_to_Tp1, axis=1),
-            "z_states_prior_t1_to_T": tf.stack(z_states_prior_t1_to_T, axis=1),
-            "actions_dreamed_t1_to_T": tf.stack(a_dreamed_t1_to_T, axis=1),
-            "rewards_dreamed_t1_to_T": tf.stack(r_dreamed_t1_to_T, axis=1),
-            "rewards_symlog_dreamed_t1_to_T": tf.stack(
-                r_symlog_dreamed_t1_to_T, axis=1
-            ),
-            "continues_dreamed_t1_to_T": tf.stack(c_dreamed_t1_to_T, axis=1)
+            "h_states_t0_to_H_B": h_states_t0_to_H_B,
+            "z_states_prior_t0_to_H_B": z_states_prior_t0_to_H_B,
+            "rewards_dreamed_t0_to_H_B": tf.reshape(r_dreamed_t0_to_HxB, (T, B)),
+            "continues_dreamed_t0_to_H_B": tf.reshape(c_dreamed_t0_to_HxB, (T, B)),
         }
+
+        if use_sampled_actions_in_dream:
+            ret["actions_one_hot_sampled_t0_to_H_B"] = a_one_hot_t0_to_H_B
+        elif use_random_actions_in_dream:
+            ret["actions_one_hot_random_t0_to_H_B"] = a_one_hot_t0_to_H_B
+        else:
+            ret["actions_one_hot_dreamed_t0_to_H_B"] = a_one_hot_t0_to_H_B
 
         return ret
 

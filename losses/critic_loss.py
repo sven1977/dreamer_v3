@@ -14,21 +14,13 @@ from utils.two_hot import two_hot
 @tf.function
 def critic_loss(
     dream_data,
-    gamma,
-    lambda_,
+    value_targets,  # t0 to H-1, B
 ):
     H, B = dream_data["rewards_dreamed_t0_to_H_B"].shape[:2]
     Hm1 = H - 1
     # Note that value targets are NOT symlog'd and go from t0 to H-1, not H, like
     # all the other dream data.
-    value_targets_t0_to_Hm1_B = tf.stop_gradient(compute_value_targets(
-        # Learn critic in symlog'd space.
-        rewards_H_BxT=dream_data["rewards_dreamed_t0_to_H_B"],
-        continues_H_BxT=dream_data["continues_dreamed_t0_to_H_B"],
-        value_predictions_H_BxT=dream_data["values_dreamed_t0_to_H_B"],
-        gamma=gamma,
-        lambda_=lambda_,
-    ))
+    value_targets_t0_to_Hm1_B = tf.stop_gradient(value_targets)
     value_symlog_targets_t0_to_Hm1_B = symlog(value_targets_t0_to_Hm1_B)
     # Fold time rank (for two_hot'ing).
     value_symlog_targets_HxB = tf.reshape(value_symlog_targets_t0_to_Hm1_B, (-1,))
@@ -84,15 +76,16 @@ def critic_loss(
     L_critic = tf.reduce_mean(L_critic_H_B)
 
     return {
+        # Symlog'd value targets. Critic learns to predict symlog'd values.
+        "VALUE_TARGETS_symlog_H_B": value_symlog_targets_t0_to_Hm1_B,
+
+        # Critic loss terms.
         "CRITIC_L_total": L_critic,
         "CRITIC_L_total_H_B": L_critic_H_B,
-        "VALUE_TARGETS_H_B": value_targets_t0_to_Hm1_B,
-        "VALUE_TARGETS_symlog_H_B": value_symlog_targets_t0_to_Hm1_B,
-        #"value_probs_B_H": value_probs_B_H,
-        #"L_critic_neg_logp_target": L_critic_neg_logp_target,
         "CRITIC_L_neg_logp_of_value_targets_H_B": value_loss_two_hot_H_B,
-        #"L_critic_ema_regularization": L_critic_ema_regularization,
+        "CRITIC_L_neg_logp_of_value_targets": tf.reduce_mean(value_loss_two_hot_H_B),
         "CRITIC_L_slow_critic_regularization_H_B": ema_regularization_loss_H_B,
+        "CRITIC_L_slow_critic_regularization": tf.reduce_mean(ema_regularization_loss_H_B),
     }
 
 

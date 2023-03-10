@@ -1,3 +1,4 @@
+import numpy as np
 import tensorflow as tf
 import tree  # pip install dm_tree
 
@@ -86,15 +87,12 @@ def summarize_forward_train_outs_vs_samples(
         descr_obs=f"predicted_posterior_T{batch_length_T}",
         symlog_obs=symlog_obs,
     )
-    predicted_rewards = tf.reshape(
-        inverse_symlog(forward_train_outs["rewards_BxT"]),
-        shape=(batch_size_B, batch_length_T),
-    )
+    predicted_rewards = inverse_symlog(forward_train_outs["rewards_BxT"])
     _summarize_rewards(
         tbx_writer=tbx_writer,
         step=step,
-        computed_rewards_B_T=predicted_rewards,
-        sampled_rewards_B_T=sample["rewards"],
+        computed_rewards=predicted_rewards,
+        sampled_rewards=np.reshape(sample["rewards"], [-1]),
         descr_prefix="WORLD_MODEL",
         descr_reward="predicted_posterior",
     )
@@ -102,18 +100,16 @@ def summarize_forward_train_outs_vs_samples(
         "sampled_rewards", sample["rewards"].numpy(), global_step=step
     )
     tbx_writer.add_histogram(
-        "predicted_posterior_rewards", predicted_rewards.numpy(), global_step=step
+        "WORLD_MODEL_predicted_posterior_rewards",
+        predicted_rewards.numpy(),
+        global_step=step,
     )
 
-    predicted_continues = tf.reshape(
-        forward_train_outs["continues_BxT"],
-        shape=(batch_size_B, batch_length_T),
-    )
     _summarize_continues(
         tbx_writer=tbx_writer,
         step=step,
-        computed_continues_B_T=predicted_continues,
-        sampled_continues_B_T=(1.0 - sample["is_terminated"]),
+        computed_continues=forward_train_outs["continues_BxT"],
+        sampled_continues=np.reshape(1.0 - sample["is_terminated"], [-1]),
         descr_prefix="WORLD_MODEL",
         descr_cont="predicted_posterior",
     )
@@ -121,14 +117,20 @@ def summarize_forward_train_outs_vs_samples(
 
 def summarize_actor_train_results(*, tbx_writer, step, actor_critic_train_results):
     keys_to_log = [
+        # Loss terms.
         "ACTOR_L_total",
+        "ACTOR_L_neglogp_reinforce_term",
+        "ACTOR_L_neg_entropy_term",
+
+        # Action entropy.
         "ACTOR_action_entropy",
-        "ACTOR_L_reinforce_term",
-        "ACTOR_L_entropy_term",
+
+        # Terms related to scaling the value targets.
         "ACTOR_scaled_value_targets_H_B",
-        "ACTOR_L_logp_H_B",
         "ACTOR_value_targets_pct95_ema",
         "ACTOR_value_targets_pct5_ema",
+
+        # Gradients.
         "ACTOR_gradients_maxabs",
         "ACTOR_gradients_clipped_by_glob_norm_maxabs",
     ]
@@ -143,9 +145,12 @@ def summarize_critic_train_results(*, tbx_writer, step, actor_critic_train_resul
         "VALUE_TARGETS_H_B",
         "VALUE_TARGETS_symlog_H_B",
 
+        # Loss terms.
         "CRITIC_L_total",
-        "CRITIC_L_neg_logp_of_value_targets_H_B",
-        "CRITIC_L_slow_critic_regularization_H_B",
+        "CRITIC_L_neg_logp_of_value_targets",
+        "CRITIC_L_slow_critic_regularization",
+
+        # Gradients.
         "CRITIC_gradients_maxabs",
         "CRITIC_gradients_clipped_by_glob_norm_maxabs",
     ]
@@ -159,7 +164,6 @@ def summarize_dreamed_eval_trajectory_vs_samples(
     step,
     dream_data,
     sample,
-    batch_size_B,
     burn_in_T,
     dreamed_T,
     dreamer_model,
@@ -167,8 +171,8 @@ def summarize_dreamed_eval_trajectory_vs_samples(
 ):
     # Obs MSE.
     dreamed_obs = reconstruct_obs_from_h_and_z(
-        h_t1_to_Tp1=dream_data["h_states_t1_to_Tp1"],
-        z_t1_to_T=dream_data["z_states_prior_t1_to_T"],
+        h_t0_to_H=dream_data["h_states_t0_to_H_B"],
+        z_t0_to_H=dream_data["z_states_prior_t0_to_H_B"],
         dreamer_model=dreamer_model,
         obs_dims_shape=sample["obs"].shape[2:],
     )
@@ -178,7 +182,7 @@ def summarize_dreamed_eval_trajectory_vs_samples(
         step=step,
         computed_float_obs_B_T_dims=dreamed_obs,
         sampled_obs_B_T_dims=sample["obs"][:, burn_in_T:burn_in_T + dreamed_T],
-        descr_prefix="EVAL",
+        descr_prefix="EVALUATION",
         descr_obs=f"dreamed_prior_H{dreamed_T}",
         symlog_obs=symlog_obs,
     )
@@ -187,9 +191,9 @@ def summarize_dreamed_eval_trajectory_vs_samples(
     _summarize_rewards(
         tbx_writer=tbx_writer,
         step=step,
-        computed_rewards_B_T=dream_data["rewards_dreamed_t1_to_T"],
-        sampled_rewards_B_T=sample["rewards"][:, burn_in_T:burn_in_T + dreamed_T],
-        descr_prefix="EVAL",
+        computed_rewards=dream_data["rewards_dreamed_t1_to_T"],
+        sampled_rewards=sample["rewards"][:, burn_in_T:burn_in_T + dreamed_T],
+        descr_prefix="EVALUATION",
         descr_reward=f"dreamed_prior_H{dreamed_T}",
     )
 
@@ -197,12 +201,67 @@ def summarize_dreamed_eval_trajectory_vs_samples(
     _summarize_continues(
         tbx_writer=tbx_writer,
         step=step,
-        computed_continues_B_T=dream_data["continues_dreamed_t1_to_T"],
-        sampled_continues_B_T=(1.0 - sample["is_terminated"])[:, burn_in_T:burn_in_T + dreamed_T],
-        descr_prefix="EVAL",
+        computed_continues=dream_data["continues_dreamed_t0_to_H_B"],
+        sampled_continues=(1.0 - sample["is_terminated"])[:, burn_in_T:burn_in_T + dreamed_T],
+        descr_prefix="EVALUATION",
         descr_cont=f"dreamed_prior_H{dreamed_T}",
     )
     return mse_sampled_vs_dreamed_obs
+
+
+def summarize_sampling_and_replay_buffer(
+    *,
+    tbx_writer,
+    step,
+    replay_buffer,
+    sampler_metrics,
+    print_=False,
+):
+    episodes_in_buffer = replay_buffer.get_num_episodes()
+    ts_in_buffer = replay_buffer.get_num_timesteps()
+    replayed_steps = replay_buffer.get_sampled_timesteps()
+
+    # Summarize buffer length.
+    tbx_writer.add_scalar(
+        "BUFFER_size_num_episodes", episodes_in_buffer, global_step=step
+    )
+    tbx_writer.add_scalar(
+        "BUFFER_size_timesteps", ts_in_buffer, global_step=step
+    )
+
+    # Summarize episode returns.
+    episode_returns = []
+    episode_return_mean = None
+    if sampler_metrics.get("episode_lengths"):
+        episode_lengths = list(sampler_metrics["episode_lengths"])
+        episode_length_mean = np.mean(episode_lengths)
+        episode_returns = list(sampler_metrics["episode_returns"])
+        episode_return_mean = np.mean(episode_returns)
+
+        tbx_writer.add_scalar(
+            "SAMPLER_episode_length_mean", episode_length_mean, global_step=step
+        )
+        tbx_writer.add_scalar(
+            "SAMPLER_episode_return_mean", episode_return_mean, global_step=step
+        )
+        # Summarize actions taken.
+        tbx_writer.add_histogram(
+            "SAMPLER_actions_taken", sampler_metrics["actions"], global_step=step
+        )
+
+    if print_:
+        print(f"SAMPLE: ts={sampler_metrics['ts_taken']} (total={step}); ", end="")
+        if episode_return_mean is not None:
+            print(f"avg(R)={episode_return_mean:.4f}; ", end="")
+        else:
+            print(f"avg(R)=[no episodes completed]; ", end="")
+        print(f"Rs={episode_returns}; ")
+
+        print(
+            f"BUFFER: ts replayed={replayed_steps}; "
+            f"ts total={ts_in_buffer}; "
+            f"episodes total={episodes_in_buffer}; "
+        )
 
 
 def summarize_world_model_train_results(*, tbx_writer, step, world_model_train_results):
@@ -215,22 +274,28 @@ def summarize_world_model_train_results(*, tbx_writer, step, world_model_train_r
         # Learned initial state.
         "WORLD_MODEL_learned_initial_h",
 
-        # Losses.
+        # Loss terms.
+        # Prediction loss.
         "WORLD_MODEL_L_prediction_B_T",
         "WORLD_MODEL_L_prediction",
+        # ----
         "WORLD_MODEL_L_decoder_B_T",
         "WORLD_MODEL_L_decoder",
         "WORLD_MODEL_L_reward_B_T",
         "WORLD_MODEL_L_reward",
         "WORLD_MODEL_L_continue_B_T",
         "WORLD_MODEL_L_continue",
+        # ----
 
+        # Dynamics loss.
         "WORLD_MODEL_L_dynamics_B_T",
         "WORLD_MODEL_L_dynamics",
 
+        # Representation loss.
         "WORLD_MODEL_L_representation_B_T",
         "WORLD_MODEL_L_representation",
 
+        # TOTAL loss.
         "WORLD_MODEL_L_total_B_T",
         "WORLD_MODEL_L_total",
 
@@ -320,19 +385,17 @@ def _summarize_rewards(
     *,
     tbx_writer,
     step,
-    computed_rewards_B_T,
-    sampled_rewards_B_T,
+    computed_rewards,
+    sampled_rewards,
     descr_prefix=None,
     descr_reward,
 ):
     descr_prefix = (descr_prefix + "_") if descr_prefix else ""
     mse_sampled_vs_computed_rewards = tf.losses.mse(
-        tf.expand_dims(computed_rewards_B_T, axis=-1),
-        tf.expand_dims(sampled_rewards_B_T, axis=-1),
+        tf.expand_dims(computed_rewards, axis=-1),
+        tf.expand_dims(sampled_rewards, axis=-1),
     )
-    mse_sampled_vs_computed_rewards = tf.reduce_mean(
-        tf.reduce_sum(mse_sampled_vs_computed_rewards, axis=1)
-    )
+    mse_sampled_vs_computed_rewards = tf.reduce_mean(mse_sampled_vs_computed_rewards)
     tbx_writer.add_scalar(
         f"{descr_prefix}sampled_vs_{descr_reward}_rewards_mse",
         mse_sampled_vs_computed_rewards.numpy(),
@@ -344,19 +407,19 @@ def _summarize_continues(
     *,
     tbx_writer,
     step,
-    computed_continues_B_T,
-    sampled_continues_B_T,
+    computed_continues,
+    sampled_continues,
     descr_prefix=None,
     descr_cont,
 ):
     descr_prefix = (descr_prefix + "_") if descr_prefix else ""
     # Continue MSE.
     mse_sampled_vs_computed_continues = tf.losses.mse(
-        tf.expand_dims(computed_continues_B_T, axis=-1),
-        tf.expand_dims(tf.cast(sampled_continues_B_T, dtype=tf.float32), axis=-1),
+        tf.expand_dims(computed_continues, axis=-1),
+        tf.expand_dims(tf.cast(sampled_continues, dtype=tf.float32), axis=-1),
     )
     mse_sampled_vs_computed_continues = tf.reduce_mean(
-        tf.reduce_sum(mse_sampled_vs_computed_continues, axis=1)
+        mse_sampled_vs_computed_continues
     )
     tbx_writer.add_scalar(
         f"{descr_prefix}sampled_vs_{descr_cont}_continues_mse",

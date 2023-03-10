@@ -37,11 +37,12 @@ from utils.episode_replay_buffer import EpisodeReplayBuffer
 from utils.episode import Episode
 from utils.cartpole_debug import CartPoleDebug  # import registers `CartPoleDebug-v0`
 from utils.tensorboard import (
+    reconstruct_obs_from_h_and_z,
     summarize_actor_train_results,
     summarize_critic_train_results,
     summarize_dreamed_eval_trajectory_vs_samples,
     summarize_forward_train_outs_vs_samples,
-    reconstruct_obs_from_h_and_z,
+    summarize_sampling_and_replay_buffer,
     summarize_world_model_train_results,
 )
 
@@ -110,13 +111,13 @@ algo_config = (
         # integrates information over time, DreamerV2 does not use frame stacking.
         # The experiments use a single-task setup where a separate agent is trained
         # for each game. Moreover, each agent uses only a single environment instance.
-        "repeat_action_probability": 0.0,#25,  # "sticky actions" but not according to Dani's 100k configs
-        "full_action_space": False,#True,  # "full action space" but not according to Dani's 100k configs
+        "repeat_action_probability": 0.0,  # "sticky actions" but not according to Danijar's 100k configs.
+        "full_action_space": False, # "full action space" but not according to Danijar's 100k configs.
         "frameskip": 1,  # already done by MaxAndSkip wrapper: "action repeat" == 4
     } if config["is_atari"] else config.get("env_config", {}))
     .rollouts(
         num_envs_per_worker=1,
-        rollout_fragment_length=1,#TESTbatch_length_T,
+        rollout_fragment_length=1,
     )
 )
 # The vectorized gymnasium EnvRunner to collect samples of shape (B, T, ...).
@@ -137,7 +138,8 @@ if from_checkpoint is not None:
     dreamer_model = tf.keras.models.load_model(from_checkpoint)
 else:
     model_dimension = config["model_dimension"]
-    img_space = config["is_atari"] or config["env"] == "DebugImgEnv-v0"
+    img_space = len(env_runner.env.single_observation_space.shape) in [2, 3]
+    gray_scaled = img_space and len(env_runner.env.single_observation_space.shape) == 2
     world_model = WorldModel(
         model_dimension=model_dimension,
         action_space=env_runner.env.single_action_space,
@@ -146,7 +148,7 @@ else:
         encoder=CNNAtari(model_dimension=model_dimension) if img_space else MLP(model_dimension=model_dimension),
         decoder=ConvTransposeAtari(
             model_dimension=model_dimension,
-            gray_scaled=False,
+            gray_scaled=gray_scaled,
         ) if img_space else VectorDecoder(
             model_dimension=model_dimension,
             observation_space=env_runner.env.single_observation_space,
@@ -301,6 +303,12 @@ for iteration in range(1000000):
     #while iteration == 0:
     #END TEST
 
+    if iteration == 0:
+        print(
+            "Pre-filling replay buffer so it contains at least "
+            f"{batch_size_B * batch_length_T} ts (required for a single train batch)."
+        )
+
     while True:
         # Sample one round.
         done_episodes, ongoing_episodes = env_runner.sample(random_actions=False)
@@ -310,19 +318,14 @@ for iteration in range(1000000):
             len(eps) for eps in done_episodes + ongoing_episodes
         )
         env_steps += env_steps_last_sample
+        total_env_steps += env_steps_last_sample
 
         # Add ongoing and finished episodes into buffer. The buffer will automatically
         # take care of properly concatenating (by episode IDs) the different chunks of
         # the same episodes, even if they come in in separate `add()` calls.
         buffer.add(episodes=done_episodes + ongoing_episodes)
-        episodes_in_buffer = buffer.get_num_episodes()
-        ts_in_buffer = buffer.get_num_timesteps()
-        print(
-            f"\tsampled env-steps={env_steps}; "
-            f"buffer size (ts)={ts_in_buffer}; "
-            f"buffer size (episodes)={episodes_in_buffer}"
-        )
 
+        ts_in_buffer = buffer.get_num_timesteps()
         if (
             # Got to have more timesteps than warm up setting.
             ts_in_buffer > warm_up_timesteps
@@ -333,42 +336,15 @@ for iteration in range(1000000):
             ## Too much initial data goes into the buffer, then.
             #and episodes_in_buffer >= batch_size_B
         ):
+            # Summarize environment interaction and buffer data.
+            summarize_sampling_and_replay_buffer(
+                tbx_writer=tbx_writer,
+                step=total_env_steps,
+                replay_buffer=buffer,
+                sampler_metrics=env_runner.get_metrics(),
+                print_=True,
+            )
             break
-
-    # Summarize actual environment interaction data.
-    metrics = env_runner.get_metrics()
-    assert not env_runner.get_metrics()  # make sure purges env-runner buffers
-
-    # Summarize buffer length.
-    tbx_writer.add_scalar(
-        "buffer_size_num_episodes", episodes_in_buffer, global_step=total_env_steps
-    )
-    tbx_writer.add_scalar(
-        "buffer_size_timesteps", ts_in_buffer, global_step=total_env_steps
-    )
-    # Summarize episode returns.
-    if metrics.get("episode_returns"):
-        episode_return_mean = np.mean(metrics["episode_returns"])
-        print(f"\tFinished sampling episodes R={list(metrics['episode_returns'])}")
-        tbx_writer.add_scalar(
-            "ENV_episode_return_mean", episode_return_mean, global_step=total_env_steps
-        )
-
-    # Summarize actions taken.
-    actions = np.concatenate(
-        [eps.actions for eps in done_episodes + ongoing_episodes],
-        axis=0,
-    )
-    tbx_writer.add_histogram(
-        "ENV_actions_taken", actions, global_step=total_env_steps
-    )
-
-    total_env_steps += env_steps
-
-    print(
-        f"\treplayed-steps learned: {total_replayed_steps}; "
-        f"env-steps taken: {total_env_steps}"
-    )
 
     replayed_steps = 0
 
@@ -376,8 +352,6 @@ for iteration in range(1000000):
     #sample = buffer.sample(num_items=batch_size_B)
     #sample = tree.map_structure(lambda v: tf.convert_to_tensor(v), sample)
     #END TEST
-
-    print()
 
     sub_iter = 0
     while replayed_steps / env_steps_last_sample < training_ratio:
@@ -538,7 +512,7 @@ for iteration in range(1000000):
                             dreamed_a=dream_data["actions_dreamed_t0_to_H_B"][t][0],
                             dreamed_r_tp1=dream_data["rewards_dreamed_t0_to_H_B"][t+1][0],
                             dreamed_c_tp1=dream_data["continues_dreamed_t0_to_H_B"][t+1][0],
-                            value_target=actor_critic_train_results["value_targets_H_B"][t][0],
+                            value_target=actor_critic_train_results["VALUE_TARGETS_H_B"][t][0],
                             initial_h=dream_data["h_states_t0_to_H_B"][t][0],
                             as_tensor=True,
                         )
@@ -581,12 +555,15 @@ for iteration in range(1000000):
         # rewards, continues to the actually observed trajectory.
         dreamed_T = horizon_H
         print(f"\tDreaming trajectories (burn-in={burn_in_T}; H={dreamed_T}) from all 1st timesteps drawn from buffer ...")
+        start_states = dreamer_model.get_initial_state(batch_size_B=batch_size_B)
         dream_data = dreamer_model.dream_trajectory_with_burn_in(
+            start_states=start_states,
+            timesteps_burn_in=burn_in_T,
+            timesteps_H=horizon_H,
             observations=sample["obs"][:, :burn_in_T],  # use only first burn_in_T obs
             actions=sample["actions"][:, :burn_in_T + dreamed_T],  # use all actions from 0 to T (no actor)
-            initial_h=sample["h_states"][:, 0],  # use initial T=0 h-states
-            timesteps=dreamed_T,  # dream for n timesteps
-            use_sampled_actions=True,  # use sampled actions, not the actor
+            use_sampled_actions_in_dream=True,  # use sampled actions, not the actor
+            use_random_actions_in_dream=False,
         )
 
         mse_sampled_vs_dreamed_obs = summarize_dreamed_eval_trajectory_vs_samples(
@@ -594,7 +571,6 @@ for iteration in range(1000000):
             step=total_env_steps,
             dream_data=dream_data,
             sample=sample,
-            batch_size_B=batch_size_B,
             burn_in_T=burn_in_T,
             dreamed_T=dreamed_T,
             dreamer_model=dreamer_model,
@@ -616,15 +592,15 @@ for iteration in range(1000000):
             f"mean len: {mean_episode_len:.1f}"
         )
         tbx_writer.add_scalar(
-            "EVAL_mean_episode_return", mean_episode_return, global_step=total_env_steps
+            "EVALUATION_mean_episode_return", mean_episode_return, global_step=total_env_steps
         )
         tbx_writer.add_scalar(
-            "EVAL_mean_episode_length", mean_episode_len, global_step=total_env_steps
+            "EVALUATION_mean_episode_length", mean_episode_len, global_step=total_env_steps
         )
         # Summarize (best and worst) evaluation episodes.
         sorted_episodes = sorted(episodes, key=lambda e: e.get_return())
         tbx_writer.add_video(
-            f"EVAL_episode_video" + ("_best" if len(sorted_episodes) > 1 else ""),
+            f"EVALUATION_episode_video" + ("_best" if len(sorted_episodes) > 1 else ""),
             np.expand_dims(sorted_episodes[-1].render_images, axis=0),
             global_step=total_env_steps,
             fps=10,
@@ -632,7 +608,7 @@ for iteration in range(1000000):
         )
         if len(sorted_episodes) > 1:
             tbx_writer.add_video(
-                f"EVAL_episode_video_worst",
+                f"EVALUATION_episode_video_worst",
                 np.expand_dims(sorted_episodes[0].render_images, axis=0),
                 global_step=total_env_steps,
                 fps=10,
@@ -668,4 +644,4 @@ for iteration in range(1000000):
         pass
 
     # Main iteration done.
-    print("\n")
+    print()

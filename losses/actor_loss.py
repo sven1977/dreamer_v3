@@ -16,16 +16,17 @@ def actor_loss(
     entropy_scale,
     return_normalization_decay,
 ):
-    # Note: `value_targets` are already stop_gradient'd. The returned
-    # `scaled_value_targets` as well.
+    # Note: `value_targets` are NOT stop_gradient'd yet.
     # TODO: Don't stop_gradient here if advantages used for straight through backprop
     #  through dynamics (for cont. actions loss).
-    scaled_value_targets_t0_to_Hm1_B = tf.stop_gradient(compute_scaled_value_targets(
-        value_targets=value_targets,  # targets are already [t0 to H-1, B]
-        value_predictions=dream_data["values_dreamed_t0_to_H_B"][:-1],
-        actor=actor,
-        return_normalization_decay=return_normalization_decay,
-    ))
+    scaled_value_targets_t0_to_Hm1_B = tf.stop_gradient(
+        compute_scaled_value_targets(
+            value_targets=value_targets,  # targets are already [t0 to H-1, B]
+            value_predictions=dream_data["values_dreamed_t0_to_H_B"][:-1],
+            actor=actor,
+            return_normalization_decay=return_normalization_decay,
+        )
+    )
 
     # Actions actually taken in the dream.
     actions_one_hot_dreamed = tf.stop_gradient(dream_data["actions_one_hot_dreamed_t0_to_H_B"])[:-1]
@@ -74,14 +75,14 @@ def actor_loss(
         "ACTOR_scaled_value_targets_H_B": scaled_value_targets_t0_to_Hm1_B,
         "ACTOR_value_targets_pct95_ema": actor.ema_value_target_pct95,
         "ACTOR_value_targets_pct5_ema": actor.ema_value_target_pct5,
-        #"logp_loss_H_B": logp_loss_H_B,
         "ACTOR_action_entropy_H_B": entropy_H_B,
         "ACTOR_action_entropy": entropy,
 
-        "ACTOR_L_reinforce_term_H_B": L_actor_reinforce_term_H_B,
-        "ACTOR_L_reinforce_term": tf.reduce_mean(L_actor_reinforce_term_H_B),
-        "ACTOR_L_entropy_term_H_B": L_actor_action_entropy_term_H_B,
-        "ACTOR_L_entropy_term": tf.reduce_mean(L_actor_action_entropy_term_H_B),
+        # Individual loss terms.
+        "ACTOR_L_neglogp_reinforce_term_H_B": L_actor_reinforce_term_H_B,
+        "ACTOR_L_neglogp_reinforce_term": tf.reduce_mean(L_actor_reinforce_term_H_B),
+        "ACTOR_L_neg_entropy_term_H_B": L_actor_action_entropy_term_H_B,
+        "ACTOR_L_neg_entropy_term": tf.reduce_mean(L_actor_action_entropy_term_H_B),
     }
 
 
