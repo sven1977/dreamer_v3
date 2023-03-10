@@ -623,7 +623,10 @@ for iteration in range(1000000):
     if iteration != 0 and model_save_frequency_main_iters and (
         iteration % model_save_frequency_main_iters == 0
     ):
-        dreamer_model.save(f"checkpoints/dreamer_model_{iteration}")
+        try:
+            dreamer_model.save(f"checkpoints/dreamer_model_{iteration}")
+        except Exception as e:
+            print(f"ERROR: Trying to save DreamerModel!!\nError is {e}")
 
     # Try trick from https://medium.com/dive-into-ml-ai/dealing-with-memory-leak-
     # issue-in-keras-model-training-e703907a6501

@@ -133,7 +133,7 @@ class WorldModel(tf.keras.Model):
     def call(self, inputs, *args, **kwargs):
         return self.forward_inference(inputs, *args, **kwargs)
 
-    @tf.function
+    @tf.function(reduce_retracing=True)
     def forward_inference(self, previous_states, observations, is_first, training=None):
         """Performs a forward step for inference.
 
