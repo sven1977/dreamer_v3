@@ -176,12 +176,14 @@ def summarize_dreamed_eval_trajectory_vs_samples(
         dreamer_model=dreamer_model,
         obs_dims_shape=sample["obs"].shape[2:],
     )
+    t0 = burn_in_T - 1
+    tH = t0 + dreamed_T
     # Observation MSE and - if applicable - images comparisons.
     mse_sampled_vs_dreamed_obs = _summarize_obs(
         tbx_writer=tbx_writer,
         step=step,
         computed_float_obs_B_T_dims=dreamed_obs,
-        sampled_obs_B_T_dims=sample["obs"][:, burn_in_T:burn_in_T + dreamed_T],
+        sampled_obs_B_T_dims=sample["obs"][:, t0:tH+1],
         descr_prefix="EVALUATION",
         descr_obs=f"dreamed_prior_H{dreamed_T}",
         symlog_obs=symlog_obs,
@@ -191,8 +193,8 @@ def summarize_dreamed_eval_trajectory_vs_samples(
     _summarize_rewards(
         tbx_writer=tbx_writer,
         step=step,
-        computed_rewards=dream_data["rewards_dreamed_t1_to_T"],
-        sampled_rewards=sample["rewards"][:, burn_in_T:burn_in_T + dreamed_T],
+        computed_rewards=dream_data["rewards_dreamed_t0_to_H_B"],
+        sampled_rewards=sample["rewards"][:, t0:tH+1],
         descr_prefix="EVALUATION",
         descr_reward=f"dreamed_prior_H{dreamed_T}",
     )
@@ -202,7 +204,7 @@ def summarize_dreamed_eval_trajectory_vs_samples(
         tbx_writer=tbx_writer,
         step=step,
         computed_continues=dream_data["continues_dreamed_t0_to_H_B"],
-        sampled_continues=(1.0 - sample["is_terminated"])[:, burn_in_T:burn_in_T + dreamed_T],
+        sampled_continues=(1.0 - sample["is_terminated"])[:, t0:tH+1],
         descr_prefix="EVALUATION",
         descr_cont=f"dreamed_prior_H{dreamed_T}",
     )

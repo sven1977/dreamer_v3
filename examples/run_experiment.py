@@ -517,7 +517,7 @@ for iteration in range(1000000):
                             as_tensor=True,
                         )
                         tbx_writer.add_images(
-                            f"dreamed_trajectories_for_critic_actor_learning[T={t},B=0]",
+                            f"dreamed_trajectories_for_critic_actor_learning_T{t}_B0",
                             tf.expand_dims(img, axis=0).numpy(),
                             dataformats="NHWC",
                             global_step=total_env_steps,
@@ -585,18 +585,22 @@ for iteration in range(1000000):
             random_actions=False,
             with_render_data=True,
         )
-        mean_episode_len = np.mean([len(eps) for eps in episodes])
-        mean_episode_return = np.mean([eps.get_return() for eps in episodes])
-        print(
-            f"\tMean episode return: {mean_episode_return:.4f}; "
-            f"mean len: {mean_episode_len:.1f}"
-        )
-        tbx_writer.add_scalar(
-            "EVALUATION_mean_episode_return", mean_episode_return, global_step=total_env_steps
-        )
-        tbx_writer.add_scalar(
-            "EVALUATION_mean_episode_length", mean_episode_len, global_step=total_env_steps
-        )
+        metrics = env_runner_evaluation.get_metrics()
+        if "episode_returns" in metrics:
+            print(
+                f"\tMean episode return: {np.mean(metrics['episode_returns']):.4f}; "
+                f"mean len: {np.mean(metrics['episode_lengths']):.1f}"
+            )
+            tbx_writer.add_scalar(
+                "EVALUATION_mean_episode_return",
+                np.mean(metrics['episode_returns']),
+                global_step=total_env_steps,
+            )
+            tbx_writer.add_scalar(
+                "EVALUATION_mean_episode_length",
+                np.mean(metrics['episode_lengths']),
+                global_step=total_env_steps,
+            )
         # Summarize (best and worst) evaluation episodes.
         sorted_episodes = sorted(episodes, key=lambda e: e.get_return())
         tbx_writer.add_video(

@@ -257,7 +257,6 @@ class EnvRunnerV2:
                 self._split_by_env(rewards),
                 self._split_by_env(terminateds),
                 self._split_by_env(truncateds),
-                #self._split_by_env(states),
             )):
                 s = {k: s[i] for k, s in states.items()}
                 # The last entry in self.observations[i] is already the reset
@@ -272,10 +271,8 @@ class EnvRunnerV2:
                     )
                     # Reset h-states to all zeros b/c we are starting a new episode.
                     if self.model is not None:
-                        states[i] = tree.map_structure(
-                            lambda s: s.numpy(),
-                            self.model.get_initial_state(batch_size_B=0),
-                        )
+                        for k, v in self.model.get_initial_state(batch_size_B=0).items():
+                            states[k][i] = v.numpy()
                     else:
                         raise NotImplementedError
                         #states[i] = 0.0
@@ -347,8 +344,11 @@ class EnvRunnerV2:
         if self.model is not None:
             states = tree.map_structure(
                 lambda s: s.numpy(),
-                self.model.get_initial_states(batch_size=self.num_envs),
+                self.model.get_initial_state(
+                    batch_size_B=self.num_envs
+                ),
             )
+            is_first = np.ones((self.num_envs,), dtype=np.float32)
         else:
             raise NotImplementedError
             states = np.array([0.0] * self.num_envs)
@@ -387,12 +387,9 @@ class EnvRunnerV2:
             else:
                 # Sample.
                 if explore:
-                    a, h = self.model(
-                        obs,
-                        initial_h=tf.convert_to_tensor(states),
-                    )
-                    actions = a.numpy()
-                    states = h.numpy()
+                    actions, states = self.model(states, obs, is_first)
+                    actions = actions.numpy()
+                    states = tree.map_structure(lambda s: s.numpy(), states)
                 # Greedy.
                 else:
                     raise NotImplementedError
@@ -409,6 +406,7 @@ class EnvRunnerV2:
                 self._split_by_env(terminateds),
                 self._split_by_env(truncateds),
             )):
+                s = {k: s[i] for k, s in states.items()}
                 # The last entry in self.observations[i] is already the reset
                 # obs of the new episode.
                 if term or trunc:
@@ -418,24 +416,22 @@ class EnvRunnerV2:
                         infos["final_observation"][i],
                         a,
                         r,
-                        state={k: s[i] for k, s in states.items()},
+                        state=s,
                         is_terminated=True,
                     )
                     # Reset h-states to all zeros b/c we are starting a new episode.
                     if self.model is not None:
-                        states[i] = tree.map_structure(
-                            lambda s: s.numpy(),
-                            self.model.get_initial_states(batch_size=0),
-                        )
+                        for k, v in self.model.get_initial_state(batch_size_B=0).items():
+                            states[k][i] = v.numpy()
                     else:
                         raise NotImplementedError
-                        #states[i] = 0.0
-
+                        # states[i] = 0.0
+                    is_first[i] = True
                     done_episodes_to_return.append(episodes[i])
 
                     episodes[i] = Episode(
                         initial_observation=o,
-                        initial_state=states[i],
+                        initial_state=s,
                         initial_render_image=render_images[i],
                     )
                 else:
@@ -447,10 +443,12 @@ class EnvRunnerV2:
                         is_terminated=False,
                         render_image=render_images[i],
                     )
+                    is_first[i] = False
 
             if eps >= num_episodes:
                 break
 
+        self.done_episodes_for_metrics.extend(done_episodes_to_return)
         self.ts_since_last_metrics += sum(len(eps) for eps in done_episodes_to_return)
 
         return done_episodes_to_return

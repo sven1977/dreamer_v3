@@ -207,7 +207,7 @@ class DreamerModel(tf.keras.Model):
 
         return ret
 
-    #@tf.function
+    @tf.function
     def dream_trajectory_with_burn_in(
         self,
         *,
@@ -235,7 +235,7 @@ class DreamerModel(tf.keras.Model):
             states = self.world_model.forward_inference(
                 previous_states=states,
                 observations=observations[:, i],
-                is_first=tf.fill((), 1.0 if i == 0 else 0.0),
+                is_first=tf.fill((B,), 1.0 if i == 0 else 0.0),
             )
             states["a_one_hot"] = actions_one_hot[:, i]
 
@@ -260,7 +260,7 @@ class DreamerModel(tf.keras.Model):
 
             # Compute next dreamed action or use sampled one or random one.
             if use_sampled_actions_in_dream:
-                a_one_hot = actions[:, timesteps_burn_in + j]
+                a_one_hot = actions_one_hot[:, timesteps_burn_in + j]
             elif use_random_actions_in_dream:
                 a = tf.random.randint((B,), 0, self.action_space.n, tf.int64)
                 a_one_hot = tf.one_hot(a, depth=self.action_space.n)
@@ -298,8 +298,8 @@ class DreamerModel(tf.keras.Model):
         ret = {
             "h_states_t0_to_H_B": h_states_t0_to_H_B,
             "z_states_prior_t0_to_H_B": z_states_prior_t0_to_H_B,
-            "rewards_dreamed_t0_to_H_B": tf.reshape(r_dreamed_t0_to_HxB, (T, B)),
-            "continues_dreamed_t0_to_H_B": tf.reshape(c_dreamed_t0_to_HxB, (T, B)),
+            "rewards_dreamed_t0_to_H_B": tf.reshape(r_dreamed_t0_to_HxB, (-1, B)),
+            "continues_dreamed_t0_to_H_B": tf.reshape(c_dreamed_t0_to_HxB, (-1, B)),
         }
 
         if use_sampled_actions_in_dream:
