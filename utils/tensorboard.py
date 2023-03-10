@@ -377,6 +377,7 @@ def _summarize_obs(
             f"{descr_prefix}sampled_vs_{descr_obs}_videos",
             sampled_vs_computed_images.numpy(),
             dataformats="NTHWC",
+            fps=15,
             global_step=step,
         )
 

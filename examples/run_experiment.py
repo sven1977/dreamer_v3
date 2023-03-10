@@ -607,7 +607,7 @@ for iteration in range(1000000):
             f"EVALUATION_episode_video" + ("_best" if len(sorted_episodes) > 1 else ""),
             np.expand_dims(sorted_episodes[-1].render_images, axis=0),
             global_step=total_env_steps,
-            fps=10,
+            fps=15,
             dataformats="NTHWC",
         )
         if len(sorted_episodes) > 1:
@@ -615,7 +615,7 @@ for iteration in range(1000000):
                 f"EVALUATION_episode_video_worst",
                 np.expand_dims(sorted_episodes[0].render_images, axis=0),
                 global_step=total_env_steps,
-                fps=10,
+                fps=15,
                 dataformats="NTHWC",
             )
 
