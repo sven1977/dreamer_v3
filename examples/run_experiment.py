@@ -634,7 +634,7 @@ for iteration in range(1000000):
         total_train_steps % gc_frequency_train_steps == 0
     ):
         gc.collect()
-        # tf.keras.backend.clear_session()  # <- this seems to be not needed.
+        #tf.keras.backend.clear_session()  # <- this seems to be not needed.
 
     # Log GPU memory consumption.
     try:
