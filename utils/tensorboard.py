@@ -14,7 +14,7 @@ def _summarize(tbx_writer, step, keys_to_log, results):
     for k in keys_to_log:
         if results[k].shape == ():
             tbx_writer.add_scalar(k, results[k], global_step=step)
-        if results[k].shape == ():
+        else:
             tbx_writer.add_histogram(k, results[k], global_step=step)
 
 
