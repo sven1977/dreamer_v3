@@ -208,10 +208,10 @@ class EnvRunnerV2:
         else:
             obs = np.stack([eps.observations[-1] for eps in self.episodes])
             states = {
-                k: np.stack(
+                k: np.stack([
                     initial_states[k][i] if eps.states is None else eps.states[k]
                     for i, eps in enumerate(self.episodes)
-                )
+                ])
                 for k in initial_states.keys()
             }
             is_first = np.zeros((self.num_envs,), dtype=np.float32)

@@ -170,7 +170,7 @@ def summarize_dreamed_eval_trajectory_vs_samples(
     symlog_obs: bool = True,
 ):
     # Obs MSE.
-    dreamed_obs = reconstruct_obs_from_h_and_z(
+    dreamed_obs_H_B = reconstruct_obs_from_h_and_z(
         h_t0_to_H=dream_data["h_states_t0_to_H_B"],
         z_t0_to_H=dream_data["z_states_prior_t0_to_H_B"],
         dreamer_model=dreamer_model,
@@ -182,7 +182,10 @@ def summarize_dreamed_eval_trajectory_vs_samples(
     mse_sampled_vs_dreamed_obs = _summarize_obs(
         tbx_writer=tbx_writer,
         step=step,
-        computed_float_obs_B_T_dims=dreamed_obs,
+        # Have to transpose b/c dreamed data is time-major.
+        computed_float_obs_B_T_dims=tf.transpose(
+            dreamed_obs, perm=[1, 0] + dreamed_obs.shape[2:]
+        ),
         sampled_obs_B_T_dims=sample["obs"][:, t0:tH+1],
         descr_prefix="EVALUATION",
         descr_obs=f"dreamed_prior_H{dreamed_T}",

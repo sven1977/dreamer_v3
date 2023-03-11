@@ -13,4 +13,4 @@ frozenlake-4x4-experiment:
   summary_frequency_train_steps: 10
   evaluation_frequency_main_iters:  0
   evaluation_num_episodes: 0
-  model_save_frequency_main_iters: 1000000
+  model_save_frequency_main_iters: 0
