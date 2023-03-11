@@ -212,13 +212,18 @@ class WorldModel(tf.keras.Model):
         # Unfold time dimension.
         encoder_out = tf.reshape(encoder_out, shape=[B, T] + encoder_out.shape.as_list()[1:])
         # Make time major for faster upcoming loop.
-        encoder_out = tf.transpose(encoder_out, perm=[1, 0] + list(range(2, len(encoder_out.shape.as_list()))))
+        encoder_out = tf.transpose(
+            encoder_out, perm=[1, 0] + list(range(2, len(encoder_out.shape.as_list())))
+        )
         # encoder_out=[T, B, ...]
 
         initial_states = self.get_initial_state(batch_size_B=B)
 
         # Make actions and `is_first` time-major.
-        actions_one_hot = tf.transpose(actions_one_hot, perm=[1, 0] + list(range(2, len(actions_one_hot.shape.as_list()))))
+        actions_one_hot = tf.transpose(
+            actions_one_hot,
+            perm=[1, 0] + list(range(2, len(actions_one_hot.shape.as_list()))),
+        )
         is_first = tf.transpose(is_first, perm=[1, 0])
 
         # Loop through the T-axis of our samples and perform one computation step at

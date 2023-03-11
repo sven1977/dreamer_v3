@@ -184,7 +184,8 @@ def summarize_dreamed_eval_trajectory_vs_samples(
         step=step,
         # Have to transpose b/c dreamed data is time-major.
         computed_float_obs_B_T_dims=tf.transpose(
-            dreamed_obs_T_B, perm=[1, 0] + dreamed_obs_T_B.shape[2:]
+            dreamed_obs_T_B,
+            perm=[1, 0] + list(range(2, len(dreamed_obs_T_B.shape.as_list()))),
         ),
         sampled_obs_B_T_dims=sample["obs"][:, t0:tH+1],
         descr_prefix="EVALUATION",
