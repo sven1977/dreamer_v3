@@ -46,6 +46,11 @@ from utils.tensorboard import (
     summarize_world_model_train_results,
 )
 
+# Set GPU to grow in memory (so tf does not block all GPU mem).
+gpus = tf.config.list_physical_devices('GPU')
+for gpu in gpus:
+    tf.config.experimental.set_memory_growth(gpu, True)
+
 parser = argparse.ArgumentParser()
 parser.add_argument(
     "--config",

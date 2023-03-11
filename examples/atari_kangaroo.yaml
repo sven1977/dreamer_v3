@@ -1,0 +1,14 @@
+atari-pong-experiment:
+  env: ALE/Kangaroo-v5
+  is_atari: true
+
+  model_dimension: S
+
+  training_ratio: 1024
+
+  summary_frequency_train_steps: 30
+  evaluation_frequency_main_iters: 1000
+  evaluation_num_episodes: 2
+  model_save_frequency_main_iters: 10000
+
+  gc_frequency_train_steps: 10  # Try this to be able to run 2 atari jobs at same time on V100
