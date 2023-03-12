@@ -87,31 +87,31 @@ def world_model_prediction_losses(
 @tf.function
 def world_model_dynamics_and_representation_loss(forward_train_outs, B, T):
     # Actual distribution over stochastic internal states (z) produced by the encoder.
-    z_probs_encoder_BxT = forward_train_outs["z_probs_encoder_BxT"]
-    z_distr_encoder_BxT = tfp.distributions.Independent(
-        tfp.distributions.OneHotCategorical(probs=z_probs_encoder_BxT),
+    z_posterior_probs_BxT = forward_train_outs["z_posterior_probs_BxT"]
+    z_posterior_distr_BxT = tfp.distributions.Independent(
+        tfp.distributions.OneHotCategorical(probs=z_posterior_probs_BxT),
         reinterpreted_batch_ndims=1,
     )
 
     # Actual distribution over stochastic internal states (z) produced by the
     # dynamics network.
-    z_probs_dynamics_BxT = forward_train_outs["z_probs_dynamics_BxT"]
-    z_distr_dynamics_BxT = tfp.distributions.Independent(
-        tfp.distributions.OneHotCategorical(probs=z_probs_dynamics_BxT),
+    z_prior_probs_BxT = forward_train_outs["z_prior_probs_BxT"]
+    z_prior_distr_BxT = tfp.distributions.Independent(
+        tfp.distributions.OneHotCategorical(probs=z_prior_probs_BxT),
         reinterpreted_batch_ndims=1,
     )
 
     # Stop gradient for encoder's z-outputs:
-    sg_z_distr_encoder_BxT = tfp.distributions.Independent(
+    sg_z_posterior_distr_BxT = tfp.distributions.Independent(
         tfp.distributions.OneHotCategorical(
-            probs=tf.stop_gradient(z_probs_encoder_BxT)
+            probs=tf.stop_gradient(z_posterior_probs_BxT)
         ),
         reinterpreted_batch_ndims=1,
     )
     # Stop gradient for dynamics model's z-outputs:
-    sg_z_distr_dynamics_BxT = tfp.distributions.Independent(
+    sg_z_prior_distr_BxT = tfp.distributions.Independent(
         tfp.distributions.OneHotCategorical(
-            probs=tf.stop_gradient(z_probs_dynamics_BxT)
+            probs=tf.stop_gradient(z_prior_probs_BxT)
         ),
         reinterpreted_batch_ndims=1,
     )
@@ -128,7 +128,7 @@ def world_model_dynamics_and_representation_loss(forward_train_outs, B, T):
         ## This is the same thing that a tfp.distributions.Independent() distribution
         ## with an underlying set of different Categoricals would do.
         #tf.reduce_sum(
-        tfp.distributions.kl_divergence(sg_z_distr_encoder_BxT, z_distr_dynamics_BxT),
+        tfp.distributions.kl_divergence(sg_z_posterior_distr_BxT, z_prior_distr_BxT),
         #    axis=-1,
         #),
     )
@@ -141,7 +141,7 @@ def world_model_dynamics_and_representation_loss(forward_train_outs, B, T):
         ## This is the same thing that a tfp.distributions.Independent() distribution
         ## with an underlying set of different Categoricals would do.
         #tf.reduce_sum(
-        tfp.distributions.kl_divergence(z_distr_encoder_BxT, sg_z_distr_dynamics_BxT),
+        tfp.distributions.kl_divergence(z_posterior_distr_BxT, sg_z_prior_distr_BxT),
         #    axis=-1,
         #),
     )

@@ -7,8 +7,8 @@ import gymnasium as gym
 import numpy as np
 import tensorflow as tf
 
-from models.components.actor_network import ActorNetwork
-from models.components.critic_network import CriticNetwork
+from models.actor_network import ActorNetwork
+from models.critic_network import CriticNetwork
 from utils.symlog import inverse_symlog
 
 

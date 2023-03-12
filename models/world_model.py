@@ -7,7 +7,6 @@ from typing import Optional
 
 import gymnasium as gym
 import tensorflow as tf
-import tensorflow_probability as tfp
 
 from models.components.continue_predictor import ContinuePredictor
 from models.components.dynamics_predictor import DynamicsPredictor
@@ -15,7 +14,7 @@ from models.components.mlp import MLP
 from models.components.representation_layer import RepresentationLayer
 from models.components.reward_predictor import RewardPredictor
 from models.components.sequence_model import SequenceModel
-from utils.model_sizes import get_dense_hidden_units, get_gru_units
+from utils.model_sizes import get_gru_units
 from utils.symlog import symlog
 
 
@@ -70,7 +69,6 @@ class WorldModel(tf.keras.Model):
         self.symlog_obs = symlog_obs
         self.action_space = action_space
 
-        # RSSM (Recurrent State-Space Model)
         # Encoder + z-generator (x, h -> z).
         self.encoder = encoder
 
@@ -231,8 +229,8 @@ class WorldModel(tf.keras.Model):
         # on the current z(t), but z(t) depends on the current sequence model's output
         # h(t).
         z_t0_to_T = [initial_states["z"]]
-        z_probs_encoder = []
-        z_probs_dynamics = []
+        z_posterior_probs = []
+        z_prior_probs = []
         h_t0_to_T = [initial_states["h"]]
         for t in range(self.batch_length_T):
             # If first, mask it with initial state/actions.
@@ -258,12 +256,12 @@ class WorldModel(tf.keras.Model):
                 return_z_probs=True,
             )
             # z_t=[B, num_categoricals, num_classes]
-            z_probs_encoder.append(z_probs)
+            z_posterior_probs.append(z_probs)
             z_t0_to_T.append(z_t)
 
             # Compute the predicted z_t (z^) using the dynamics model.
             _, z_probs = self.dynamics_predictor(h_t, return_z_probs=True)
-            z_probs_dynamics.append(z_probs)
+            z_prior_probs.append(z_probs)
 
         # Stack at time dimension to yield: [B, T, ...].
         h_t1_to_T = tf.stack(h_t0_to_T[1:], axis=1)
@@ -271,17 +269,17 @@ class WorldModel(tf.keras.Model):
 
         # Fold time axis to retrieve the final (loss ready) Independent distribution
         # (over `num_categoricals` Categoricals).
-        z_probs_encoder = tf.stack(z_probs_encoder, axis=1)
-        z_probs_encoder = tf.reshape(
-            z_probs_encoder,
-            shape=[-1] + z_probs_encoder.shape.as_list()[2:],
+        z_posterior_probs = tf.stack(z_posterior_probs, axis=1)
+        z_posterior_probs = tf.reshape(
+            z_posterior_probs,
+            shape=[-1] + z_posterior_probs.shape.as_list()[2:],
         )
         # Fold time axis to retrieve the final (loss ready) Independent distribution
         # (over `num_categoricals` Categoricals).
-        z_probs_dynamics = tf.stack(z_probs_dynamics, axis=1)
-        z_probs_dynamics = tf.reshape(
-            z_probs_dynamics,
-            shape=[-1] + z_probs_dynamics.shape.as_list()[2:],
+        z_prior_probs = tf.stack(z_prior_probs, axis=1)
+        z_prior_probs = tf.reshape(
+            z_prior_probs,
+            shape=[-1] + z_prior_probs.shape.as_list()[2:],
         )
 
         # Fold time dimension for parallelization of all dependent predictions:
@@ -310,8 +308,8 @@ class WorldModel(tf.keras.Model):
             "rewards_BxT": rewards,
             "continue_distribution_BxT": continue_distribution,
             "continues_BxT": continues,
-            "z_probs_encoder_BxT": z_probs_encoder,
-            "z_probs_dynamics_BxT": z_probs_dynamics,
+            "z_posterior_probs_BxT": z_posterior_probs,
+            "z_prior_probs_BxT": z_prior_probs,
             # Deterministic, continuous h-states (t1 to T).
             "h_states_BxT": h_BxT,
             # Sampled, discrete z-states (t1 to T).
