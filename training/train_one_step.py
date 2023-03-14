@@ -6,6 +6,7 @@ https://arxiv.org/pdf/2301.04104v1.pdf
 import tensorflow as tf
 from losses.actor_loss import actor_loss
 from losses.critic_loss import critic_loss, compute_value_targets
+from losses.disagree_loss import disagree_loss
 from losses.world_model_losses import (
     world_model_dynamics_and_representation_loss,
     world_model_prediction_losses,
@@ -20,7 +21,6 @@ def train_world_model_one_step(
     batch_length_T,
     grad_clip,
     world_model,
-    optimizer,
 ):
     # Compute losses.
     with tf.GradientTape() as tape:
@@ -81,7 +81,9 @@ def train_world_model_one_step(
     # Clip all gradients by global norm.
     clipped_gradients, _ = tf.clip_by_global_norm(gradients, grad_clip)
     # Apply gradients to our model.
-    optimizer.apply_gradients(zip(clipped_gradients, world_model.trainable_variables))
+    world_model.optimizer.apply_gradients(
+        zip(clipped_gradients, world_model.trainable_variables)
+    )
 
     return {
         # Forward train results.
@@ -127,19 +129,19 @@ def train_world_model_one_step(
 @tf.function
 def train_actor_and_critic_one_step(
     *,
-    forward_train_outs,
+    world_model_forward_train_outs,
     is_terminated,
     horizon_H,
     gamma,
     lambda_,
     actor_grad_clip,
     critic_grad_clip,
+    disagree_grad_clip,
     dreamer_model,
-    actor_optimizer,
-    critic_optimizer,
     entropy_scale,
     return_normalization_decay,
     train_actor=True,
+    use_curiosity=False,
 ):
     # Compute losses.
     with tf.GradientTape(persistent=True) as tape:
@@ -147,17 +149,48 @@ def train_actor_and_critic_one_step(
         # computed during world model training.
         dream_data = dreamer_model.dream_trajectory(
             start_states={
-                "h": forward_train_outs["h_states_BxT"],
-                "z": forward_train_outs["z_states_BxT"],
+                "h": world_model_forward_train_outs["h_states_BxT"],
+                "z": world_model_forward_train_outs["z_states_BxT"],
             },
             start_is_terminated=is_terminated,
             timesteps_H=horizon_H,
             gamma=gamma,
         )
+        # Compute intrinsic rewards and add them to the dream data.
+        ri_t0_to_H_B = None
+        if use_curiosity:
+            Hp1xBxT = (horizon_H + 1) * tf.shape(dream_data["h_states_t0_to_H_B"])[1]
+            h = tf.reshape(
+                dream_data["h_states_t0_to_H_B"],
+                shape=(Hp1xBxT, -1),
+            )
+            z = tf.reshape(
+                dream_data["z_states_prior_t0_to_H_B"],
+                shape=[Hp1xBxT] + (
+                    dream_data["z_states_prior_t0_to_H_B"].shape.as_list()[2:]
+                ),
+            )
+            a_one_hot = tf.reshape(
+                dream_data["actions_one_hot_dreamed_t0_to_H_B"],
+                shape=(Hp1xBxT, -1)
+            )
+            disag_forward_train_outs = dreamer_model.disagree_nets.forward_train(
+                h=h,
+                z=z,
+                a_one_hot=a_one_hot,
+            )
+            del h
+            del z
+            del a_one_hot
+            ri_t0_to_H_B = dreamer_model.disagree_nets.compute_intrinsic_rewards(
+                dream_data=dream_data,
+                forward_train_out=disag_forward_train_outs,
+            )
 
         value_targets = compute_value_targets(
             # Learn critic in symlog'd space.
             rewards_H_BxT=dream_data["rewards_dreamed_t0_to_H_B"],
+            intrinsic_rewards_H_BxT=ri_t0_to_H_B,
             continues_H_BxT=dream_data["continues_dreamed_t0_to_H_B"],
             value_predictions_H_BxT=dream_data["values_dreamed_t0_to_H_B"],
             gamma=gamma,
@@ -171,6 +204,11 @@ def train_actor_and_critic_one_step(
                 actor=dreamer_model.actor,
                 entropy_scale=entropy_scale,
                 return_normalization_decay=return_normalization_decay
+            )
+        if use_curiosity:
+            L_disagree = disagree_loss(
+                dream_data=dream_data,
+                forward_train_out=disag_forward_train_outs,
             )
 
     results = critic_loss_results.copy()
@@ -187,36 +225,53 @@ def train_actor_and_critic_one_step(
             L_actor,
             dreamer_model.actor.trainable_variables,
         )
-
     critic_gradients = tape.gradient(
         L_critic,
         dreamer_model.critic.trainable_variables,
     )
+    if use_curiosity:
+        results["DISAGREE_L_total"] = L_disagree
+        results["DISAGREE_intrinsic_rewards_H_B"] = ri_t0_to_H_B
+        results["DISAGREE_intrinsic_rewards"] = tf.reduce_mean(ri_t0_to_H_B)
+        disagree_gradients = tape.gradient(
+            L_disagree,
+            dreamer_model.disagree_nets.trainable_variables,
+        )
 
-    # Clip all gradients.
+    # Clip all gradients by global norm.
     if train_actor:
-        # Clip all gradients by global norm.
         clipped_actor_gradients, _ = tf.clip_by_global_norm(
             actor_gradients, actor_grad_clip
         )
         results["ACTOR_gradients_maxabs"] = tf.reduce_max([tf.reduce_max(tf.math.abs(g)) for g in actor_gradients])
         results["ACTOR_gradients_clipped_by_glob_norm_maxabs"] = tf.reduce_max([tf.reduce_max(tf.math.abs(g)) for g in clipped_actor_gradients])
-
-    # Clip all gradients by global norm.
     clipped_critic_gradients, _ = tf.clip_by_global_norm(
         critic_gradients, critic_grad_clip
     )
     results["CRITIC_gradients_maxabs"] = tf.reduce_max([tf.reduce_max(tf.math.abs(g)) for g in critic_gradients])
     results["CRITIC_gradients_clipped_by_glob_norm_maxabs"] = tf.reduce_max([tf.reduce_max(tf.math.abs(g)) for g in clipped_critic_gradients])
+    if use_curiosity:
+        clipped_disagree_gradients, _ = tf.clip_by_global_norm(
+            disagree_gradients, disagree_grad_clip
+        )
+        results["DISAGREE_gradients_maxabs"] = tf.reduce_max([tf.reduce_max(tf.math.abs(g)) for g in disagree_gradients])
+        results["DISAGREE_gradients_clipped_by_glob_norm_maxabs"] = tf.reduce_max([tf.reduce_max(tf.math.abs(g)) for g in clipped_disagree_gradients])
 
     # Apply gradients to our models.
     if train_actor:
-        actor_optimizer.apply_gradients(
+        dreamer_model.actor.optimizer.apply_gradients(
             zip(clipped_actor_gradients, dreamer_model.actor.trainable_variables)
         )
-    critic_optimizer.apply_gradients(
+    dreamer_model.critic.optimizer.apply_gradients(
         zip(clipped_critic_gradients, dreamer_model.critic.trainable_variables)
     )
+    if use_curiosity:
+        dreamer_model.disagree_nets.optimizer.apply_gradients(
+            zip(
+                clipped_disagree_gradients,
+                dreamer_model.disagree_nets.trainable_variables,
+            )
+        )
 
     # Update EMA weights of the critic.
     dreamer_model.critic.update_ema()

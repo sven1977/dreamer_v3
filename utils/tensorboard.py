@@ -158,6 +158,23 @@ def summarize_critic_train_results(*, tbx_writer, step, actor_critic_train_resul
     _summarize(tbx_writer, step, keys_to_log, actor_critic_train_results)
 
 
+def summarize_disagree_train_results(*, tbx_writer, step, actor_critic_train_results):
+    keys_to_log = [
+        # Loss terms.
+        "DISAGREE_L_total",
+
+        # Intrinsic rewards.
+        "DISAGREE_intrinsic_rewards_H_B",
+        "DISAGREE_intrinsic_rewards",
+
+        # Gradients.
+        "DISAGREE_gradients_maxabs",
+        "DISAGREE_gradients_clipped_by_glob_norm_maxabs",
+    ]
+
+    _summarize(tbx_writer, step, keys_to_log, actor_critic_train_results)
+
+
 def summarize_dreamed_eval_trajectory_vs_samples(
     *,
     tbx_writer,

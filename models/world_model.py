@@ -117,6 +117,9 @@ class WorldModel(tf.keras.Model):
         # Decoder (h, z -> x^).
         self.decoder = decoder
 
+        # Optimizer.
+        self.optimizer = tf.keras.optimizers.Adam(learning_rate=1e-4, epsilon=1e-8)
+
     def get_initial_state(self, batch_size_B):
         h = tf.repeat(tf.math.tanh(self.initial_h), batch_size_B or 1, axis=0)
         # Use the mode, NOT a sample for the initial z-state.

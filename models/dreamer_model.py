@@ -9,6 +9,8 @@ import tensorflow as tf
 
 from models.actor_network import ActorNetwork
 from models.critic_network import CriticNetwork
+from models.disagree_networks import DisagreeNetworks
+from utils.model_sizes import get_num_curiosity_nets
 from utils.symlog import inverse_symlog
 
 
@@ -21,6 +23,8 @@ class DreamerModel(tf.keras.Model):
             model_dimension: str = "XS",
             action_space: gym.Space,
             world_model,
+            use_curiosity: bool = False,
+            intrinsic_rewards_scale: float = 0.1,
     ):
         """TODO
 
@@ -32,10 +36,10 @@ class DreamerModel(tf.keras.Model):
         super().__init__()
 
         self.model_dimension = model_dimension
+        self.action_space = action_space
+        self.use_curiosity = use_curiosity
 
         self.world_model = world_model
-
-        self.action_space = action_space
 
         self.actor = ActorNetwork(
             action_space=self.action_space,
@@ -44,6 +48,14 @@ class DreamerModel(tf.keras.Model):
         self.critic = CriticNetwork(
             model_dimension=self.model_dimension,
         )
+
+        self.disagree_nets = None
+        if self.use_curiosity:
+            self.disagree_nets = DisagreeNetworks(
+                num_networks=8,
+                model_dimension=self.model_dimension,
+                intrinsic_rewards_scale=intrinsic_rewards_scale,
+            )
 
     def call(self, inputs, *args, **kwargs):
         return self.forward_inference(inputs, *args, **kwargs)

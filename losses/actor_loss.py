@@ -40,7 +40,6 @@ def actor_loss(
          ],
         axis=0,
     )
-    num_actions = logp_actions_t0_to_Hm1_B.shape[-1]
     # Log probs of actions actually taken in the dream.
     logp_actions_dreamed_t0_to_Hm1_B = tf.reduce_sum(
         actions_one_hot_dreamed * logp_actions_t0_to_Hm1_B,

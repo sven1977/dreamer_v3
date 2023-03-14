@@ -40,6 +40,7 @@ from utils.tensorboard import (
     reconstruct_obs_from_h_and_z,
     summarize_actor_train_results,
     summarize_critic_train_results,
+    summarize_disagree_train_results,
     summarize_dreamed_eval_trajectory_vs_samples,
     summarize_forward_train_outs_vs_samples,
     summarize_sampling_and_replay_buffer,
@@ -67,12 +68,13 @@ with open(args.config, "r") as f:
 print(f"Running with the following config:")
 pprint(config)
 assert len(config) == 1, "Only one experiment allowed in config yaml!"
-config = next(iter(config.values()))
+experiment_name = next(iter(config.keys()))
+config = config[experiment_name]
 
 # Create the checkpoint path, if it doesn't exist yet.
-os.makedirs("checkpoints", exist_ok=True)
+os.makedirs(f"experiments/{experiment_name}/checkpoints", exist_ok=True)
 # Create the tensorboard summary data dir.
-os.makedirs("tensorboard", exist_ok=True)
+os.makedirs(f"experiments/{experiment_name}/tensorboard", exist_ok=True)
 tbx_writer = SummaryWriter("tensorboard")
 # How many iterations do we pre-train?
 num_pretrain_iterations = config.get("num_pretrain_iterations", 0)
@@ -134,6 +136,10 @@ train_critic = config.get("train_critic", True)
 train_actor = config.get("train_actor", True)
 # Cannot train actor w/o critic.
 assert not (train_actor and not train_critic)
+# Whether to use the disagree-networks to compute intrinsic rewards for the dreamed
+# data that critic and actor learn from.
+use_curiosity = config.get("use_curiosity", False)
+intrinsic_rewards_scale = config.get("intrinsic_rewards_scale", 0.1)
 
 # Our DreamerV3 world model.
 from_checkpoint = None
@@ -164,6 +170,8 @@ else:
         model_dimension=model_dimension,
         action_space=env_runner.env.single_action_space,
         world_model=world_model,
+        use_curiosity=use_curiosity,
+        intrinsic_rewards_scale=intrinsic_rewards_scale,
     )
 
 # TODO: ugly hack (resulting from the insane fact that you cannot know
@@ -176,17 +184,14 @@ buffer = EpisodeReplayBuffer(capacity=int(1e6))
 # Timesteps to put into the buffer before the first learning step.
 warm_up_timesteps = 0
 
-# Use an Adam optimizer.
-world_model_optimizer = tf.keras.optimizers.Adam(learning_rate=1e-4, epsilon=1e-8)
-critic_optimizer = tf.keras.optimizers.Adam(learning_rate=3e-5, epsilon=1e-5)
-actor_optimizer = tf.keras.optimizers.Adam(learning_rate=3e-5, epsilon=1e-5)
-
-# World model grad clipping according to [1] Appendix W.
+# World model grad (by global norm) clipping according to [1] Appendix W.
 world_model_grad_clip = 1000.0
-# Critic grad clipping according to [1] Appendix W.
+# Critic grad (by global norm) clipping according to [1] Appendix W.
 critic_grad_clip = 100.0
-# Actor grad clipping according to [1] Appendix W.
+# Actor grad (by global norm) clipping according to [1] Appendix W.
 actor_grad_clip = 100.0
+# Disagree nets grad clipping according to Danijar's code.
+disagree_grad_clip = 100.0
 
 # Training ratio: Ratio of replayed steps over env steps.
 training_ratio = config["training_ratio"]
@@ -246,7 +251,6 @@ if num_pretrain_iterations > 0:
             batch_length_T=tf.convert_to_tensor(batch_length_T),
             grad_clip=tf.convert_to_tensor(world_model_grad_clip),
             world_model=world_model,
-            optimizer=world_model_optimizer,
         )
         forward_train_outs = world_model_train_results["forward_train_outs"]
 
@@ -299,6 +303,7 @@ if num_pretrain_iterations > 0:
     print()
     print("Pretraining offline completed ... switching to online training and evaluation")
 
+
 for iteration in range(1000000):
     print(f"Online training main iteration {iteration}")
     # Push enough samples into buffer initially before we start training.
@@ -334,8 +339,11 @@ for iteration in range(1000000):
         if (
             # Got to have more timesteps than warm up setting.
             ts_in_buffer > warm_up_timesteps
-            # and more timesteps than BxT.
+            # More timesteps than BxT.
             and ts_in_buffer >= batch_size_B * batch_length_T
+            # And enough timesteps for the next train batch to not exceed
+            # the training_ratio.
+            and total_replayed_steps / total_env_steps < training_ratio
             ## But also at least as many episodes as the batch size B.
             ## Actually: This is not useful for longer episode envs, such as Atari.
             ## Too much initial data goes into the buffer, then.
@@ -383,9 +391,10 @@ for iteration in range(1000000):
             batch_length_T=tf.convert_to_tensor(batch_length_T),
             grad_clip=tf.convert_to_tensor(world_model_grad_clip),
             world_model=world_model,
-            optimizer=world_model_optimizer,
         )
-        forward_train_outs = world_model_train_results["WORLD_MODEL_forward_train_outs"]
+        world_model_forward_train_outs = (
+            world_model_train_results["WORLD_MODEL_forward_train_outs"]
+        )
 
         # Update h_states in buffer after the world model (sequential model)
         # forward pass.
@@ -401,8 +410,8 @@ for iteration in range(1000000):
             # Dummy forward pass to be able to produce summary.
             world_model(
                 {
-                    "h": forward_train_outs["h_states_BxT"][:batch_size_B],
-                    "z": forward_train_outs["z_states_BxT"][:batch_size_B],
+                    "h": world_model_forward_train_outs["h_states_BxT"][:batch_size_B],
+                    "z": world_model_forward_train_outs["z_states_BxT"][:batch_size_B],
                     "a_one_hot": sample["actions_one_hot"][:, 0],
                 },
                 sample["obs"][:, 0],
@@ -416,7 +425,7 @@ for iteration in range(1000000):
             summarize_forward_train_outs_vs_samples(
                 tbx_writer=tbx_writer,
                 step=total_env_steps,
-                forward_train_outs=forward_train_outs,
+                forward_train_outs=world_model_forward_train_outs,
                 sample=sample,
                 batch_size_B=batch_size_B,
                 batch_length_T=batch_length_T,
@@ -445,53 +454,55 @@ for iteration in range(1000000):
             if not dreamer_model.critic.trainable_variables:
                 # Forward pass for fast critic.
                 dreamer_model.critic(
-                    h=forward_train_outs["h_states_BxT"],
-                    z=forward_train_outs["z_states_BxT"],
+                    h=world_model_forward_train_outs["h_states_BxT"],
+                    z=world_model_forward_train_outs["z_states_BxT"],
                     return_logits=True,
                 )
                 # Forward pass for EMA-weights critic.
                 dreamer_model.critic(
-                    h=forward_train_outs["h_states_BxT"],
-                    z=forward_train_outs["z_states_BxT"],
+                    h=world_model_forward_train_outs["h_states_BxT"],
+                    z=world_model_forward_train_outs["z_states_BxT"],
                     return_logits=False,
                     use_ema=True,
                 )
                 dreamer_model.critic.init_ema()
+                # Summarize critic models.
+                dreamer_model.critic.summary()
 
             actor_critic_train_results = train_actor_and_critic_one_step(
-                forward_train_outs=forward_train_outs,
+                world_model_forward_train_outs=world_model_forward_train_outs,
                 is_terminated=tf.reshape(sample["is_terminated"], [-1]),
                 horizon_H=horizon_H,
                 gamma=discount_gamma,
                 lambda_=gae_lambda,
                 actor_grad_clip=actor_grad_clip,
                 critic_grad_clip=critic_grad_clip,
+                disagree_grad_clip=disagree_grad_clip,
                 dreamer_model=dreamer_model,
-                actor_optimizer=actor_optimizer,
-                critic_optimizer=critic_optimizer,
                 entropy_scale=entropy_scale,
                 return_normalization_decay=return_normalization_decay,
                 train_actor=train_actor,
+                use_curiosity=use_curiosity,
             )
             L_critic = actor_critic_train_results["CRITIC_L_total"]
             if train_actor:
                 L_actor = actor_critic_train_results["ACTOR_L_total"]
+            if use_curiosity:
+                L_disagree = actor_critic_train_results["DISAGREE_L_total"]
             dream_data = actor_critic_train_results["dream_data"]
 
-            # Summarize actor/critic models.
+            # Summarize critic models.
             if iteration == 0 and sub_iter == 0:
                 # Dummy forward pass to be able to produce summary.
                 if train_actor:
-                    dreamer_model.actor(
-                        dream_data["h_states_t0_to_H_B"][0],
-                        dream_data["z_states_prior_t0_to_H_B"][0],
-                    )
                     dreamer_model.actor.summary()
-                dreamer_model.critic(
-                    dream_data["h_states_t0_to_H_B"][0],
-                    dream_data["z_states_prior_t0_to_H_B"][0],
-                )
-                dreamer_model.critic.summary()
+                if use_curiosity:
+                    dreamer_model.disagree_nets(
+                        dream_data["h_states_t0_to_H_B"][0],
+                        z=dream_data["z_states_prior_t0_to_H_B"][0],
+                        a_one_hot=dream_data["actions_one_hot_dreamed_t0_to_H_B"][0],
+                    )
+                    dreamer_model.disagree_nets.summary()
 
             # Analyze generated dream data for its suitability in training the critic
             # and actors.
@@ -516,6 +527,7 @@ for iteration in range(1000000):
                             dreamed_V=dream_data["values_dreamed_t0_to_H_B"][t][0],
                             dreamed_a=dream_data["actions_dreamed_t0_to_H_B"][t][0],
                             dreamed_r_tp1=dream_data["rewards_dreamed_t0_to_H_B"][t+1][0],
+                            dreamed_ri_tp1=actor_critic_train_results["DISAGREE_intrinsic_rewards_H_B"][t+1][0],
                             dreamed_c_tp1=dream_data["continues_dreamed_t0_to_H_B"][t+1][0],
                             value_target=actor_critic_train_results["VALUE_TARGETS_H_B"][t][0],
                             initial_h=dream_data["h_states_t0_to_H_B"][t][0],
@@ -537,6 +549,12 @@ for iteration in range(1000000):
 
                 if train_actor:
                     summarize_actor_train_results(
+                        tbx_writer=tbx_writer,
+                        step=total_env_steps,
+                        actor_critic_train_results=actor_critic_train_results,
+                    )
+                if use_curiosity:
+                    summarize_disagree_train_results(
                         tbx_writer=tbx_writer,
                         step=total_env_steps,
                         actor_critic_train_results=actor_critic_train_results,

@@ -36,6 +36,18 @@ def get_gru_units(model_dimension, override=None):
     return gru_units[model_dimension]
 
 
+def get_num_curiosity_nets(model_dimension, override=None):
+    if override is not None:
+        return override
+
+    # Determine size of this model.
+    assert model_dimension in ["XXS", "XS", "S", "M", "L", "XL"]
+    num_curiosity_nets = {
+        "XXS": 8, "XS": 8, "S": 8, "M": 8, "L": 8, "XL": 8
+    }
+    return num_curiosity_nets[model_dimension]
+
+
 def get_num_dense_layers(model_dimension, override=None):
     if override is not None:
         return override

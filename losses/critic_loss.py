@@ -92,6 +92,7 @@ def critic_loss(
 def compute_value_targets(
     *,
     rewards_H_BxT,
+    intrinsic_rewards_H_BxT,
     continues_H_BxT,
     value_predictions_H_BxT,
     gamma,
@@ -113,6 +114,9 @@ def compute_value_targets(
     whereas returned targets are [t0 to H-1, B] (last timestep missing as target equals
     vf prediction in that location.
     """
+    if intrinsic_rewards_H_BxT is not None:
+        rewards_H_BxT += intrinsic_rewards_H_BxT
+
     # In all the following, when building value targets for t=1 to T=H,
     # exclude rewards & continues for t=1 b/c we don't need r1 or c1.
     # The target (R1) for V1 is built from r2, c2, and V2/R2.
@@ -131,22 +135,6 @@ def compute_value_targets(
     # targets.shape=[t0 to H-1,BxT]
 
     return targets
-
-    # Danijar's code:
-    # Note: All shapes are time-major: H=16, B=1024(==BxT), ...
-    # rew = self.rewfn(traj)  # shape=[2-16, B(1024)]  # 2-16 means: includes 16, but excludes first reward (from initial porterior state)
-    # discount = 1 - 1 / self.config.horizon
-    # disc = traj['cont'][1:] * discount  # shape=[2-16, B]
-    # value = self.net(traj).mean()  # shape=[1-16, B]
-    # vals = [value[-1]]  # val indices = [16]
-    # interm = rew + disc * value[1:] * (1 - self.config.return_lambda)
-    # interm.shape==[2-16, B]
-    # for t in reversed(range(len(disc))):
-    #   vals.append(interm[t] + disc[t] * self.config.return_lambda * vals[-1])
-    #   # val indices = [16, 15, 14, 13, 12, ..., 1]
-    # ret = jnp.stack(list(reversed(vals))[:-1])
-    # ret.shape=[1-15, B]  # value targets for values, except last (doesn't make sense as target == prediction)
-    # return rew (1-15, B), ret (1-15, B), value[:-1] (1-15, B)
 
 
 if __name__ == "__main__":

@@ -43,6 +43,9 @@ class ActorNetwork(tf.keras.Model):
             output_layer_size=self.action_space.n,
         )
 
+        # Optimizer.
+        self.optimizer = tf.keras.optimizers.Adam(learning_rate=3e-5, epsilon=1e-5)
+
     def call(self, h, z, return_distribution=False):
         """TODO
 
