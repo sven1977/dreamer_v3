@@ -238,9 +238,6 @@ class EnvRunnerV2:
                 # Sample.
                 if explore:
                     actions, states = self.model(states, obs, is_first)
-                    #TEST
-                    assert np.all(tf.one_hot(actions, depth=self.env.single_action_space.n) == states["a_one_hot"])
-                    #END TEST
                     actions = actions.numpy()
                     states = tree.map_structure(lambda s: s.numpy(), states)
                 # Greedy.
@@ -466,18 +463,18 @@ class EnvRunnerV2:
             for eps in self.done_episodes_for_metrics:
                 lengths.append(len(eps))
                 returns.append(eps.get_return())
-                actions.append(eps.actions)
+                actions.extend(list(eps.actions))
                 # Don't forget about the already returned chunks of this episode.
                 if eps.id_ in self.ongoing_episodes_for_metrics:
                     for eps2 in self.ongoing_episodes_for_metrics[eps.id_]:
                         lengths[-1] += len(eps2)
                         returns[-1] += eps2.get_return()
-                        actions.append(eps2.actions)
+                        actions.extend(list(eps2.actions))
                     del self.ongoing_episodes_for_metrics[eps.id_]
 
             metrics["episode_lengths"] = lengths
             metrics["episode_returns"] = returns
-            metrics["actions"] = np.concatenate(actions, axis=0)
+            metrics["actions"] = np.array(actions)
 
         self.done_episodes_for_metrics.clear()
         self.ts_since_last_metrics = 0

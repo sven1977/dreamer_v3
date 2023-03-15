@@ -9,11 +9,13 @@ https://arxiv.org/pdf/2010.02193.pdf
 """
 
 import argparse
+import datetime
 import gc
 import os
-import yaml
 from pprint import pprint
+import yaml
 
+import gymnasium as gym
 import numpy as np
 import tree  # pip install dm_tree
 import tensorflow as tf
@@ -71,11 +73,20 @@ assert len(config) == 1, "Only one experiment allowed in config yaml!"
 experiment_name = next(iter(config.keys()))
 config = config[experiment_name]
 
+# Handle some paths for this experiment.
+experiment_path = os.path.join(
+    "experiments",
+    experiment_name,
+    datetime.datetime.now().strftime("%m-%d-%y-%H-%M-%S"),
+)
+checkpoint_path = os.path.join(experiment_path, "checkpoints")
+tensorboard_path = os.path.join(experiment_path, "tensorboard")
 # Create the checkpoint path, if it doesn't exist yet.
-os.makedirs(f"experiments/{experiment_name}/checkpoints", exist_ok=True)
+os.makedirs(checkpoint_path)
 # Create the tensorboard summary data dir.
-os.makedirs(f"experiments/{experiment_name}/tensorboard", exist_ok=True)
-tbx_writer = SummaryWriter("tensorboard")
+os.makedirs(tensorboard_path)
+tbx_writer = SummaryWriter(tensorboard_path)
+
 # How many iterations do we pre-train?
 num_pretrain_iterations = config.get("num_pretrain_iterations", 0)
 # Every how many training steps do we write data to TB?
@@ -131,6 +142,8 @@ algo_config = (
 env_runner = EnvRunnerV2(model=None, config=algo_config)
 env_runner_evaluation = EnvRunnerV2(model=None, config=algo_config)
 
+action_space = env_runner.env.single_action_space
+
 # Whether to o nly train the world model (not the critic and actor networks).
 train_critic = config.get("train_critic", True)
 train_actor = config.get("train_actor", True)
@@ -153,7 +166,7 @@ else:
     gray_scaled = img_space and len(env_runner.env.single_observation_space.shape) == 2
     world_model = WorldModel(
         model_dimension=model_dimension,
-        action_space=env_runner.env.single_action_space,
+        action_space=action_space,
         batch_length_T=batch_length_T,
         num_gru_units=config.get("num_gru_units"),
         encoder=CNNAtari(model_dimension=model_dimension) if img_space else MLP(model_dimension=model_dimension),
@@ -168,7 +181,7 @@ else:
     )
     dreamer_model = DreamerModel(
         model_dimension=model_dimension,
-        action_space=env_runner.env.single_action_space,
+        action_space=action_space,
         world_model=world_model,
         use_curiosity=use_curiosity,
         intrinsic_rewards_scale=intrinsic_rewards_scale,
@@ -380,9 +393,11 @@ for iteration in range(1000000):
         sample["is_first"] = tf.cast(sample["is_first"], tf.float32)
         sample["is_last"] = tf.cast(sample["is_last"], tf.float32)
         sample["is_terminated"] = tf.cast(sample["is_terminated"], tf.float32)
-        sample["actions_one_hot"] = tf.one_hot(
-            sample["actions"], depth=env_runner.env.single_action_space.n
-        )
+        if isinstance(action_space, gym.spaces.Discrete):
+            sample["actions_ints"] = sample["actions"]
+            sample["actions"] = tf.one_hot(
+                sample["actions_ints"], depth=action_space.n
+            )
 
         # Perform one world-model training step.
         world_model_train_results = train_world_model_one_step(
@@ -412,7 +427,7 @@ for iteration in range(1000000):
                 {
                     "h": world_model_forward_train_outs["h_states_BxT"][:batch_size_B],
                     "z": world_model_forward_train_outs["z_states_BxT"][:batch_size_B],
-                    "a_one_hot": sample["actions_one_hot"][:, 0],
+                    "a": sample["actions"][:, 0],
                 },
                 sample["obs"][:, 0],
                 sample["is_first"][:, 0],
@@ -500,7 +515,7 @@ for iteration in range(1000000):
                     dreamer_model.disagree_nets(
                         dream_data["h_states_t0_to_H_B"][0],
                         z=dream_data["z_states_prior_t0_to_H_B"][0],
-                        a_one_hot=dream_data["actions_one_hot_dreamed_t0_to_H_B"][0],
+                        a=dream_data["actions_dreamed_t0_to_H_B"][0],
                     )
                     dreamer_model.disagree_nets.summary()
 

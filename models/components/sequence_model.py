@@ -52,30 +52,26 @@ class SequenceModel(tf.keras.Model):
         # Add layer norm after the GRU output.
         #self.layer_norm = tf.keras.layers.LayerNormalization()
 
-    def call(self, z, a_one_hot, h=None):
+    def call(self, z, a, h=None):
         """
 
         Args:
             z: The previous stochastic discrete representations of the original
                 observation input. (B, num_categoricals, num_classes_per_categorical).
-            a_one_hot: The previous action (already one-hot'd if applicable). (B, ...).
+            a: The previous action (already one-hot'd if applicable). (B, ...).
             h: The previous deterministic hidden state of the sequence model.
                 (B, num_gru_units)
         """
-        # Discrete int actions -> one_hot
-        #if isinstance(self.action_space, gym.spaces.Discrete):
-        #    a = tf.one_hot(a, depth=self.action_space.n)
         # Flatten last two dims of z.
         z_shape = tf.shape(z)
         z = tf.reshape(tf.cast(z, tf.float32), shape=(z_shape[0], -1))
-        out = tf.concat([z, a_one_hot], axis=-1)
+        out = tf.concat([z, a], axis=-1)
         # Pass through pre-GRU layer.
         out = self.pre_gru_layer(out)
         # Pass through (time-major) GRU.
         out = self.gru_unit(tf.expand_dims(out, axis=0), initial_state=h)
         # Pass through LayerNorm and return both non-normed and normed h-states.
-        return out #self.layer_norm(out)
-        #return out, self.layer_norm(out)
+        return out
 
 
 if __name__ == "__main__":

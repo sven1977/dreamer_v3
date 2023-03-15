@@ -39,8 +39,8 @@ class DisagreeNetworks(tf.keras.Model):
         # Optimizer.
         self.optimizer = tf.keras.optimizers.Adam(learning_rate=1e-4, epsilon=1e-5)
 
-    def call(self, inputs, z, a_one_hot, training=None):
-        return self.forward_train(h=inputs, z=z, a_one_hot=a_one_hot)
+    def call(self, inputs, z, a, training=None):
+        return self.forward_train(h=inputs, z=z, a=a)
 
     def compute_intrinsic_rewards(self, dream_data, forward_train_out):
         shape = tf.shape(dream_data["h_states_t0_to_H_B"])
@@ -71,10 +71,10 @@ class DisagreeNetworks(tf.keras.Model):
         )
         return stddevs_H_B_mean * self.intrinsic_rewards_scale
 
-    def forward_train(self, h, z, a_one_hot):
+    def forward_train(self, h, z, a):
         HxB = tf.shape(h)[0]
         z = tf.reshape(z, shape=(HxB, -1))
-        inputs_ = tf.stop_gradient(tf.concat([h, z, a_one_hot], axis=-1))
+        inputs_ = tf.stop_gradient(tf.concat([h, z, a], axis=-1))
 
         z_predicted_probs_N_HxB = [
             repr(mlp(inputs_), return_z_probs=True)[1]  # [0]=sample; [1]=returned probs

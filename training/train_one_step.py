@@ -27,7 +27,7 @@ def train_world_model_one_step(
         # Compute forward (train) data.
         forward_train_outs = world_model.forward_train(
             observations=sample["obs"],
-            actions_one_hot=sample["actions_one_hot"],
+            actions=sample["actions"],
             is_first=sample["is_first"],
         )
 
@@ -170,18 +170,16 @@ def train_actor_and_critic_one_step(
                     dream_data["z_states_prior_t0_to_H_B"].shape.as_list()[2:]
                 ),
             )
-            a_one_hot = tf.reshape(
-                dream_data["actions_one_hot_dreamed_t0_to_H_B"],
+            a = tf.reshape(
+                dream_data["actions_dreamed_t0_to_H_B"],
                 shape=(Hp1xBxT, -1)
             )
             disag_forward_train_outs = dreamer_model.disagree_nets.forward_train(
-                h=h,
-                z=z,
-                a_one_hot=a_one_hot,
+                h=h, z=z, a=a
             )
             del h
             del z
-            del a_one_hot
+            del a
             ri_t0_to_H_B = dreamer_model.disagree_nets.compute_intrinsic_rewards(
                 dream_data=dream_data,
                 forward_train_out=disag_forward_train_outs,

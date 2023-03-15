@@ -126,6 +126,7 @@ class WorldModel(tf.keras.Model):
         _, z_probs = self.dynamics_predictor(h, return_z_probs=True)
         z = tf.argmax(z_probs, axis=-1)
         z = tf.one_hot(z, depth=z_probs.shape[-1])
+
         if batch_size_B is None or batch_size_B > 0:
             return {"h": h, "z": z}
         else:
@@ -134,7 +135,7 @@ class WorldModel(tf.keras.Model):
     def call(self, inputs, *args, **kwargs):
         return self.forward_inference(inputs, *args, **kwargs)
 
-    @tf.function(experimental_relax_shapes=True)
+    @tf.function#(experimental_relax_shapes=True)
     def forward_inference(self, previous_states, observations, is_first, training=None):
         """Performs a forward step for inference.
 
@@ -165,20 +166,16 @@ class WorldModel(tf.keras.Model):
         previous_z = previous_z + self._mask(initial_states["z"], is_first)  # add init
 
         # Zero out actions (no special learnt initial state).
-        previous_a_one_hot = self._mask(previous_states["a_one_hot"], 1.0 - is_first)
+        previous_a = self._mask(previous_states["a"], 1.0 - is_first)
 
         # Compute new states.
-        h = self.sequence_model(
-            z=previous_z,
-            a_one_hot=previous_a_one_hot,
-            h=previous_h,
-        )
+        h = self.sequence_model(z=previous_z, a=previous_a, h=previous_h)
         z = self.compute_posterior_z(observations=observations, initial_h=h)
 
         return {"h": h, "z": z}
 
     @tf.function
-    def forward_train(self, observations, actions_one_hot, is_first, training=None):
+    def forward_train(self, observations, actions, is_first, training=None):
         """Performs a forward step for training.
 
         1) Forwards all observations [B, T, ...] through the encoder network to yield
@@ -221,9 +218,9 @@ class WorldModel(tf.keras.Model):
         initial_states = self.get_initial_state(batch_size_B=B)
 
         # Make actions and `is_first` time-major.
-        actions_one_hot = tf.transpose(
-            actions_one_hot,
-            perm=[1, 0] + list(range(2, len(actions_one_hot.shape.as_list()))),
+        actions = tf.transpose(
+            actions,
+            perm=[1, 0] + list(range(2, len(actions.shape.as_list()))),
         )
         is_first = tf.transpose(is_first, perm=[1, 0])
 
@@ -244,10 +241,10 @@ class WorldModel(tf.keras.Model):
             z_tm1 = z_tm1 + self._mask(initial_states["z"], is_first[t])  # add init
 
             # Zero out actions (no special learnt initial state).
-            a_one_hot_tm1 = self._mask(actions_one_hot[t - 1], 1.0 - is_first[t])
+            a_tm1 = self._mask(actions[t - 1], 1.0 - is_first[t])
 
             # Perform one RSSM (sequence model) step to get the current h.
-            h_t = self.sequence_model(z=z_tm1, a_one_hot=a_one_hot_tm1, h=h_tm1)
+            h_t = self.sequence_model(z=z_tm1, a=a_tm1, h=h_tm1)
             h_t0_to_T.append(h_t)
 
             posterior_mlp_input = tf.concat([encoder_out[t], h_t], axis=-1)
