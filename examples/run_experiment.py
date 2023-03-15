@@ -540,9 +540,14 @@ for iteration in range(1000000):
                         img = func(
                             dreamed_obs=dreamed_obs_H_B[t][0],
                             dreamed_V=dream_data["values_dreamed_t0_to_H_B"][t][0],
-                            dreamed_a=dream_data["actions_dreamed_t0_to_H_B"][t][0],
+                            dreamed_a=dream_data["actions_ints_dreamed_t0_to_H_B"][t][0],
                             dreamed_r_tp1=dream_data["rewards_dreamed_t0_to_H_B"][t+1][0],
-                            dreamed_ri_tp1=actor_critic_train_results["DISAGREE_intrinsic_rewards_H_B"][t+1][0],
+                            dreamed_ri_tp1=(
+                                actor_critic_train_results[
+                                    "DISAGREE_intrinsic_rewards_H_B"
+                                ][t+1][0]
+                                if use_curiosity else None
+                            ),
                             dreamed_c_tp1=dream_data["continues_dreamed_t0_to_H_B"][t+1][0],
                             value_target=actor_critic_train_results["VALUE_TARGETS_H_B"][t][0],
                             initial_h=dream_data["h_states_t0_to_H_B"][t][0],
