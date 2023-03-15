@@ -7,6 +7,6 @@ cartpole:
   training_ratio: 1024
 
   summary_frequency_train_steps: 10
-  evaluation_frequency_main_iters: 0
-  evaluation_num_episodes: 0
-  model_save_frequency_main_iters: 0
+  evaluation_frequency_main_iters: 100
+  evaluation_num_episodes: 10
+  model_save_frequency_main_iters: 1000

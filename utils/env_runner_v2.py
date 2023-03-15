@@ -239,6 +239,8 @@ class EnvRunnerV2:
                 if explore:
                     actions, states = self.model(states, obs, is_first)
                     actions = actions.numpy()
+                    if isinstance(self.env.single_action_space, gym.spaces.Discrete):
+                        actions = np.argmax(actions, axis=-1)
                     states = tree.map_structure(lambda s: s.numpy(), states)
                 # Greedy.
                 else:
