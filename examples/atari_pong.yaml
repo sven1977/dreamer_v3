@@ -4,9 +4,9 @@ atari-pong:
 
   model_dimension: S
 
-  training_ratio: 1
+  training_ratio: 1024
 
   summary_frequency_train_steps: 20
-  evaluation_frequency_main_iters: 1
+  evaluation_frequency_main_iters: 100
   evaluation_num_episodes: 2
-  model_save_frequency_main_iters: 1
+  model_save_frequency_main_iters: 10000
