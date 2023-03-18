@@ -8,11 +8,12 @@ frozenlake-4x4-stochastic:
 
   model_dimension: XXS
 
-  training_ratio: 128 #1024 #16 #TEST 1024
-  #intrinsic_rewards_scale: 0.1
-  #batch_size_B: 2 #TEST
-  #batch_length_T: 16 #TEST
+  training_ratio: 1024
+  batch_size_B: 24
+  batch_length_T: 24
+
   use_curiosity: true
+  intrinsic_rewards_scale: 10.0
 
   summary_frequency_train_steps: 10
   evaluation_frequency_main_iters:  100

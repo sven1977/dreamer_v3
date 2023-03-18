@@ -91,10 +91,10 @@ def critic_loss(
 
 def compute_value_targets(
     *,
-    rewards_H_BxT,
-    intrinsic_rewards_H_BxT,
-    continues_H_BxT,
-    value_predictions_H_BxT,
+    rewards_t0_to_H_BxT,
+    intrinsic_rewards_t1_to_H_BxT,
+    continues_t0_to_H_BxT,
+    value_predictions_t0_to_H_BxT,
     gamma,
     lambda_,
 ):
@@ -114,15 +114,17 @@ def compute_value_targets(
     whereas returned targets are [t0 to H-1, B] (last timestep missing as target equals
     vf prediction in that location.
     """
-    if intrinsic_rewards_H_BxT is not None:
-        rewards_H_BxT += intrinsic_rewards_H_BxT
+    # The first reward is irrelevant (not used for any VF target).
+    rewards_t1_to_H_BxT = rewards_t0_to_H_BxT[1:]
+    if intrinsic_rewards_t1_to_H_BxT is not None:
+        rewards_t1_to_H_BxT += intrinsic_rewards_t1_to_H_BxT
 
     # In all the following, when building value targets for t=1 to T=H,
     # exclude rewards & continues for t=1 b/c we don't need r1 or c1.
     # The target (R1) for V1 is built from r2, c2, and V2/R2.
-    discount = continues_H_BxT[1:] * gamma  # shape=[2-16, BxT]
-    Rs = [value_predictions_H_BxT[-1]]  # Rs indices=[16]
-    intermediates = rewards_H_BxT[1:] + discount * (1 - lambda_) * value_predictions_H_BxT[1:]
+    discount = continues_t0_to_H_BxT[1:] * gamma  # shape=[2-16, BxT]
+    Rs = [value_predictions_t0_to_H_BxT[-1]]  # Rs indices=[16]
+    intermediates = rewards_t1_to_H_BxT + discount * (1 - lambda_) * value_predictions_t0_to_H_BxT[1:]
     # intermediates.shape=[2-16, BxT]
 
     # Loop through reversed timesteps (axis=1) from T+1 to t=2.
@@ -156,9 +158,9 @@ if __name__ == "__main__":
 
     # my GAE:
     print(compute_value_targets(
-        rewards_H_BxT=r,
-        continues_H_BxT=c,
-        value_predictions_H_BxT=vf,
+        rewards_t0_to_H_BxT=r,
+        continues_t0_to_H_BxT=c,
+        value_predictions_t0_to_H_BxT=vf,
         gamma=gamma,
         lambda_=lambda_,
     ))

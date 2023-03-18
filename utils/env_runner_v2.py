@@ -19,6 +19,7 @@ import tree  # pip install dm_tree
 
 from ray.rllib.algorithms.algorithm_config import AlgorithmConfig
 from ray.rllib.env.wrappers.atari_wrappers import NoopResetEnv, MaxAndSkipEnv
+from ray.rllib.env.wrappers.dm_control_wrapper import DMCEnv
 from ray.rllib.utils.numpy import one_hot
 
 from utils.episode import Episode
@@ -72,6 +73,22 @@ class OneHot(gym.ObservationWrapper):
         return one_hot(obs, depth=self.observation_space.shape[0])
 
 
+class ActionClip(gym.ActionWrapper):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._low = -1.0
+        self._high = 1.0
+        self.action_space = gym.spaces.Box(
+            self._low,
+            self._high,
+            self.action_space.shape,
+            self.action_space.dtype,
+        )
+
+    def action(self, action):
+        return np.clip(action, self._low, self._high)
+
+
 class EnvRunnerV2:
     """An environment runner to locally collect data from vectorized gym environments.
     """
@@ -120,6 +137,25 @@ class EnvRunnerV2:
                 num_envs=self.config.num_envs_per_worker,
                 asynchronous=self.config.remote_worker_envs,
                 make_kwargs=dict(self.config.env_config, **{"render_mode": "rgb_array"}),
+            )
+        elif self.config.env.startswith("DMC"):
+            parts = self.config.env.split("/")
+            assert len(parts) == 3, (
+                "ERROR: DMC env must be formatted as 'DMC/[task]/[domain]', e.g. "
+                f"'DMC/cartpole/swingup'! You provided '{self.config.env}'."
+            )
+            gym.register(
+                "dmc_env-v0",
+                lambda : DMCEnv(
+                    parts[1], parts[2], from_pixels=True, channels_first=False
+                )
+            )
+            self.env = gym.vector.make(
+                "dmc_env-v0",
+                wrappers=[ActionClip],
+                num_envs=self.config.num_envs_per_worker,
+                asynchronous=self.config.remote_worker_envs,
+                **dict(self.config.env_config),
             )
         else:
             wrappers = [] if self.config.env != "FrozenLake-v1" else [OneHot]

@@ -13,6 +13,7 @@ import datetime
 import gc
 import os
 from pprint import pprint
+import re
 import yaml
 
 import gymnasium as gym
@@ -39,11 +40,11 @@ from utils.episode_replay_buffer import EpisodeReplayBuffer
 from utils.episode import Episode
 from utils.cartpole_debug import CartPoleDebug  # import registers `CartPoleDebug-v0`
 from utils.tensorboard import (
-    reconstruct_obs_from_h_and_z,
     summarize_actor_train_results,
     summarize_critic_train_results,
     summarize_disagree_train_results,
     summarize_dreamed_eval_trajectory_vs_samples,
+    summarize_dreamed_trajectory,
     summarize_forward_train_outs_vs_samples,
     summarize_sampling_and_replay_buffer,
     summarize_world_model_train_results,
@@ -59,19 +60,29 @@ parser.add_argument(
     "--config",
     "-c",
     type=str,
-    default="atari_pong.yaml",
+    default="examples/atari_100k.yaml",
     help="The config yaml file for the experiment.",
 )
+parser.add_argument(
+    "--env",
+    "-e",
+    type=str,
+    default="ALE/Pong-v5",
+    help="The env to use for the experiment.",
+)
 args = parser.parse_args()
-
 print(f"Trying to open config file {args.config} ...")
 with open(args.config, "r") as f:
     config = yaml.safe_load(f)
-print(f"Running with the following config:")
-pprint(config)
 assert len(config) == 1, "Only one experiment allowed in config yaml!"
 experiment_name = next(iter(config.keys()))
 config = config[experiment_name]
+if args.env and not config.get("env"):
+    config["env"] = args.env
+    experiment_name += "-" + re.sub("^ALE/|-v\\d$", "", args.env).lower()
+
+print(f"Running with the following config:")
+pprint(config)
 
 # Handle some paths for this experiment.
 experiment_path = os.path.join(
@@ -105,11 +116,13 @@ batch_length_T = config.get("batch_length_T", 64)
 # The number of timesteps we use to "initialize" (burn-in) a dream_trajectory run.
 # For this many timesteps, the posterior (actual observation data) will be used
 # to compute z, after that, only the prior (dynamics network) will be used.
-burn_in_T = 5
+burn_in_T = config.get("burn_in_T", 5)
 horizon_H = config.get("horizon_H", 15)
 
-# Whether to symlog the observations or not.
-symlog_obs = not config.get("is_atari", False)
+assert burn_in_T + horizon_H <= batch_length_T, (
+    f"ERROR: burn_in_T ({burn_in_T}) + horizon_H ({horizon_H}) must be <= "
+    f"batch_length_T ({batch_length_T})!"
+)
 
 # Actor/critic hyperparameters.
 discount_gamma = config.get("discount_gamma", 0.997)  # [1] eq. 7.
@@ -121,26 +134,20 @@ return_normalization_decay = 0.99  # [1] eq. 11 and 12.
 # EnvRunner config (an RLlib algorithm config).
 algo_config = (
     AlgorithmConfig()
-    .environment(config["env"], env_config={
-        # [2]: "We follow the evaluation protocol of Machado et al. (2018) with 200M
-        # environment steps, action repeat of 4, a time limit of 108,000 steps per
-        # episode that correspond to 30 minutes of game play, no access to life
-        # information, full action space, and sticky actions. Because the world model
-        # integrates information over time, DreamerV2 does not use frame stacking.
-        # The experiments use a single-task setup where a separate agent is trained
-        # for each game. Moreover, each agent uses only a single environment instance.
-        "repeat_action_probability": 0.0,  # "sticky actions" but not according to Danijar's 100k configs.
-        "full_action_space": False, # "full action space" but not according to Danijar's 100k configs.
-        "frameskip": 1,  # already done by MaxAndSkip wrapper: "action repeat" == 4
-    } if config["is_atari"] else config.get("env_config", {}))
+    .environment(config["env"], env_config=config.get("env_config", {}))
     .rollouts(
-        num_envs_per_worker=1,
+        num_envs_per_worker=config.get("num_envs_per_worker", 1),
         rollout_fragment_length=1,
     )
 )
 # The vectorized gymnasium EnvRunner to collect samples of shape (B, T, ...).
 env_runner = EnvRunnerV2(model=None, config=algo_config)
 env_runner_evaluation = EnvRunnerV2(model=None, config=algo_config)
+
+# Whether we have an image observation space or not.
+is_img_space = len(env_runner.env.single_observation_space.shape) in [2, 3]
+# Whether to symlog the observations or not.
+symlog_obs = config.get("symlog_obs", not is_img_space)
 
 action_space = env_runner.env.single_action_space
 
@@ -162,18 +169,20 @@ if from_checkpoint is not None:
     dreamer_model = tf.keras.models.load_model(from_checkpoint)
 else:
     model_dimension = config["model_dimension"]
-    img_space = len(env_runner.env.single_observation_space.shape) in [2, 3]
-    gray_scaled = img_space and len(env_runner.env.single_observation_space.shape) == 2
+    gray_scaled = is_img_space and len(env_runner.env.single_observation_space.shape) == 2
     world_model = WorldModel(
         model_dimension=model_dimension,
         action_space=action_space,
         batch_length_T=batch_length_T,
         num_gru_units=config.get("num_gru_units"),
-        encoder=CNNAtari(model_dimension=model_dimension) if img_space else MLP(model_dimension=model_dimension),
+        encoder=(
+            CNNAtari(model_dimension=model_dimension) if is_img_space
+            else MLP(model_dimension=model_dimension)
+        ),
         decoder=ConvTransposeAtari(
             model_dimension=model_dimension,
             gray_scaled=gray_scaled,
-        ) if img_space else VectorDecoder(
+        ) if is_img_space else VectorDecoder(
             model_dimension=model_dimension,
             observation_space=env_runner.env.single_observation_space,
         ),
@@ -216,12 +225,12 @@ total_train_steps = 0
 if num_pretrain_iterations > 0:
     # 1) Initialize dataset
     import d3rlpy
-    if config["env"] == "CartPole-v0":
+    if config["env"].startswith("ALE/"):
+        dataset, _ = d3rlpy.datasets.get_atari(config["offline_dataset"])
+    elif config["env"] == "CartPole-v0":
         dataset, _ = d3rlpy.datasets.get_cartpole()
     elif config["env"] == "Pendulum-v0":
         dataset, _ = d3rlpy.datasets.get_pendulum()
-    elif config["is_atari"] == True:
-        dataset, _ = d3rlpy.datasets.get_atari(config["offline_dataset"])
     else:
         raise ValueError("Unknown offline environment.")
     
@@ -303,7 +312,8 @@ if num_pretrain_iterations > 0:
             )
 
         print(
-            f"\t\tL_world_model_total={world_model_train_results['L_world_model_total'].numpy():.5f} ("
+            "\t\tL_world_model_total="
+            f"{world_model_train_results['L_world_model_total'].numpy():.5f} ("
             f"L_pred={world_model_train_results['L_pred'].numpy():.5f} ("
             f"decoder/obs={world_model_train_results['L_decoder'].numpy()} "
             f"reward(two-hot)={world_model_train_results['L_reward_two_hot'].numpy()} "
@@ -314,7 +324,9 @@ if num_pretrain_iterations > 0:
         )
 
     print()
-    print("Pretraining offline completed ... switching to online training and evaluation")
+    print(
+        "Pretraining offline completed ... switching to online training and evaluation"
+    )
 
 
 for iteration in range(1000000):
@@ -453,14 +465,17 @@ for iteration in range(1000000):
             )
 
         print(
-            f"\t\tWORLD_MODEL_L_total={world_model_train_results['WORLD_MODEL_L_total'].numpy():.5f} ("
-            f"L_pred={world_model_train_results['WORLD_MODEL_L_prediction'].numpy():.5f} ("
+            "\t\tWORLD_MODEL_L_total="
+            f"{world_model_train_results['WORLD_MODEL_L_total'].numpy():.5f} ("
+            "L_pred="
+            f"{world_model_train_results['WORLD_MODEL_L_prediction'].numpy():.5f} ("
             f"dec/obs={world_model_train_results['WORLD_MODEL_L_decoder'].numpy()} "
             f"rew(two-hot)={world_model_train_results['WORLD_MODEL_L_reward'].numpy()} "
             f"cont={world_model_train_results['WORLD_MODEL_L_continue'].numpy()}"
             "); "
             f"L_dyn={world_model_train_results['WORLD_MODEL_L_dynamics'].numpy():.5f}; "
-            f"L_rep={world_model_train_results['WORLD_MODEL_L_representation'].numpy():.5f})"
+            "L_rep="
+            f"{world_model_train_results['WORLD_MODEL_L_representation'].numpy():.5f})"
         )
 
         # Train critic and actor.
@@ -524,42 +539,6 @@ for iteration in range(1000000):
             if summary_frequency_train_steps and (
                 total_train_steps % summary_frequency_train_steps == 0
             ):
-                #TODO: put all of this block into tensorboard module.
-                #TODO: Make this work with any renderable env.
-                if env_runner.config.env in ["CartPoleDebug-v0", "CartPole-v1", "FrozenLake-v1"]:
-                    from utils.cartpole_debug import create_cartpole_dream_image, create_frozenlake_dream_image
-                    dreamed_obs_H_B = reconstruct_obs_from_h_and_z(
-                        h_t0_to_H=dream_data["h_states_t0_to_H_B"],
-                        z_t0_to_H=dream_data["z_states_prior_t0_to_H_B"],
-                        dreamer_model=dreamer_model,
-                        obs_dims_shape=sample["obs"].shape[2:],
-                    )
-                    # Take 0th dreamed trajectory and produce series of images.
-                    for t in range(len(dreamed_obs_H_B) - 1):
-                        func = create_cartpole_dream_image if env_runner.config.env.startswith("CartPole") else create_frozenlake_dream_image
-                        img = func(
-                            dreamed_obs=dreamed_obs_H_B[t][0],
-                            dreamed_V=dream_data["values_dreamed_t0_to_H_B"][t][0],
-                            dreamed_a=dream_data["actions_ints_dreamed_t0_to_H_B"][t][0],
-                            dreamed_r_tp1=dream_data["rewards_dreamed_t0_to_H_B"][t+1][0],
-                            dreamed_ri_tp1=(
-                                actor_critic_train_results[
-                                    "DISAGREE_intrinsic_rewards_H_B"
-                                ][t+1][0]
-                                if use_curiosity else None
-                            ),
-                            dreamed_c_tp1=dream_data["continues_dreamed_t0_to_H_B"][t+1][0],
-                            value_target=actor_critic_train_results["VALUE_TARGETS_H_B"][t][0],
-                            initial_h=dream_data["h_states_t0_to_H_B"][t][0],
-                            as_tensor=True,
-                        )
-                        tbx_writer.add_images(
-                            f"dreamed_trajectories_for_critic_actor_learning_T{t}_B0",
-                            tf.expand_dims(img, axis=0).numpy(),
-                            dataformats="NHWC",
-                            global_step=total_env_steps,
-                        )
-
                 # Summarize actor-critic loss stats.
                 summarize_critic_train_results(
                     tbx_writer = tbx_writer,
@@ -580,8 +559,24 @@ for iteration in range(1000000):
                         actor_critic_train_results=actor_critic_train_results,
                     )
 
+                # TODO: Make this work with any renderable env.
+                if env_runner.config.env in [
+                    "CartPoleDebug-v0", "CartPole-v1", "FrozenLake-v1"
+                ]:
+                    summarize_dreamed_trajectory(
+                        tbx_writer=tbx_writer,
+                        dream_data=dream_data,
+                        actor_critic_train_results=actor_critic_train_results,
+                        env=env_runner.config.env,
+                        dreamer_model=dreamer_model,
+                        obs_dims_shape=sample["obs"].shape[2:],
+                        step=total_env_steps,
+                        desc="for_actor_critic_learning",
+                    )
+
             print(
-                f"\t\tL_actor={L_actor.numpy() if train_actor else 0.0:.5f} L_critic={L_critic.numpy():.5f}"
+                f"\t\tL_actor={L_actor.numpy() if train_actor else 0.0:.5f} "
+                f"L_critic={L_critic.numpy():.5f}"
             )
 
         sub_iter += 1
@@ -594,21 +589,60 @@ for iteration in range(1000000):
             total_train_steps % evaluation_frequency_main_iters == 0
     ):
         print("\nEVALUATION:")
+
+        # Special debug evaluation for intrinsic rewards -> Roll out a special
+        # episode and draw the intrinsic rewards in the rendered images so we can
+        # check, whether curiosity is actually producing the correct rewards.
+        #if use_curiosity and env_runner.config.env == "FrozenLake-v1":
+        #    start_states = dreamer_model.get_initial_state(batch_size_B=batch_size_B)
+        #    dream_data = dreamer_model.dream_trajectory_with_burn_in(
+        #        start_states=start_states,
+        #        timesteps_burn_in=0,
+        #        timesteps_H=horizon_H,
+        #        # Initial state observation (start state of grid world).
+        #        observations=np.array([[[1.0] + [0.0] * 15]]),  # [B=1, T=1, 16]
+        #        actions=np.one_hot(np.array([[  # B=1, T=
+        #            2, 2, 1, 1, 1, 2
+        #        ]]), depth=4),
+        #        use_sampled_actions_in_dream=True,
+        #        use_random_actions_in_dream=False,
+        #    )
+        #    summarize_dreamed_trajectory(
+        #        tbx_writer=tbx_writer,
+        #        dream_data=dream_data,
+        #        actor_critic_train_results=actor_critic_train_results,
+        #        env=env_runner.config.env,
+        #        dreamer_model=dreamer_model,
+        #        obs_dims_shape=sample["obs"].shape[2:],
+        #        step=total_env_steps,
+        #        desc="for_intrinsic_reward_debugging",
+        #    )
+
         # Dream a trajectory using the samples from the buffer and compare obs,
-        # rewards, continues to the actually observed trajectory.
+        # rewards, continues to the actually observed trajectory (from the real env).
+        # Use a burn-in window where we compute posterior states (using the actual
+        # observations), then a dream window, where we compute prior states, but still
+        # use the actions from the real env (to be able to compare with the sampled
+        # trajectory).
         dreamed_T = horizon_H
-        print(f"\tDreaming trajectories (burn-in={burn_in_T}; H={dreamed_T}) from all 1st timesteps drawn from buffer ...")
+        print(
+            f"\tDreaming trajectories (burn-in={burn_in_T}; H={dreamed_T}) starting "
+            "from all 1st timesteps drawn from buffer to compare with sampled data "
+            "(using the same actions as in the sampling) ..."
+        )
         start_states = dreamer_model.get_initial_state(batch_size_B=batch_size_B)
         dream_data = dreamer_model.dream_trajectory_with_burn_in(
             start_states=start_states,
             timesteps_burn_in=burn_in_T,
             timesteps_H=horizon_H,
-            observations=sample["obs"][:, :burn_in_T],  # use only first burn_in_T obs
-            actions=sample["actions"][:, :burn_in_T + dreamed_T],  # use all actions from 0 to T (no actor)
-            use_sampled_actions_in_dream=True,  # use sampled actions, not the actor
+            # Use only first burn_in_T obs.
+            observations=sample["obs"][:, :burn_in_T],
+            # Use all actions from 0 to T (no actor).
+            actions=sample["actions"][:, :burn_in_T + dreamed_T],
+            # Use sampled actions, not the actor.
+            use_sampled_actions_in_dream=True,
             use_random_actions_in_dream=False,
         )
-
         mse_sampled_vs_dreamed_obs = summarize_dreamed_eval_trajectory_vs_samples(
             tbx_writer=tbx_writer,
             step=total_env_steps,
@@ -619,7 +653,10 @@ for iteration in range(1000000):
             dreamer_model=dreamer_model,
             symlog_obs=symlog_obs,
         )
-        print(f"\tMSE sampled vs dreamed obs (B={batch_size_B} T/H={dreamed_T}): {mse_sampled_vs_dreamed_obs:.6f}")
+        print(
+            f"\tMSE sampled vs dreamed obs (B={batch_size_B} T/H={dreamed_T}): "
+            f"{mse_sampled_vs_dreamed_obs:.6f}"
+        )
 
         # Run n episodes in an actual env and report mean episode returns.
         print(f"Running {evaluation_num_episodes} episodes in env for evaluation ...")
@@ -667,7 +704,7 @@ for iteration in range(1000000):
         iteration % model_save_frequency_main_iters == 0
     ):
         try:
-            dreamer_model.save(f"checkpoints/dreamer_model_{iteration}")
+            dreamer_model.save(f"{checkpoint_path}/dreamer_model_{iteration}")
         except Exception as e:
             print(f"ERROR: Trying to save DreamerModel!!\nError is {e}")
 

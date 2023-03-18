@@ -2,6 +2,10 @@ import numpy as np
 import tensorflow as tf
 import tree  # pip install dm_tree
 
+from utils.cartpole_debug import (
+    create_cartpole_dream_image,
+    create_frozenlake_dream_image,
+)
 from utils.symlog import inverse_symlog
 
 
@@ -42,6 +46,70 @@ def reconstruct_obs_from_h_and_z(
     reconstructed_obs_T_B = tf.reshape(loc, shape=(T, B) + obs_dims_shape)
     # Return inverse symlog'd (real env obs space) reconstructed observations.
     return reconstructed_obs_T_B
+
+
+def summarize_dreamed_trajectory(
+    *,
+    tbx_writer,
+    dream_data,
+    actor_critic_train_results,
+    env,
+    dreamer_model,
+    obs_dims_shape,
+    step,
+    batch_indices=(0,),
+    desc=None,
+):
+    dreamed_obs_H_B = reconstruct_obs_from_h_and_z(
+        h_t0_to_H=dream_data["h_states_t0_to_H_B"],
+        z_t0_to_H=dream_data["z_states_prior_t0_to_H_B"],
+        dreamer_model=dreamer_model,
+        obs_dims_shape=obs_dims_shape,
+    )
+    func = (
+        create_cartpole_dream_image
+        if env.startswith("CartPole") else create_frozenlake_dream_image
+    )
+    # Take 0th dreamed trajectory and produce series of images.
+    for b in batch_indices:
+        images = []
+        for t in range(len(dreamed_obs_H_B) - 1):
+            images.append(func(
+                dreamed_obs=dreamed_obs_H_B[t][b],
+                dreamed_V=dream_data["values_dreamed_t0_to_H_B"][t][b],
+                dreamed_a=(
+                    dream_data["actions_ints_dreamed_t0_to_H_B"][t][b]
+                ),
+                dreamed_r_tp1=(
+                    dream_data["rewards_dreamed_t0_to_H_B"][t + 1][b]
+                ),
+                # `DISAGREE_intrinsic_rewards_H_B` are shifted by 1 already
+                # (from t1 to H, not t0 to H like all other data here).
+                dreamed_ri_tp1=(
+                    actor_critic_train_results[
+                        "DISAGREE_intrinsic_rewards_H_B"
+                    ][t][b]
+                    if "DISAGREE_intrinsic_rewards_H_B" in actor_critic_train_results
+                    else None
+                ),
+                dreamed_c_tp1=(
+                    dream_data["continues_dreamed_t0_to_H_B"][t + 1][b]
+                ),
+                value_target=(
+                    actor_critic_train_results["VALUE_TARGETS_H_B"][t][b]
+                ),
+                initial_h=dream_data["h_states_t0_to_H_B"][t][b],
+                as_tensor=True,
+            ).numpy())
+        # Concat images along width-axis (so they show as a "film sequence" next to each
+        # other).
+        images = np.concatenate(images, axis=1)
+        tbx_writer.add_images(
+            f"dreamed_trajectories{('_'+desc) if desc else ''}_B{b}",
+            np.expand_dims(images, axis=0),
+            dataformats="NHWC",
+            global_step=step,
+        )
 
 
 def summarize_forward_train_outs_vs_samples(

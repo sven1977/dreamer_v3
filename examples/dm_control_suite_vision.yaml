@@ -1,0 +1,14 @@
+dm-control-suite-vision:
+  # Run with
+  from_pixels: true
+
+  num_envs_per_worker: 4
+
+  # See Appendix A.
+  model_dimension: S
+  training_ratio: 512
+
+  summary_frequency_train_steps: 30
+  evaluation_frequency_main_iters: 1000
+  evaluation_num_episodes: 2
+  model_save_frequency_main_iters: 10000

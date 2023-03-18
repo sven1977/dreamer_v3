@@ -42,38 +42,39 @@ class DisagreeNetworks(tf.keras.Model):
     def call(self, inputs, z, a, training=None):
         return self.forward_train(h=inputs, z=z, a=a)
 
-    def compute_intrinsic_rewards(self, dream_data, forward_train_out):
-        shape = tf.shape(dream_data["h_states_t0_to_H_B"])
-        Hp1, B = shape[0], shape[1]
+    def compute_intrinsic_rewards(self, h, z, a):
+        forward_train_outs = self.forward_train(h, z, a)
+        B = tf.shape(h)[0]
 
         # Intrinsic rewards are computed as:
         # Stddev of the mode of the 32x32 discrete, stochastic probs
         # between the different nets. Meaning that if the larger the disagreement
         # (stddev) between the nets on what the probabilities for the different
         # classes should be, the higher the intrinsic reward.
-        z_predicted_probs_N_HxB = forward_train_out["z_predicted_probs_N_HxB"]
-        N = len(z_predicted_probs_N_HxB)
-        z_predicted_modes_N_HxB = tf.stack(z_predicted_probs_N_HxB, axis=0)
+        z_predicted_probs_N_B = forward_train_outs["z_predicted_probs_N_HxB"]
+        N = len(z_predicted_probs_N_B)
+        z_predicted_probs_N_B = tf.stack(z_predicted_probs_N_B, axis=0)
         # Flatten z-dims (num_categoricals x num_classes).
-        z_predicted_modes_N_HxB = tf.reshape(
-            z_predicted_modes_N_HxB, shape=(N, Hp1*B, -1)
+        z_predicted_probs_N_B = tf.reshape(
+            z_predicted_probs_N_B, shape=(N, B, -1)
         )
 
-        # Compute stddevs over all disagree nets.
+        # Compute stddevs over all disagree nets (axis=0).
         # Mean over last axis ([num categoricals] x [num classes] folded axis).
-        # Unfold time axis.
-        stddevs_H_B_mean = tf.reshape(
-            tf.reduce_mean(
-                tf.math.reduce_std(z_predicted_modes_N_HxB, axis=0),
-                axis=-1,
-            ),
-            shape=(Hp1, B),
+        stddevs_B_mean = tf.reduce_mean(
+            tf.math.reduce_std(z_predicted_probs_N_B, axis=0),
+            axis=-1,
         )
-        return stddevs_H_B_mean * self.intrinsic_rewards_scale
+        return {
+            "rewards_intrinsic": stddevs_B_mean * self.intrinsic_rewards_scale,
+            "forward_train_outs": forward_train_outs,
+        }
 
     def forward_train(self, h, z, a):
         HxB = tf.shape(h)[0]
+        # Fold z-dims.
         z = tf.reshape(z, shape=(HxB, -1))
+        # Concat all input components (h, z, and a).
         inputs_ = tf.stop_gradient(tf.concat([h, z, a], axis=-1))
 
         z_predicted_probs_N_HxB = [

@@ -156,41 +156,15 @@ def train_actor_and_critic_one_step(
             timesteps_H=horizon_H,
             gamma=gamma,
         )
-        # Compute intrinsic rewards and add them to the dream data.
-        ri_t0_to_H_B = None
-        if use_curiosity:
-            Hp1xBxT = (horizon_H + 1) * tf.shape(dream_data["h_states_t0_to_H_B"])[1]
-            h = tf.reshape(
-                dream_data["h_states_t0_to_H_B"],
-                shape=(Hp1xBxT, -1),
-            )
-            z = tf.reshape(
-                dream_data["z_states_prior_t0_to_H_B"],
-                shape=[Hp1xBxT] + (
-                    dream_data["z_states_prior_t0_to_H_B"].shape.as_list()[2:]
-                ),
-            )
-            a = tf.reshape(
-                dream_data["actions_dreamed_t0_to_H_B"],
-                shape=(Hp1xBxT, -1)
-            )
-            disag_forward_train_outs = dreamer_model.disagree_nets.forward_train(
-                h=h, z=z, a=a
-            )
-            del h
-            del z
-            del a
-            ri_t0_to_H_B = dreamer_model.disagree_nets.compute_intrinsic_rewards(
-                dream_data=dream_data,
-                forward_train_out=disag_forward_train_outs,
-            )
 
         value_targets = compute_value_targets(
             # Learn critic in symlog'd space.
-            rewards_H_BxT=dream_data["rewards_dreamed_t0_to_H_B"],
-            intrinsic_rewards_H_BxT=ri_t0_to_H_B,
-            continues_H_BxT=dream_data["continues_dreamed_t0_to_H_B"],
-            value_predictions_H_BxT=dream_data["values_dreamed_t0_to_H_B"],
+            rewards_t0_to_H_BxT=dream_data["rewards_dreamed_t0_to_H_B"],
+            intrinsic_rewards_t1_to_H_BxT=(
+                dream_data["rewards_intrinsic_t1_to_H_B"] if use_curiosity else None
+            ),
+            continues_t0_to_H_BxT=dream_data["continues_dreamed_t0_to_H_B"],
+            value_predictions_t0_to_H_BxT=dream_data["values_dreamed_t0_to_H_B"],
             gamma=gamma,
             lambda_=lambda_,
         )
@@ -204,10 +178,7 @@ def train_actor_and_critic_one_step(
                 return_normalization_decay=return_normalization_decay
             )
         if use_curiosity:
-            L_disagree = disagree_loss(
-                dream_data=dream_data,
-                forward_train_out=disag_forward_train_outs,
-            )
+            L_disagree = disagree_loss(dream_data=dream_data)
 
     results = critic_loss_results.copy()
     results["VALUE_TARGETS_H_B"] = value_targets
@@ -229,8 +200,12 @@ def train_actor_and_critic_one_step(
     )
     if use_curiosity:
         results["DISAGREE_L_total"] = L_disagree
-        results["DISAGREE_intrinsic_rewards_H_B"] = ri_t0_to_H_B
-        results["DISAGREE_intrinsic_rewards"] = tf.reduce_mean(ri_t0_to_H_B)
+        results["DISAGREE_intrinsic_rewards_H_B"] = (
+            dream_data["rewards_intrinsic_t1_to_H_B"]
+        )
+        results["DISAGREE_intrinsic_rewards"] = tf.reduce_mean(
+            dream_data["rewards_intrinsic_t1_to_H_B"]
+        )
         disagree_gradients = tape.gradient(
             L_disagree,
             dreamer_model.disagree_nets.trainable_variables,

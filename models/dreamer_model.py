@@ -171,19 +171,43 @@ class DreamerModel(tf.keras.Model):
         a_dreamed_H_B = tf.stack(a_dreamed_t0_to_H, axis=0)  # (T, B, ...)
 
         # Compute r using reward predictor.
-        r_dreamed_HxB = (
-            inverse_symlog(self.world_model.reward_predictor(h=h_states_HxB, z=z_states_prior_HxB))
+        r_dreamed_H_B = tf.reshape(
+            inverse_symlog(
+                self.world_model.reward_predictor(h=h_states_HxB, z=z_states_prior_HxB)
+            ),
+            shape=[timesteps_H+1, -1],
         )
-        r_dreamed_H_B = tf.reshape(r_dreamed_HxB, [timesteps_H+1, -1])
+
+        # Compute intrinsic rewards.
+        if self.use_curiosity:
+            results_HxB = self.disagree_nets.compute_intrinsic_rewards(
+                h=h_states_HxB,
+                z=z_states_prior_HxB,
+                a=tf.reshape(a_dreamed_H_B, [-1] + a_dreamed_H_B.shape.as_list()[2:]),
+            )
+            # Cut out last timestep as we always predict z-states for the NEXT timestep
+            # and derive ri (for the NEXT timestep) from the disagreement between
+            # our N disagreee nets.
+            r_intrinsic_H_B = tf.reshape(
+                results_HxB["rewards_intrinsic"], shape=[timesteps_H+1, -1]
+            )[:-1]
+            curiosity_forward_train_outs = results_HxB["forward_train_outs"]
+            del results_HxB
 
         # Compute continues using continue predictor.
-        c_dreamed_HxB = self.world_model.continue_predictor(h=h_states_HxB, z=z_states_prior_HxB)
+        c_dreamed_HxB = self.world_model.continue_predictor(
+            h=h_states_HxB,
+            z=z_states_prior_HxB,
+        )
         c_dreamed_H_B = tf.reshape(c_dreamed_HxB, [timesteps_H+1, -1])
         # Force-set first continue to False iff `start_is_terminated`.
         # Note: This will cause the loss-weights for this row in the batch to be
         # completely zero'd out. In general, we don't use dreamed data past any
         # predicted (or actual first) continue=False flags.
-        c_dreamed_H_B = tf.concat([1.0 - tf.expand_dims(start_is_terminated, 0), c_dreamed_H_B[1:]], axis=0)
+        c_dreamed_H_B = tf.concat(
+            [1.0 - tf.expand_dims(start_is_terminated, 0), c_dreamed_H_B[1:]],
+            axis=0,
+        )
 
         # Loss weights for each individual dreamed timestep. Zero-out all timesteps
         # that lie past continue=False flags. B/c our world model does NOT learn how
@@ -198,10 +222,17 @@ class DreamerModel(tf.keras.Model):
             return_logits=True,
         )
         v_dreamed_HxB = inverse_symlog(v)
-        v_dreamed_H_B = tf.reshape(v_dreamed_HxB, [timesteps_H+1, -1])
+        v_dreamed_H_B = tf.reshape(v_dreamed_HxB, shape=[timesteps_H+1, -1])
 
-        v_symlog_dreamed_ema_HxB = self.critic(h=h_states_HxB, z=z_states_prior_HxB, return_logits=False, use_ema=True)
-        v_symlog_dreamed_ema_H_B = tf.reshape(v_symlog_dreamed_ema_HxB, [timesteps_H+1, -1])
+        v_symlog_dreamed_ema_HxB = self.critic(
+            h=h_states_HxB,
+            z=z_states_prior_HxB,
+            return_logits=False,
+            use_ema=True,
+        )
+        v_symlog_dreamed_ema_H_B = tf.reshape(
+            v_symlog_dreamed_ema_HxB, shape=[timesteps_H+1, -1]
+        )
 
         ret = {
             "h_states_t0_to_H_B": h_states_H_B,
@@ -216,6 +247,10 @@ class DreamerModel(tf.keras.Model):
             # Loss weights for critic- and actor losses.
             "dream_loss_weights_t0_to_H_B": dream_loss_weights_H_B,
         }
+
+        if self.use_curiosity:
+            ret["rewards_intrinsic_t1_to_H_B"] = r_intrinsic_H_B
+            ret.update(curiosity_forward_train_outs)
 
         if isinstance(self.action_space, gym.spaces.Discrete):
             ret["actions_ints_dreamed_t0_to_H_B"] = tf.argmax(a_dreamed_H_B, axis=-1)
@@ -291,7 +326,8 @@ class DreamerModel(tf.keras.Model):
 
         z_states_prior_t0_to_H_B = tf.stack(z_states_prior_t0_to_H, axis=0)
         z_states_prior_t0_to_HxB = tf.reshape(
-            z_states_prior_t0_to_H_B, shape=[-1] + z_states_prior_t0_to_H_B.shape.as_list()[2:]
+            z_states_prior_t0_to_H_B,
+            shape=[-1] + z_states_prior_t0_to_H_B.shape.as_list()[2:],
         )
 
         a_t0_to_H_B = tf.stack(a_t0_to_H, axis=0)

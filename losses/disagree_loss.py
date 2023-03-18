@@ -8,8 +8,8 @@ import tensorflow as tf
 
 
 @tf.function
-def disagree_loss(dream_data, forward_train_out):
-    z_predicted_probs_N_HxB = forward_train_out["z_predicted_probs_N_HxB"]
+def disagree_loss(dream_data):
+    z_predicted_probs_N_HxB = dream_data["z_predicted_probs_N_HxB"]
 
     # Targets are the next step z-states.
     targets_t1_to_H_B = tf.stop_gradient(dream_data["z_states_prior_t0_to_H_B"])[1:]

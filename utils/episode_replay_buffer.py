@@ -16,8 +16,8 @@ class EpisodeReplayBuffer:
 
         # The actual episode buffer.
         self.episodes = deque()
-        # Maps (unique) episode IDs to the idex under which to find this episode
-        # within our `self.episodes` Deque. Note that after ejection started, the
+        # Maps (unique) episode IDs to the index under which to find this episode
+        # within our `self.episodes` deque. Note that after ejection started, the
         # indices will NOT be changed. We will therefore need to offset these indices
         # by the number of episodes that have already been ejected.
         self.episode_id_to_index = {}
@@ -26,7 +26,10 @@ class EpisodeReplayBuffer:
         # from the episode index to get the actual location within `self.episodes`.
         self._num_episodes_ejected = 0
 
-        # Deque storing all index tuples [eps-idx, pos-in-eps-idx].
+        # Deque storing all index tuples: [eps-idx, ts-in-eps-idx], where ...
+        # `eps-idx` - self._num_episodes_ejected is the index into self.episodes.
+        # `ts-in-eps-idx` is the timestep index within that episode
+        #  (0 = 1st timestep, etc..).
         # We sample uniformly from the set of these indices in a `sample()`
         # call.
         self._indices = []
@@ -221,12 +224,17 @@ class EpisodeReplayBuffer:
     #            episode.h_states[episode_ts] = h_states[i][j]
 
     def get_num_episodes(self):
+        """Returns the number of episodes (completed or truncated) stored in the buffer.
+        """
         return len(self.episodes)
 
     def get_num_timesteps(self):
+        """Returns the number of individual timesteps stored in the buffer."""
         return len(self._indices)
 
     def get_sampled_timesteps(self):
+        """Returns the number of timesteps that have been sampled in buffer's lifetime.
+        """
         return self.sampled_timesteps
 
 
