@@ -90,7 +90,7 @@ class DreamerModel(tf.keras.Model):
         states = self.world_model.get_initial_state(batch_size_B=batch_size_B)
         action_dim = (
             self.action_space.n if isinstance(self.action_space, gym.spaces.Discrete)
-            else len(self.action_space.shape)
+            else np.prod(self.action_space.shape)
         )
         if batch_size_B > 0:
             states["a"] = tf.zeros((batch_size_B, action_dim), dtype=tf.float32)

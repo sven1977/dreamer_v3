@@ -31,8 +31,9 @@ class SequenceModel(tf.keras.Model):
         num_gru_units = get_gru_units(model_dimension, override=num_gru_units)
 
         self.action_space = action_space
-        # TODO: In Danijar's code, there is an additional layer (units=[model_size])
-        #  prior to the GRU (but always only with 1 layer).
+        # In Danijar's code, there is an additional layer (units=[model_size])
+        # prior to the GRU (but always only with 1 layer), which is not mentioned in
+        # the paper.
         self.pre_gru_layer = MLP(
             num_dense_layers=1,
             model_dimension=model_dimension,
@@ -46,11 +47,11 @@ class SequenceModel(tf.keras.Model):
             # Note: Changing these activations is most likely a bad idea!
             # In experiments, setting one of both of them to silu deteriorated
             # performance significantly.
-            #activation=tf.nn.silu,
-            #recurrent_activation=tf.nn.silu,
+            # activation=tf.nn.silu,
+            # recurrent_activation=tf.nn.silu,
         )
         # Add layer norm after the GRU output.
-        #self.layer_norm = tf.keras.layers.LayerNormalization()
+        # self.layer_norm = tf.keras.layers.LayerNormalization()
 
     def call(self, z, a, h=None):
         """
