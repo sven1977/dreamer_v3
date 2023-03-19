@@ -1,6 +1,5 @@
 frozenlake-4x4-stochastic:
   env: FrozenLake-v1
-  is_atari: false
 
   env_config:
     map_name: 4x4

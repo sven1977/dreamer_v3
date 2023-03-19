@@ -286,14 +286,14 @@ if num_pretrain_iterations > 0:
         #buffer.update_h_states(h_B_t2_to_Tp1.numpy(), sample["indices"].numpy())
 
         # Summarize world model.
-        if iteration == 0:
-            # Dummy forward pass to be able to produce summary.
-            world_model(
-                sample["obs"][:, 0],
-                sample["actions"][:, 0],
-                sample["h_states"][:, 0],
-            )
-            world_model.summary()
+        #if iteration == 0:
+        #    # Dummy forward pass to be able to produce summary.
+        #    world_model(
+        #        sample["obs"][:, 0],
+        #        sample["actions"][:, 0],
+        #        sample["h_states"][:, 0],
+        #    )
+        #    world_model.summary()
 
         if summary_frequency_train_steps and iteration % summary_frequency_train_steps:
             summarize_forward_train_outs_vs_samples(
@@ -433,18 +433,18 @@ for iteration in range(1000000):
         #buffer.update_h_states(h_B_t2_to_Tp1.numpy(), sample["indices"].numpy())
 
         # Summarize world model.
-        if iteration == 0 and sub_iter == 0 and num_pretrain_iterations == 0:
+        #if iteration == 0 and sub_iter == 0 and num_pretrain_iterations == 0:
             # Dummy forward pass to be able to produce summary.
-            world_model(
-                {
-                    "h": world_model_forward_train_outs["h_states_BxT"][:batch_size_B],
-                    "z": world_model_forward_train_outs["z_states_BxT"][:batch_size_B],
-                    "a": sample["actions"][:, 0],
-                },
-                sample["obs"][:, 0],
-                sample["is_first"][:, 0],
-            )
-            world_model.summary()
+            #world_model(
+            #    {
+            #        "h": world_model_forward_train_outs["h_states_BxT"][:4],
+            #        "z": world_model_forward_train_outs["z_states_BxT"][:4],
+            #        "a": sample["actions"][:4, 0],
+            #    },
+            #    sample["obs"][:4, 0],
+            #    sample["is_first"][:4, 0],
+            #)
+            #world_model.summary()
 
         if summary_frequency_train_steps and (
                 total_train_steps % summary_frequency_train_steps == 0
@@ -497,7 +497,7 @@ for iteration in range(1000000):
                 )
                 dreamer_model.critic.init_ema()
                 # Summarize critic models.
-                dreamer_model.critic.summary()
+                #dreamer_model.critic.summary()
 
             actor_critic_train_results = train_actor_and_critic_one_step(
                 world_model_forward_train_outs=world_model_forward_train_outs,
@@ -522,17 +522,17 @@ for iteration in range(1000000):
             dream_data = actor_critic_train_results["dream_data"]
 
             # Summarize critic models.
-            if iteration == 0 and sub_iter == 0:
+            #if iteration == 0 and sub_iter == 0:
                 # Dummy forward pass to be able to produce summary.
-                if train_actor:
-                    dreamer_model.actor.summary()
-                if use_curiosity:
-                    dreamer_model.disagree_nets(
-                        dream_data["h_states_t0_to_H_B"][0],
-                        z=dream_data["z_states_prior_t0_to_H_B"][0],
-                        a=dream_data["actions_dreamed_t0_to_H_B"][0],
-                    )
-                    dreamer_model.disagree_nets.summary()
+                #if train_actor:
+                #    dreamer_model.actor.summary()
+                #if use_curiosity:
+                #    dreamer_model.disagree_nets(
+                #        dream_data["h_states_t0_to_H_B"][0],
+                #        z=dream_data["z_states_prior_t0_to_H_B"][0],
+                #        a=dream_data["actions_dreamed_t0_to_H_B"][0],
+                #    )
+                #    #dreamer_model.disagree_nets.summary()
 
             # Analyze generated dream data for its suitability in training the critic
             # and actors.
@@ -699,14 +699,15 @@ for iteration in range(1000000):
                 dataformats="NTHWC",
             )
 
-    # Save the model every N iterations (but not after the very first).
-    if iteration != 0 and model_save_frequency_main_iters and (
+    # Save the model every N iterations.
+    if model_save_frequency_main_iters and (
         iteration % model_save_frequency_main_iters == 0
     ):
-        try:
-            dreamer_model.save(f"{checkpoint_path}/dreamer_model_{iteration}")
-        except Exception as e:
-            print(f"ERROR: Trying to save DreamerModel!!\nError is {e}")
+        #try:
+        print("\nSAVING model ...")
+        dreamer_model.save(f"{checkpoint_path}/dreamer_model_{iteration}")
+        #except Exception as e:
+        #    print(f"ERROR: Trying to save DreamerModel!!\nError is {e}")
 
     # Try trick from https://medium.com/dive-into-ml-ai/dealing-with-memory-leak-
     # issue-in-keras-model-training-e703907a6501

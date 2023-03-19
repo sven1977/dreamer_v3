@@ -1,6 +1,5 @@
 pendulum:
   env: Pendulum-v1
-  is_atari: false
 
   model_dimension: XS
 

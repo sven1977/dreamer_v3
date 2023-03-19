@@ -1,6 +1,5 @@
 frozenlake-2x2-deterministic:
   env: FrozenLake-v1
-  is_atari: false
 
   env_config:
     desc:

@@ -1,6 +1,5 @@
 cartpole-debug:
   env: CartPoleDebug-v0
-  is_atari: false
 
   model_dimension: XS
 

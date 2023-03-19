@@ -1,4 +1,6 @@
 atari-100k:
+  # Run with --env ALE/[gym ID], e.g. ALE/Pong-v5.
+
   # [2]: "We follow the evaluation protocol of Machado et al. (2018) with 200M
   # environment steps, action repeat of 4, a time limit of 108,000 steps per
   # episode that correspond to 30 minutes of game play, no access to life
@@ -14,7 +16,8 @@ atari-100k:
   model_dimension: S
   training_ratio: 1024
 
-  summary_frequency_train_steps: 30
+  # Run config.
+  summary_frequency_train_steps: 100
   evaluation_frequency_main_iters: 1000
   evaluation_num_episodes: 2
   model_save_frequency_main_iters: 10000

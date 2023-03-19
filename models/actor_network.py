@@ -59,6 +59,7 @@ class ActorNetwork(tf.keras.Model):
         # Optimizer.
         self.optimizer = tf.keras.optimizers.Adam(learning_rate=3e-5, epsilon=1e-5)
 
+    @tf.function
     def call(self, h, z, return_distribution=False):
         """TODO
 

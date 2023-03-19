@@ -1,6 +1,5 @@
 debug-img-env:
   env: DebugImgEnv-v0
-  is_atari: false
 
   model_dimension: XS
 

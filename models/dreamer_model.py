@@ -62,7 +62,7 @@ class DreamerModel(tf.keras.Model):
     def call(self, inputs, *args, **kwargs):
         return self.forward_inference(inputs, *args, **kwargs)
 
-    @tf.function
+    @tf.function#(experimental_relax_shapes=True)
     def forward_inference(self, previous_states, observations, is_first, training=None):
         """TODO"""
         # Perform one step in the world model (starting from `previous_state` and
