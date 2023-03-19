@@ -217,10 +217,8 @@ class EnvRunnerV2:
         # Get initial states for all rows.
         if self.model is not None:
             initial_states = tree.map_structure(
-                lambda s: s.numpy(),
-                self.model.get_initial_state(
-                    batch_size_B=self.num_envs
-                ),
+                lambda s: tf.repeat(s, self.num_envs, axis=0).numpy(),
+                self.model.get_initial_state(),
             )
         else:
             raise NotImplementedError
@@ -306,7 +304,7 @@ class EnvRunnerV2:
                     )
                     # Reset h-states to all zeros b/c we are starting a new episode.
                     if self.model is not None:
-                        for k, v in self.model.get_initial_state(batch_size_B=0).items():
+                        for k, v in self.model.get_initial_state().items():
                             states[k][i] = v.numpy()
                     else:
                         raise NotImplementedError
@@ -378,10 +376,8 @@ class EnvRunnerV2:
 
         if self.model is not None:
             states = tree.map_structure(
-                lambda s: s.numpy(),
-                self.model.get_initial_state(
-                    batch_size_B=self.num_envs
-                ),
+                lambda s: tf.repeat(s, self.num_envs, axis=0).numpy(),
+                self.model.get_initial_state(),
             )
             is_first = np.ones((self.num_envs,), dtype=np.float32)
         else:
@@ -458,7 +454,7 @@ class EnvRunnerV2:
                     )
                     # Reset h-states to all zeros b/c we are starting a new episode.
                     if self.model is not None:
-                        for k, v in self.model.get_initial_state(batch_size_B=0).items():
+                        for k, v in self.model.get_initial_state().items():
                             states[k][i] = v.numpy()
                     else:
                         raise NotImplementedError

@@ -9,7 +9,7 @@ from utils.cartpole_debug import (
 from utils.symlog import inverse_symlog
 
 
-def _summarize(tbx_writer, step, keys_to_log, results):
+def _summarize(tbx_writer, step, keys_to_log, results, include_histograms=False):
     results = tree.map_structure(
         lambda s: s.numpy() if tf.is_tensor(s) else s,
         results,
@@ -18,7 +18,7 @@ def _summarize(tbx_writer, step, keys_to_log, results):
     for k in keys_to_log:
         if results[k].shape == ():
             tbx_writer.add_scalar(k, results[k], global_step=step)
-        else:
+        elif include_histograms:
             tbx_writer.add_histogram(k, results[k], global_step=step)
 
 
@@ -183,7 +183,13 @@ def summarize_forward_train_outs_vs_samples(
     )
 
 
-def summarize_actor_train_results(*, tbx_writer, step, actor_critic_train_results):
+def summarize_actor_train_results(
+    *,
+    tbx_writer,
+    step,
+    actor_critic_train_results,
+    include_histograms=False,
+):
     keys_to_log = [
         # Loss terms.
         "ACTOR_L_total",
@@ -203,10 +209,22 @@ def summarize_actor_train_results(*, tbx_writer, step, actor_critic_train_result
         "ACTOR_gradients_clipped_by_glob_norm_maxabs",
     ]
 
-    _summarize(tbx_writer, step, keys_to_log, actor_critic_train_results)
+    _summarize(
+        tbx_writer,
+        step,
+        keys_to_log,
+        actor_critic_train_results,
+        include_histograms,
+    )
 
 
-def summarize_critic_train_results(*, tbx_writer, step, actor_critic_train_results):
+def summarize_critic_train_results(
+    *,
+    tbx_writer,
+    step,
+    actor_critic_train_results,
+    include_histograms=False,
+):
     keys_to_log = [
         # TODO: Move this to generic function as value targets are also important for actor
         #  loss.
@@ -223,10 +241,22 @@ def summarize_critic_train_results(*, tbx_writer, step, actor_critic_train_resul
         "CRITIC_gradients_clipped_by_glob_norm_maxabs",
     ]
 
-    _summarize(tbx_writer, step, keys_to_log, actor_critic_train_results)
+    _summarize(
+        tbx_writer,
+        step,
+        keys_to_log,
+        actor_critic_train_results,
+        include_histograms,
+    )
 
 
-def summarize_disagree_train_results(*, tbx_writer, step, actor_critic_train_results):
+def summarize_disagree_train_results(
+    *,
+    tbx_writer,
+    step,
+    actor_critic_train_results,
+    include_histograms=False,
+):
     keys_to_log = [
         # Loss terms.
         "DISAGREE_L_total",
@@ -240,7 +270,13 @@ def summarize_disagree_train_results(*, tbx_writer, step, actor_critic_train_res
         "DISAGREE_gradients_clipped_by_glob_norm_maxabs",
     ]
 
-    _summarize(tbx_writer, step, keys_to_log, actor_critic_train_results)
+    _summarize(
+        tbx_writer,
+        step,
+        keys_to_log,
+        actor_critic_train_results,
+        include_histograms,
+    )
 
 
 def summarize_dreamed_eval_trajectory_vs_samples(
@@ -355,7 +391,13 @@ def summarize_sampling_and_replay_buffer(
         )
 
 
-def summarize_world_model_train_results(*, tbx_writer, step, world_model_train_results):
+def summarize_world_model_train_results(
+    *,
+    tbx_writer,
+    step,
+    world_model_train_results,
+    include_histograms=False,
+):
     # TODO: Move to returned train_one_step results.
     tbx_writer.add_scalar("WORLD_MODEL_initial_h_sum_abs", tf.reduce_sum(
         tf.math.abs(world_model_train_results["WORLD_MODEL_learned_initial_h"].numpy())
@@ -395,7 +437,13 @@ def summarize_world_model_train_results(*, tbx_writer, step, world_model_train_r
         "WORLD_MODEL_gradients_clipped_by_glob_norm_maxabs",
     ]
 
-    _summarize(tbx_writer, step, keys_to_log, world_model_train_results)
+    _summarize(
+        tbx_writer,
+        step,
+        keys_to_log,
+        world_model_train_results,
+        include_histograms,
+    )
 
 
 def _summarize_obs(

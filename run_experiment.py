@@ -102,6 +102,8 @@ tbx_writer = SummaryWriter(tensorboard_path)
 num_pretrain_iterations = config.get("num_pretrain_iterations", 0)
 # Every how many training steps do we write data to TB?
 summary_frequency_train_steps = config.get("summary_frequency_train_steps", 20)
+# Whether to summarize histograms as well.
+summary_include_histograms = config.get("summary_include_histograms", False)
 # Every how many training steps do we collect garbage
 gc_frequency_train_steps = config.get("gc_frequency_train_steps", 100)
 # Every how many main iterations do we evaluate?
@@ -309,6 +311,7 @@ if num_pretrain_iterations > 0:
                 tbx_writer=tbx_writer,
                 step=total_env_steps,
                 world_model_train_results=world_model_train_results,
+                include_histograms=summary_include_histograms,
             )
 
         print(
@@ -462,6 +465,7 @@ for iteration in range(1000000):
                 tbx_writer=tbx_writer,
                 step=total_env_steps,
                 world_model_train_results=world_model_train_results,
+                include_histograms=summary_include_histograms,
             )
 
         print(
@@ -544,6 +548,7 @@ for iteration in range(1000000):
                     tbx_writer = tbx_writer,
                     step=total_env_steps,
                     actor_critic_train_results = actor_critic_train_results,
+                    include_histograms=summary_include_histograms,
                 )
 
                 if train_actor:
@@ -551,12 +556,14 @@ for iteration in range(1000000):
                         tbx_writer=tbx_writer,
                         step=total_env_steps,
                         actor_critic_train_results=actor_critic_train_results,
+                        include_histograms=summary_include_histograms,
                     )
                 if use_curiosity:
                     summarize_disagree_train_results(
                         tbx_writer=tbx_writer,
                         step=total_env_steps,
                         actor_critic_train_results=actor_critic_train_results,
+                        include_histograms=summary_include_histograms,
                     )
 
                 # TODO: Make this work with any renderable env.

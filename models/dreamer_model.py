@@ -86,16 +86,14 @@ class DreamerModel(tf.keras.Model):
         return self.world_model.forward_train(observations, actions, is_first)
 
     @tf.function
-    def get_initial_state(self, batch_size_B: int = 0):
-        states = self.world_model.get_initial_state(batch_size_B=batch_size_B)
+    def get_initial_state(self):
+        states = self.world_model.get_initial_state()
+
         action_dim = (
             self.action_space.n if isinstance(self.action_space, gym.spaces.Discrete)
             else np.prod(self.action_space.shape)
         )
-        if batch_size_B > 0:
-            states["a"] = tf.zeros((batch_size_B, action_dim), dtype=tf.float32)
-        else:
-            states["a"] = tf.zeros((action_dim,), dtype=tf.float32)
+        states["a"] = tf.zeros((action_dim,), dtype=tf.float32)
         return states
 
     @tf.function

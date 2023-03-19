@@ -7,6 +7,7 @@ from typing import Optional
 
 import gymnasium as gym
 import tensorflow as tf
+import tree  # pip install dm_tree
 
 from models.components.continue_predictor import ContinuePredictor
 from models.components.dynamics_predictor import DynamicsPredictor
@@ -121,17 +122,25 @@ class WorldModel(tf.keras.Model):
         self.optimizer = tf.keras.optimizers.Adam(learning_rate=1e-4, epsilon=1e-8)
 
     @tf.function
-    def get_initial_state(self, batch_size_B):
-        h = tf.repeat(tf.math.tanh(self.initial_h), batch_size_B or 1, axis=0)
+    def get_initial_state(self):#, batch_size_B):
+        #h = tf.repeat(tf.math.tanh(self.initial_h), batch_size_B or 1, axis=0)
+        ## Use the mode, NOT a sample for the initial z-state.
+        #_, z_probs = self.dynamics_predictor(h, return_z_probs=True)
+        #z = tf.argmax(z_probs, axis=-1)
+        #z = tf.one_hot(z, depth=z_probs.shape[-1])
+
+        #if batch_size_B is None or batch_size_B > 0:
+        #    return {"h": h, "z": z}
+        #else:
+        #    return {"h": tf.squeeze(h, 0), "z": tf.squeeze(z, 0)}
+
+        h = tf.expand_dims(tf.math.tanh(self.initial_h), 0)
         # Use the mode, NOT a sample for the initial z-state.
         _, z_probs = self.dynamics_predictor(h, return_z_probs=True)
         z = tf.argmax(z_probs, axis=-1)
         z = tf.one_hot(z, depth=z_probs.shape[-1])
 
-        if batch_size_B is None or batch_size_B > 0:
-            return {"h": h, "z": z}
-        else:
-            return {"h": tf.squeeze(h, 0), "z": tf.squeeze(z, 0)}
+        return {"h": tf.squeeze(h, 0), "z": tf.squeeze(z, 0)}
 
     def call(self, inputs, *args, **kwargs):
         return self.forward_inference(inputs, *args, **kwargs)
@@ -157,7 +166,10 @@ class WorldModel(tf.keras.Model):
         Returns:
             The next deterministic h-state (h(t+1)) as predicted by the sequence model.
         """
-        initial_states = self.get_initial_state(batch_size_B=observations.shape[0])
+        initial_states = tree.map_structure(
+            lambda s: tf.repeat(s, observations.shape[0], axis=0),
+            self.get_initial_state()
+        )
 
         # If first, mask it with initial state/actions.
         previous_h = self._mask(previous_states["h"], 1.0 - is_first)  # zero out
@@ -216,7 +228,10 @@ class WorldModel(tf.keras.Model):
         )
         # encoder_out=[T, B, ...]
 
-        initial_states = self.get_initial_state(batch_size_B=B)
+        initial_states = tree.map_structure(
+            lambda s: tf.repeat(s, B, axis=0),
+            self.get_initial_state()
+        )
 
         # Make actions and `is_first` time-major.
         actions = tf.transpose(
