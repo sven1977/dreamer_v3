@@ -710,8 +710,9 @@ for iteration in range(1000000):
             ("critic", dreamer_model.critic),
             ("disagree_nets", dreamer_model.disagree_nets),
         ]:
-            np.savez(f"{checkpoint_path}/{iteration}/{name}", weights=model.get_weights())
-            np.savez(f"{checkpoint_path}/{iteration}/{name}_optimizer", weights=model.optimizer.get_weights())
+            if model is not None:
+                np.savez(f"{checkpoint_path}/{iteration}/{name}", weights=model.get_weights())
+                np.savez(f"{checkpoint_path}/{iteration}/{name}_optimizer", weights=model.optimizer.get_weights())
         # Save buffer.
         np.savez(f"{checkpoint_path}/{iteration}/buffer", state=buffer.get_state())
         # Save state variables.
