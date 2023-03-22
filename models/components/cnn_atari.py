@@ -8,7 +8,7 @@ from typing import Optional
 import numpy as np
 import tensorflow as tf
 
-from utils.model_sizes import get_cnn_multiplier
+from utils.model_dimensions import get_cnn_multiplier
 
 class CNNAtari(tf.keras.Model):
     # TODO: Un-hard-code all hyperparameters, such as input dims, activation,

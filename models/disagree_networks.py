@@ -30,11 +30,13 @@ class DisagreeNetworks(tf.keras.Model):
 
         for _ in range(self.num_networks):
             self.mlps.append(MLP(
-                model_dimension=model_dimension,
+                model_dimension=self.model_dimension,
                 output_layer_size=None,
                 trainable=True,
             ))
-            self.representation_layers.append(RepresentationLayer())
+            self.representation_layers.append(RepresentationLayer(
+                model_dimension=self.model_dimension
+            ))
 
         # Optimizer.
         self.optimizer = tf.keras.optimizers.Adam(learning_rate=1e-4, epsilon=1e-5)
@@ -49,8 +51,8 @@ class DisagreeNetworks(tf.keras.Model):
         B = tf.shape(h)[0]
 
         # Intrinsic rewards are computed as:
-        # Stddev of the mode of the 32x32 discrete, stochastic probs
-        # between the different nets. Meaning that if the larger the disagreement
+        # Stddev (between the different nets) of the 32x32 discrete, stochastic
+        # probabilities. Meaning that if the larger the disagreement
         # (stddev) between the nets on what the probabilities for the different
         # classes should be, the higher the intrinsic reward.
         z_predicted_probs_N_B = forward_train_outs["z_predicted_probs_N_HxB"]
@@ -67,6 +69,9 @@ class DisagreeNetworks(tf.keras.Model):
             tf.math.reduce_std(z_predicted_probs_N_B, axis=0),
             axis=-1,
         )
+        #TEST:
+        stddevs_B_mean -= tf.reduce_mean(stddevs_B_mean)
+        #END TEST
         return {
             "rewards_intrinsic": stddevs_B_mean * self.intrinsic_rewards_scale,
             "forward_train_outs": forward_train_outs,

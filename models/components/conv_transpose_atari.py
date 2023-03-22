@@ -13,7 +13,7 @@ from typing import Optional, Tuple
 import tensorflow as tf
 import tensorflow_probability as tfp
 
-from utils.model_sizes import get_cnn_multiplier
+from utils.model_dimensions import get_cnn_multiplier
 
 
 class ConvTransposeAtari(tf.keras.Model):

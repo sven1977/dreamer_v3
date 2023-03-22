@@ -271,7 +271,11 @@ class EnvRunnerV2:
             else:
                 # Sample.
                 if explore:
-                    actions, states = self.model(states, obs, is_first)
+                    actions, states = self.model.forward_inference(
+                        tree.map_structure(lambda s: tf.convert_to_tensor(s), states),
+                        tf.convert_to_tensor(obs),
+                        tf.convert_to_tensor(is_first),
+                    )
                     actions = actions.numpy()
                     if isinstance(self.env.single_action_space, gym.spaces.Discrete):
                         actions = np.argmax(actions, axis=-1)
@@ -418,7 +422,11 @@ class EnvRunnerV2:
             else:
                 # Sample.
                 if explore:
-                    actions, states = self.model(states, obs, is_first)
+                    actions, states = self.model.forward_inference(
+                        tree.map_structure(lambda s: tf.convert_to_tensor(s), states),
+                        tf.convert_to_tensor(obs),
+                        tf.convert_to_tensor(is_first),
+                    )
                     actions = actions.numpy()
                     if isinstance(self.env.single_action_space, gym.spaces.Discrete):
                         actions = np.argmax(actions, axis=-1)

@@ -10,7 +10,7 @@ import numpy as np
 import tensorflow as tf
 
 from models.components.mlp import MLP
-from utils.model_sizes import get_gru_units
+from utils.model_dimensions import get_gru_units
 
 
 # TODO: de-hardcode the discrete action processing (currently one-hot).

@@ -17,8 +17,8 @@ class DynamicsPredictor(tf.keras.Model):
         self,
         *,
         model_dimension: Optional[str] = "XS",
-        num_categoricals: int = 32,
-        num_classes_per_categorical: int = 32,
+        num_categoricals: Optional[int] = None,
+        num_classes_per_categorical: Optional[int] = None,
     ):
         super().__init__()
 
@@ -30,6 +30,7 @@ class DynamicsPredictor(tf.keras.Model):
             output_layer_size=None,
         )
         self.representation_layer = RepresentationLayer(
+            model_dimension=model_dimension,
             num_categoricals=num_categoricals,
             num_classes_per_categorical=num_classes_per_categorical,
         )

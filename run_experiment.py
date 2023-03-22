@@ -70,6 +70,12 @@ parser.add_argument(
     default="ALE/Pong-v5",
     help="The env to use for the experiment.",
 )
+parser.add_argument(
+    "--checkpoint",
+    type=str,
+    default=None,
+    help="Checkpoint dir to load dreamer model model from."
+)
 args = parser.parse_args()
 print(f"Trying to open config file {args.config} ...")
 with open(args.config, "r") as f:
@@ -164,49 +170,62 @@ use_curiosity = config.get("use_curiosity", False)
 intrinsic_rewards_scale = config.get("intrinsic_rewards_scale", 0.1)
 
 # Our DreamerV3 world model.
-from_checkpoint = None
-# Uncomment this next line to load from a saved model.
-#from_checkpoint = "checkpoints/dreamer_model_0"
-if from_checkpoint is not None:
-    dreamer_model = tf.keras.models.load_model(from_checkpoint)
-else:
-    model_dimension = config["model_dimension"]
-    gray_scaled = is_img_space and len(env_runner.env.single_observation_space.shape) == 2
-    world_model = WorldModel(
+print(f"Creating initial DreamerModel ...")
+model_dimension = config["model_dimension"]
+gray_scaled = is_img_space and len(env_runner.env.single_observation_space.shape) == 2
+world_model = WorldModel(
+    model_dimension=model_dimension,
+    action_space=action_space,
+    batch_length_T=batch_length_T,
+    num_gru_units=config.get("num_gru_units"),
+    encoder=(
+        CNNAtari(model_dimension=model_dimension) if is_img_space
+        else MLP(model_dimension=model_dimension)
+    ),
+    decoder=ConvTransposeAtari(
         model_dimension=model_dimension,
-        action_space=action_space,
-        batch_length_T=batch_length_T,
-        num_gru_units=config.get("num_gru_units"),
-        encoder=(
-            CNNAtari(model_dimension=model_dimension) if is_img_space
-            else MLP(model_dimension=model_dimension)
-        ),
-        decoder=ConvTransposeAtari(
-            model_dimension=model_dimension,
-            gray_scaled=gray_scaled,
-        ) if is_img_space else VectorDecoder(
-            model_dimension=model_dimension,
-            observation_space=env_runner.env.single_observation_space,
-        ),
-        symlog_obs=symlog_obs,
-    )
-    dreamer_model = DreamerModel(
+        gray_scaled=gray_scaled,
+    ) if is_img_space else VectorDecoder(
         model_dimension=model_dimension,
-        action_space=action_space,
-        world_model=world_model,
-        use_curiosity=use_curiosity,
-        intrinsic_rewards_scale=intrinsic_rewards_scale,
-    )
-
-# TODO: ugly hack (resulting from the insane fact that you cannot know
-#  an env's spaces prior to actually constructing an instance of it) :(
-env_runner.model = dreamer_model
-env_runner_evaluation.model = dreamer_model
+        observation_space=env_runner.env.single_observation_space,
+    ),
+    symlog_obs=symlog_obs,
+)
+dreamer_model = DreamerModel(
+    model_dimension=model_dimension,
+    action_space=action_space,
+    world_model=world_model,
+    use_curiosity=use_curiosity,
+    intrinsic_rewards_scale=intrinsic_rewards_scale,
+    batch_size_B=batch_size_B,
+    batch_length_T=batch_length_T,
+    horizon_H=horizon_H,
+)
 
 # The replay buffer for storing actual env samples.
 buffer = EpisodeReplayBuffer(capacity=int(1e6))
 # Timesteps to put into the buffer before the first learning step.
 warm_up_timesteps = 0
+
+# Load state from a saved checkpoint.
+if args.checkpoint is not None:
+    #dreamer_model = tf.keras.models.load_model(args.checkpoint)
+    # Load buffer.
+    print("LOADING data from checkpoint into buffer.")
+    buffer.set_state(np.load(f"{args.checkpoint}/buffer.npz", allow_pickle=True)["state"])
+
+    total_env_steps = int(np.load(f"{args.checkpoint}/total_env_steps.npy"))
+    total_replayed_steps = int(np.load(f"{args.checkpoint}/total_replayed_steps.npy"))
+    total_train_steps = int(np.load(f"{args.checkpoint}/total_train_steps.npy"))
+else:
+    total_env_steps = 0
+    total_replayed_steps = 0
+    total_train_steps = 0
+
+# TODO: ugly hack (resulting from the insane fact that you cannot know
+#  an env's spaces prior to actually constructing an instance of it) :(
+env_runner.model = dreamer_model
+env_runner_evaluation.model = dreamer_model
 
 # World model grad (by global norm) clipping according to [1] Appendix W.
 world_model_grad_clip = 1000.0
@@ -220,10 +239,6 @@ disagree_grad_clip = 100.0
 # Training ratio: Ratio of replayed steps over env steps.
 training_ratio = config["training_ratio"]
 
-total_env_steps = 0
-total_replayed_steps = 0
-total_train_steps = 0
-
 if num_pretrain_iterations > 0:
     # 1) Initialize dataset
     import d3rlpy
@@ -236,7 +251,7 @@ if num_pretrain_iterations > 0:
     else:
         raise ValueError("Unknown offline environment.")
     
-    print("Loading episodes from d3rlpy to dreamer_v3")
+    print("LOADING episodes from d3rlpy to dreamer_v3")
     episodes = []
     for eps in dataset:
         eps_ = Episode()
@@ -277,25 +292,6 @@ if num_pretrain_iterations > 0:
             world_model=world_model,
         )
         forward_train_outs = world_model_train_results["forward_train_outs"]
-
-        # Update h_states in buffer after the world model (sequential model)
-        # forward pass.
-        #h_BxT = forward_train_outs["h_states_BxT"]
-        #h_B_t2_to_Tp1 = tf.concat([tf.reshape(
-        #    h_BxT,
-        #    shape=(batch_size_B, batch_length_T) + h_BxT.shape[1:],
-        #)[:, 1:], tf.expand_dims(h_states_training, axis=1)], axis=1)
-        #buffer.update_h_states(h_B_t2_to_Tp1.numpy(), sample["indices"].numpy())
-
-        # Summarize world model.
-        #if iteration == 0:
-        #    # Dummy forward pass to be able to produce summary.
-        #    world_model(
-        #        sample["obs"][:, 0],
-        #        sample["actions"][:, 0],
-        #        sample["h_states"][:, 0],
-        #    )
-        #    world_model.summary()
 
         if summary_frequency_train_steps and iteration % summary_frequency_train_steps:
             summarize_forward_train_outs_vs_samples(
@@ -343,7 +339,7 @@ for iteration in range(1000000):
 
     if iteration == 0:
         print(
-            "Pre-filling replay buffer so it contains at least "
+            "Filling replay buffer so it contains at least "
             f"{batch_size_B * batch_length_T} ts (required for a single train batch)."
         )
 
@@ -420,66 +416,10 @@ for iteration in range(1000000):
             batch_size_B=tf.convert_to_tensor(batch_size_B),
             batch_length_T=tf.convert_to_tensor(batch_length_T),
             grad_clip=tf.convert_to_tensor(world_model_grad_clip),
-            world_model=world_model,
+            world_model=dreamer_model.world_model,
         )
         world_model_forward_train_outs = (
             world_model_train_results["WORLD_MODEL_forward_train_outs"]
-        )
-
-        # Update h_states in buffer after the world model (sequential model)
-        # forward pass.
-        #h_BxT = forward_train_outs["h_states_BxT"]
-        #h_B_t2_to_Tp1 = tf.concat([tf.reshape(
-        #    h_BxT,
-        #    shape=(batch_size_B, batch_length_T) + h_BxT.shape[1:],
-        #)[:, 1:], tf.expand_dims(h_states_training, axis=1)], axis=1)
-        #buffer.update_h_states(h_B_t2_to_Tp1.numpy(), sample["indices"].numpy())
-
-        # Summarize world model.
-        #if iteration == 0 and sub_iter == 0 and num_pretrain_iterations == 0:
-            # Dummy forward pass to be able to produce summary.
-            #world_model(
-            #    {
-            #        "h": world_model_forward_train_outs["h_states_BxT"][:4],
-            #        "z": world_model_forward_train_outs["z_states_BxT"][:4],
-            #        "a": sample["actions"][:4, 0],
-            #    },
-            #    sample["obs"][:4, 0],
-            #    sample["is_first"][:4, 0],
-            #)
-            #world_model.summary()
-
-        if summary_frequency_train_steps and (
-                total_train_steps % summary_frequency_train_steps == 0
-        ):
-            summarize_forward_train_outs_vs_samples(
-                tbx_writer=tbx_writer,
-                step=total_env_steps,
-                forward_train_outs=world_model_forward_train_outs,
-                sample=sample,
-                batch_size_B=batch_size_B,
-                batch_length_T=batch_length_T,
-                symlog_obs=symlog_obs,
-            )
-            summarize_world_model_train_results(
-                tbx_writer=tbx_writer,
-                step=total_env_steps,
-                world_model_train_results=world_model_train_results,
-                include_histograms=summary_include_histograms,
-            )
-
-        print(
-            "\t\tWORLD_MODEL_L_total="
-            f"{world_model_train_results['WORLD_MODEL_L_total'].numpy():.5f} ("
-            "L_pred="
-            f"{world_model_train_results['WORLD_MODEL_L_prediction'].numpy():.5f} ("
-            f"dec/obs={world_model_train_results['WORLD_MODEL_L_decoder'].numpy()} "
-            f"rew(two-hot)={world_model_train_results['WORLD_MODEL_L_reward'].numpy()} "
-            f"cont={world_model_train_results['WORLD_MODEL_L_continue'].numpy()}"
-            "); "
-            f"L_dyn={world_model_train_results['WORLD_MODEL_L_dynamics'].numpy():.5f}; "
-            "L_rep="
-            f"{world_model_train_results['WORLD_MODEL_L_representation'].numpy():.5f})"
         )
 
         # Train critic and actor.
@@ -518,73 +458,122 @@ for iteration in range(1000000):
                 train_actor=train_actor,
                 use_curiosity=use_curiosity,
             )
-            L_critic = actor_critic_train_results["CRITIC_L_total"]
-            if train_actor:
-                L_actor = actor_critic_train_results["ACTOR_L_total"]
-            if use_curiosity:
-                L_disagree = actor_critic_train_results["DISAGREE_L_total"]
-            dream_data = actor_critic_train_results["dream_data"]
 
-            # Summarize critic models.
-            #if iteration == 0 and sub_iter == 0:
-                # Dummy forward pass to be able to produce summary.
-                #if train_actor:
-                #    dreamer_model.actor.summary()
-                #if use_curiosity:
-                #    dreamer_model.disagree_nets(
-                #        dream_data["h_states_t0_to_H_B"][0],
-                #        z=dream_data["z_states_prior_t0_to_H_B"][0],
-                #        a=dream_data["actions_dreamed_t0_to_H_B"][0],
-                #    )
-                #    #dreamer_model.disagree_nets.summary()
+        # Summarize world model.
+        if iteration == 0 and sub_iter == 0 and num_pretrain_iterations == 0:
+            # Dummy forward pass to be able to produce summary.
+            dreamer_model(
+                sample["obs"][:1, 0],
+                sample["actions"][:1, 0],
+                {
+                    "h": world_model_forward_train_outs["h_states_BxT"][:1],
+                    "z": world_model_forward_train_outs["z_states_BxT"][:1],
+                    "a": sample["actions"][:1, 0],
+                },
+                sample["is_first"][:1, 0],
+            )
+            dreamer_model.summary()
 
-            # Analyze generated dream data for its suitability in training the critic
-            # and actors.
-            if summary_frequency_train_steps and (
+            if args.checkpoint:
+                print(f"LOADING data into DreamerModel from checkpoint {args.checkpoint} ...")
+                for name, model in [
+                    ("world_model", dreamer_model.world_model),
+                    ("actor", dreamer_model.actor),
+                    ("critic", dreamer_model.critic),
+                    ("disagree_nets", dreamer_model.disagree_nets),
+                ]:
+                    model.set_weights(
+                        np.load(
+                            f"{args.checkpoint}/{name}.npz",
+                            allow_pickle=True,
+                        )["weights"]
+                    )
+                    model.optimizer.set_weights(
+                        np.load(
+                            f"{args.checkpoint}/{name}_optimizer.npz",
+                            allow_pickle=True,
+                        )["weights"]
+                    )
+
+        if summary_frequency_train_steps and (
                 total_train_steps % summary_frequency_train_steps == 0
-            ):
-                # Summarize actor-critic loss stats.
+        ):
+            summarize_forward_train_outs_vs_samples(
+                tbx_writer=tbx_writer,
+                step=total_env_steps,
+                forward_train_outs=world_model_forward_train_outs,
+                sample=sample,
+                batch_size_B=batch_size_B,
+                batch_length_T=batch_length_T,
+                symlog_obs=symlog_obs,
+            )
+            summarize_world_model_train_results(
+                tbx_writer=tbx_writer,
+                step=total_env_steps,
+                world_model_train_results=world_model_train_results,
+                include_histograms=summary_include_histograms,
+            )
+            # Summarize actor-critic loss stats.
+            if train_critic:
                 summarize_critic_train_results(
-                    tbx_writer = tbx_writer,
+                    tbx_writer=tbx_writer,
                     step=total_env_steps,
-                    actor_critic_train_results = actor_critic_train_results,
+                    actor_critic_train_results=actor_critic_train_results,
                     include_histograms=summary_include_histograms,
                 )
+            if train_actor:
+                summarize_actor_train_results(
+                    tbx_writer=tbx_writer,
+                    step=total_env_steps,
+                    actor_critic_train_results=actor_critic_train_results,
+                    include_histograms=summary_include_histograms,
+                )
+            if use_curiosity:
+                summarize_disagree_train_results(
+                    tbx_writer=tbx_writer,
+                    step=total_env_steps,
+                    actor_critic_train_results=actor_critic_train_results,
+                    include_histograms=summary_include_histograms,
+                )
+            # TODO: Make this work with any renderable env.
+            if env_runner.config.env in [
+                "CartPoleDebug-v0", "CartPole-v1", "FrozenLake-v1"
+            ]:
+                summarize_dreamed_trajectory(
+                    tbx_writer=tbx_writer,
+                    dream_data=actor_critic_train_results["dream_data"],
+                    actor_critic_train_results=actor_critic_train_results,
+                    env=env_runner.config.env,
+                    dreamer_model=dreamer_model,
+                    obs_dims_shape=sample["obs"].shape[2:],
+                    step=total_env_steps,
+                    desc="for_actor_critic_learning",
+                )
 
-                if train_actor:
-                    summarize_actor_train_results(
-                        tbx_writer=tbx_writer,
-                        step=total_env_steps,
-                        actor_critic_train_results=actor_critic_train_results,
-                        include_histograms=summary_include_histograms,
-                    )
-                if use_curiosity:
-                    summarize_disagree_train_results(
-                        tbx_writer=tbx_writer,
-                        step=total_env_steps,
-                        actor_critic_train_results=actor_critic_train_results,
-                        include_histograms=summary_include_histograms,
-                    )
-
-                # TODO: Make this work with any renderable env.
-                if env_runner.config.env in [
-                    "CartPoleDebug-v0", "CartPole-v1", "FrozenLake-v1"
-                ]:
-                    summarize_dreamed_trajectory(
-                        tbx_writer=tbx_writer,
-                        dream_data=dream_data,
-                        actor_critic_train_results=actor_critic_train_results,
-                        env=env_runner.config.env,
-                        dreamer_model=dreamer_model,
-                        obs_dims_shape=sample["obs"].shape[2:],
-                        step=total_env_steps,
-                        desc="for_actor_critic_learning",
-                    )
-
-            print(
-                f"\t\tL_actor={L_actor.numpy() if train_actor else 0.0:.5f} "
-                f"L_critic={L_critic.numpy():.5f}"
-            )
+        print(
+            "\t\tWORLD_MODEL_L_total="
+            f"{world_model_train_results['WORLD_MODEL_L_total'].numpy():.5f} ("
+            "L_pred="
+            f"{world_model_train_results['WORLD_MODEL_L_prediction'].numpy():.5f} ("
+            f"dec/obs={world_model_train_results['WORLD_MODEL_L_decoder'].numpy()} "
+            f"rew(two-hot)={world_model_train_results['WORLD_MODEL_L_reward'].numpy()} "
+            f"cont={world_model_train_results['WORLD_MODEL_L_continue'].numpy()}"
+            "); "
+            f"L_dyn={world_model_train_results['WORLD_MODEL_L_dynamics'].numpy():.5f}; "
+            "L_rep="
+            f"{world_model_train_results['WORLD_MODEL_L_representation'].numpy():.5f})"
+        )
+        print("\t\t", end="")
+        if train_actor:
+            L_actor = actor_critic_train_results["ACTOR_L_total"]
+            print(f"L_actor={L_actor.numpy() if train_actor else 0.0:.5f} ", end="")
+        if train_critic:
+            L_critic = actor_critic_train_results["CRITIC_L_total"]
+            print(f"L_critic={L_critic.numpy():.5f} ", end="")
+        if use_curiosity:
+            L_disagree = actor_critic_train_results["DISAGREE_L_total"]
+            print(f"L_disagree={L_disagree.numpy():.5f}", end="")
+        print()
 
         sub_iter += 1
         total_train_steps += 1
@@ -637,7 +626,10 @@ for iteration in range(1000000):
             "from all 1st timesteps drawn from buffer to compare with sampled data "
             "(using the same actions as in the sampling) ..."
         )
-        start_states = dreamer_model.get_initial_state(batch_size_B=batch_size_B)
+        start_states = tree.map_structure(
+            lambda s: tf.repeat(s, batch_size_B, axis=0),
+            dreamer_model.get_initial_state()
+        )
         dream_data = dreamer_model.dream_trajectory_with_burn_in(
             start_states=start_states,
             timesteps_burn_in=burn_in_T,
@@ -710,11 +702,23 @@ for iteration in range(1000000):
     if model_save_frequency_main_iters and (
         iteration % model_save_frequency_main_iters == 0
     ):
-        #try:
         print("\nSAVING model ...")
-        dreamer_model.save(f"{checkpoint_path}/dreamer_model_{iteration}")
-        #except Exception as e:
-        #    print(f"ERROR: Trying to save DreamerModel!!\nError is {e}")
+        os.makedirs(f"{checkpoint_path}/{iteration}")
+        for name, model in [
+            ("world_model", dreamer_model.world_model),
+            ("actor", dreamer_model.actor),
+            ("critic", dreamer_model.critic),
+            ("disagree_nets", dreamer_model.disagree_nets),
+        ]:
+            np.savez(f"{checkpoint_path}/{iteration}/{name}", weights=model.get_weights())
+            np.savez(f"{checkpoint_path}/{iteration}/{name}_optimizer", weights=model.optimizer.get_weights())
+        # Save buffer.
+        np.savez(f"{checkpoint_path}/{iteration}/buffer", state=buffer.get_state())
+        # Save state variables.
+        np.save(f"{checkpoint_path}/{iteration}/total_env_steps", total_env_steps)
+        np.save(f"{checkpoint_path}/{iteration}/total_replayed_steps", total_replayed_steps)
+        np.save(f"{checkpoint_path}/{iteration}/total_train_steps", total_train_steps)
+        #dreamer_model.save(f"{checkpoint_path}/dreamer_model_{iteration}")
 
     # Try trick from https://medium.com/dive-into-ml-ai/dealing-with-memory-leak-
     # issue-in-keras-model-training-e703907a6501
@@ -722,7 +726,6 @@ for iteration in range(1000000):
         total_train_steps % gc_frequency_train_steps == 0
     ):
         gc.collect()
-        #tf.keras.backend.clear_session()  # <- this seems to be not needed.
 
     # Log GPU memory consumption.
     try:

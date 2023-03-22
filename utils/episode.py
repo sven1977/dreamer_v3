@@ -98,6 +98,26 @@ class Episode:
     def get_return(self):
         return sum(self.rewards)
 
+    def get_state(self):
+        return list({
+            "id_": self.id_,
+            "observations": self.observations,
+            "actions": self.actions,
+            "rewards": self.rewards,
+            "states": self.states,
+            "is_terminated": self.is_terminated,
+        }.items())
+
+    @staticmethod
+    def from_state(state):
+        eps = Episode(id_=state[0][1])
+        eps.observations = state[1][1]
+        eps.actions = state[2][1]
+        eps.rewards = state[3][1]
+        eps.states = state[4][1]
+        eps.is_terminated = state[5][1]
+        return eps
+
     def __len__(self):
         assert len(self.observations) > 0, (
             "ERROR: Cannot determine length of episode that hasn't started yet! "

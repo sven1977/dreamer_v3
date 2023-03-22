@@ -14,7 +14,12 @@ frozenlake-2x2-deterministic:
 
   training_ratio: 1024
 
-  summary_frequency_train_steps: 5
-  evaluation_frequency_main_iters:  1
+  # Run config.
+  # Summary behavior.
+  summary_frequency_train_steps: 10
+  summary_include_histograms: true
+  # Evaluation runs.
+  evaluation_frequency_main_iters: 1
   evaluation_num_episodes: 20
+  # Model saving.
   model_save_frequency_main_iters: 1000

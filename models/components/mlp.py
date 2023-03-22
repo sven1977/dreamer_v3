@@ -11,7 +11,7 @@ from typing import Optional
 
 import tensorflow as tf
 
-from utils.model_sizes import get_dense_hidden_units, get_num_dense_layers
+from utils.model_dimensions import get_dense_hidden_units, get_num_dense_layers
 
 class MLP(tf.keras.Model):
     def __init__(

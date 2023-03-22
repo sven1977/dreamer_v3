@@ -8,11 +8,12 @@ import re
 import gymnasium as gym
 import numpy as np
 import tensorflow as tf
+import tree  # pip install dm_tree
 
 from models.actor_network import ActorNetwork
 from models.critic_network import CriticNetwork
 from models.disagree_networks import DisagreeNetworks
-from utils.model_sizes import get_num_curiosity_nets
+from utils.model_dimensions import get_num_curiosity_nets
 from utils.symlog import inverse_symlog
 
 
@@ -24,6 +25,9 @@ class DreamerModel(tf.keras.Model):
             *,
             model_dimension: str = "XS",
             action_space: gym.Space,
+            batch_size_B,
+            batch_length_T,
+            horizon_H,
             world_model,
             use_curiosity: bool = False,
             intrinsic_rewards_scale: float = 0.1,
@@ -40,6 +44,9 @@ class DreamerModel(tf.keras.Model):
         self.model_dimension = model_dimension
         self.action_space = action_space
         self.use_curiosity = use_curiosity
+        self.batch_size_B = batch_size_B
+        self.batch_length_T = batch_length_T
+        self.horizon_H = horizon_H
 
         self.world_model = world_model
 
@@ -59,15 +66,55 @@ class DreamerModel(tf.keras.Model):
                 intrinsic_rewards_scale=intrinsic_rewards_scale,
             )
 
-    def call(self, inputs, *args, **kwargs):
-        return self.forward_inference(inputs, *args, **kwargs)
+    @tf.function
+    def call(self, inputs, actions, previous_states, is_first, training=None):
+        observations = inputs
+        self.get_initial_state()
+        # Single action inference.
+        self.forward_inference(
+            previous_states,
+            observations,
+            is_first,
+        )
+        previous_states_B = tree.map_structure(
+            lambda s: tf.repeat(s, self.batch_size_B, axis=0),
+            previous_states,
+        )
+        observations_B = tf.repeat(observations, self.batch_size_B, axis=0)
+        is_first_B = tf.repeat(is_first, self.batch_size_B, axis=0)
+        # Inference on "get_action" batch size (parallel envs).
+        self.forward_inference(
+            previous_states_B,
+            observations_B,
+            is_first_B,
+        )
+        previous_states_BxT = tree.map_structure(
+            lambda s: tf.repeat(s, self.batch_size_B * self.batch_length_T, axis=0),
+            previous_states,
+        )
+        self.dream_trajectory(
+            start_states=previous_states_BxT,
+            start_is_terminated=tf.fill((self.batch_size_B * self.batch_length_T,), 0.0),
+            timesteps_H=self.horizon_H,
+            gamma=0.99,
+        )
+        observations_B_T = tf.repeat(tf.expand_dims(observations_B, axis=1), self.batch_length_T, axis=1)
+        actions_B = tf.repeat(actions, self.batch_size_B, axis=0)
+        actions_B_T = tree.map_structure(
+            lambda s: tf.repeat(tf.expand_dims(s, axis=1), self.batch_length_T, axis=1),
+            actions_B,
+        )
+        is_first_B_T = tf.repeat(tf.expand_dims(is_first_B, axis=1), self.batch_length_T, axis=1)
+        # For train pass, add time dimension.
+        ret = self.forward_train(observations_B_T, actions_B_T, is_first_B_T)
+        return ret
 
-    @tf.function#(experimental_relax_shapes=True)
+    @tf.function
     def forward_inference(self, previous_states, observations, is_first, training=None):
         """TODO"""
         # Perform one step in the world model (starting from `previous_state` and
         # using the observations to yield a current (posterior) state).
-        states = self.world_model.forward_inference(
+        states = self.world_model(
             previous_states, observations, is_first
         )
 
@@ -93,7 +140,7 @@ class DreamerModel(tf.keras.Model):
             self.action_space.n if isinstance(self.action_space, gym.spaces.Discrete)
             else np.prod(self.action_space.shape)
         )
-        states["a"] = tf.zeros((action_dim,), dtype=tf.float32)
+        states["a"] = tf.zeros((1, action_dim,), dtype=tf.float32)
         return states
 
     @tf.function
@@ -183,12 +230,12 @@ class DreamerModel(tf.keras.Model):
                 z=z_states_prior_HxB,
                 a=tf.reshape(a_dreamed_H_B, [-1] + a_dreamed_H_B.shape.as_list()[2:]),
             )
-            # Cut out last timestep as we always predict z-states for the NEXT timestep
-            # and derive ri (for the NEXT timestep) from the disagreement between
-            # our N disagreee nets.
+            ## Wrong? -> Cut out last timestep as we always predict z-states for the NEXT timestep
+            ## and derive ri (for the NEXT timestep) from the disagreement between
+            ## our N disagreee nets.
             r_intrinsic_H_B = tf.reshape(
                 results_HxB["rewards_intrinsic"], shape=[timesteps_H+1, -1]
-            )[:-1]
+            )[1:]   # cut out first ts instead
             curiosity_forward_train_outs = results_HxB["forward_train_outs"]
             del results_HxB
 
@@ -279,10 +326,10 @@ class DreamerModel(tf.keras.Model):
         # observations:
         states = start_states
         for i in range(timesteps_burn_in):
-            states = self.world_model.forward_inference(
-                previous_states=states,
-                observations=observations[:, i],
-                is_first=tf.fill((B,), 1.0 if i == 0 else 0.0),
+            states = self.world_model(
+                states,
+                observations[:, i],
+                tf.fill((B,), 1.0 if i == 0 else 0.0),
             )
             states["a"] = actions[:, i]
 

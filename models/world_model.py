@@ -15,7 +15,7 @@ from models.components.mlp import MLP
 from models.components.representation_layer import RepresentationLayer
 from models.components.reward_predictor import RewardPredictor
 from models.components.sequence_model import SequenceModel
-from utils.model_sizes import get_gru_units
+from utils.model_dimensions import get_gru_units
 from utils.symlog import symlog
 
 
@@ -81,7 +81,9 @@ class WorldModel(tf.keras.Model):
             #  no matter the model size.
             num_dense_layers=1,
         )
-        self.posterior_representation_layer = RepresentationLayer()
+        self.posterior_representation_layer = RepresentationLayer(
+            model_dimension=self.model_dimension
+        )
 
         # Dynamics (prior) predictor: h -> z^
         self.dynamics_predictor = DynamicsPredictor(
@@ -94,7 +96,7 @@ class WorldModel(tf.keras.Model):
             override=num_gru_units,
         )
         self.initial_h = tf.Variable(
-            tf.zeros(shape=(1, self.num_gru_units,), dtype=tf.float32),
+            tf.zeros(shape=(self.num_gru_units,), dtype=tf.float32),
             trainable=True,
         )
         # -> tanh(self.initial_h) -> deterministic state
@@ -122,26 +124,16 @@ class WorldModel(tf.keras.Model):
         self.optimizer = tf.keras.optimizers.Adam(learning_rate=1e-4, epsilon=1e-8)
 
     @tf.function
-    def get_initial_state(self):#, batch_size_B):
-        #h = tf.repeat(tf.math.tanh(self.initial_h), batch_size_B or 1, axis=0)
-        ## Use the mode, NOT a sample for the initial z-state.
-        #_, z_probs = self.dynamics_predictor(h, return_z_probs=True)
-        #z = tf.argmax(z_probs, axis=-1)
-        #z = tf.one_hot(z, depth=z_probs.shape[-1])
-
-        #if batch_size_B is None or batch_size_B > 0:
-        #    return {"h": h, "z": z}
-        #else:
-        #    return {"h": tf.squeeze(h, 0), "z": tf.squeeze(z, 0)}
-
+    def get_initial_state(self):
         h = tf.expand_dims(tf.math.tanh(self.initial_h), 0)
         # Use the mode, NOT a sample for the initial z-state.
         _, z_probs = self.dynamics_predictor(h, return_z_probs=True)
         z = tf.argmax(z_probs, axis=-1)
         z = tf.one_hot(z, depth=z_probs.shape[-1])
 
-        return {"h": tf.squeeze(h, 0), "z": tf.squeeze(z, 0)}
+        return {"h": h, "z": z}
 
+    @tf.function
     def call(self, inputs, *args, **kwargs):
         return self.forward_inference(inputs, *args, **kwargs)
 
@@ -167,7 +159,7 @@ class WorldModel(tf.keras.Model):
             The next deterministic h-state (h(t+1)) as predicted by the sequence model.
         """
         initial_states = tree.map_structure(
-            lambda s: tf.repeat(s, observations.shape[0], axis=0),
+            lambda s: tf.repeat(s, tf.shape(observations)[0], axis=0),
             self.get_initial_state()
         )
 
@@ -217,11 +209,12 @@ class WorldModel(tf.keras.Model):
         # Compute bare encoder outs (not z; this is done later with involvement of the
         # sequence model and the h-states).
         # Fold time dimension for CNN pass.
-        B, T = observations.shape[0], observations.shape[1]
-        observations = tf.reshape(observations, shape=[-1] + observations.shape.as_list()[2:])
+        shape = tf.shape(observations)
+        B, T = shape[0], shape[1]
+        observations = tf.reshape(observations, shape=tf.concat([[-1], shape[2:]], axis=0))
         encoder_out = self.encoder(observations)
         # Unfold time dimension.
-        encoder_out = tf.reshape(encoder_out, shape=[B, T] + encoder_out.shape.as_list()[1:])
+        encoder_out = tf.reshape(encoder_out, shape=tf.concat([[B, T], tf.shape(encoder_out)[1:]], axis=0))
         # Make time major for faster upcoming loop.
         encoder_out = tf.transpose(
             encoder_out, perm=[1, 0] + list(range(2, len(encoder_out.shape.as_list())))

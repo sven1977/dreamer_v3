@@ -7,9 +7,13 @@ https://arxiv.org/pdf/2301.04104v1.pdf
 D. Hafner, T. Lillicrap, M. Norouzi, J. Ba
 https://arxiv.org/pdf/2010.02193.pdf
 """
+from typing import Optional
+
 import numpy as np
 import tensorflow as tf
 import tensorflow_probability as tfp
+
+from utils.model_dimensions import get_num_z_categoricals, get_num_z_classes
 
 
 class RepresentationLayer(tf.keras.layers.Layer):
@@ -20,13 +24,19 @@ class RepresentationLayer(tf.keras.layers.Layer):
     """
     def __init__(
         self,
-        num_categoricals: int = 32,
-        num_classes_per_categorical: int = 32,
+        *,
+        model_dimension: Optional[str] = "XS",
+        num_categoricals: Optional[int] = None,
+        num_classes_per_categorical: Optional[int] = None,
     ):
         super().__init__()
 
-        self.num_categoricals = num_categoricals
-        self.num_classes_per_categorical = num_classes_per_categorical
+        self.num_categoricals = get_num_z_categoricals(
+            model_dimension, override=num_categoricals
+        )
+        self.num_classes_per_categorical = get_num_z_classes(
+            model_dimension, override=num_classes_per_categorical
+        )
 
         self.z_generating_layer = tf.keras.layers.Dense(
             self.num_categoricals * self.num_classes_per_categorical,

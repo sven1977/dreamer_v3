@@ -5,16 +5,21 @@ frozenlake-4x4-deterministic:
     map_name: 4x4
     is_slippery: false
 
-  model_dimension: XXS
+  model_dimension: nano
 
   training_ratio: 1024
-  batch_size_B: 24
-  batch_length_T: 24
+  #batch_size_B: 16
+  #batch_length_T: 64
 
   use_curiosity: true
-  intrinsic_rewards_scale: 10.0
+  #intrinsic_rewards_scale: 10.0
 
+  # Run config.
+  # Summary behavior.
   summary_frequency_train_steps: 10
-  evaluation_frequency_main_iters:  100
-  evaluation_num_episodes: 2
-  model_save_frequency_main_iters: 0
+  summary_include_histograms: true
+  # Evaluation runs.
+  evaluation_frequency_main_iters: 1
+  evaluation_num_episodes: 20
+  # Model saving.
+  model_save_frequency_main_iters: 1000

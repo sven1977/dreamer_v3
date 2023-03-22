@@ -26,9 +26,9 @@ class EpisodeReplayBuffer:
         # from the episode index to get the actual location within `self.episodes`.
         self._num_episodes_ejected = 0
 
-        # Deque storing all index tuples: [eps-idx, ts-in-eps-idx], where ...
-        # `eps-idx` - self._num_episodes_ejected is the index into self.episodes.
-        # `ts-in-eps-idx` is the timestep index within that episode
+        # List storing all index tuples: [eps_idx, ts_in_eps_idx], where ...
+        # `eps_idx - self._num_episodes_ejected' is the index into self.episodes.
+        # `ts_in_eps_idx` is the timestep index within that episode
         #  (0 = 1st timestep, etc..).
         # We sample uniformly from the set of these indices in a `sample()`
         # call.
@@ -236,6 +236,32 @@ class EpisodeReplayBuffer:
         """Returns the number of timesteps that have been sampled in buffer's lifetime.
         """
         return self.sampled_timesteps
+
+    def get_state(self):
+        return np.array(list({
+            "episodes": [eps.get_state() for eps in self.episodes],
+            "episode_id_to_index": list(self.episode_id_to_index.items()),
+            "_num_episodes_ejected": self._num_episodes_ejected,
+            "_indices": self._indices,
+            "size": self.size,
+            "sampled_timesteps": self.sampled_timesteps,
+        }.items()))
+
+    def set_state(self, state):
+        assert state[0][0] == "episodes"
+        self.episodes = deque([
+            Episode.from_state(eps_data) for eps_data in state[0][1]
+        ])
+        assert state[1][0] == "episode_id_to_index"
+        self.episode_id_to_index = dict(state[1][1])
+        assert state[2][0] == "_num_episodes_ejected"
+        self._num_episodes_ejected = state[2][1]
+        assert state[3][0] == "_indices"
+        self._indices = state[3][1]
+        assert state[4][0] == "size"
+        self.size = state[4][1]
+        assert state[5][0] == "sampled_timesteps"
+        self.sampled_timesteps = state[5][1]
 
 
 if __name__ == "__main__":
