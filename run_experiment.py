@@ -14,6 +14,7 @@ import gc
 import os
 from pprint import pprint
 import re
+import time
 import yaml
 
 import gymnasium as gym
@@ -126,7 +127,6 @@ batch_length_T = config.get("batch_length_T", 64)
 # to compute z, after that, only the prior (dynamics network) will be used.
 burn_in_T = config.get("burn_in_T", 5)
 horizon_H = config.get("horizon_H", 15)
-
 assert burn_in_T + horizon_H <= batch_length_T, (
     f"ERROR: burn_in_T ({burn_in_T}) + horizon_H ({horizon_H}) must be <= "
     f"batch_length_T ({batch_length_T})!"
@@ -206,6 +206,10 @@ dreamer_model = DreamerModel(
 buffer = EpisodeReplayBuffer(capacity=int(1e6))
 # Timesteps to put into the buffer before the first learning step.
 warm_up_timesteps = 0
+
+# Throughput metrics (EMA'd).
+throughput_env_ts_per_second = None
+throughput_train_ts_per_second = None
 
 # Load state from a saved checkpoint.
 if args.checkpoint is not None:
@@ -329,6 +333,8 @@ if num_pretrain_iterations > 0:
 
 
 for iteration in range(1000000):
+    t0 = time.time()
+
     print(f"Online training main iteration {iteration}")
     # Push enough samples into buffer initially before we start training.
     env_steps = env_steps_last_sample = 0
@@ -482,18 +488,19 @@ for iteration in range(1000000):
                     ("critic", dreamer_model.critic),
                     ("disagree_nets", dreamer_model.disagree_nets),
                 ]:
-                    model.set_weights(
-                        np.load(
-                            f"{args.checkpoint}/{name}.npz",
-                            allow_pickle=True,
-                        )["weights"]
-                    )
-                    model.optimizer.set_weights(
-                        np.load(
-                            f"{args.checkpoint}/{name}_optimizer.npz",
-                            allow_pickle=True,
-                        )["weights"]
-                    )
+                    if model is not None:
+                        model.set_weights(
+                            np.load(
+                                f"{args.checkpoint}/{name}.npz",
+                                allow_pickle=True,
+                            )["weights"]
+                        )
+                        model.optimizer.set_weights(
+                            np.load(
+                                f"{args.checkpoint}/{name}_optimizer.npz",
+                                allow_pickle=True,
+                            )["weights"]
+                        )
 
         if summary_frequency_train_steps and (
                 total_train_steps % summary_frequency_train_steps == 0
@@ -741,6 +748,21 @@ for iteration in range(1000000):
     # No GPU? No problem.
     except ValueError:
         pass
+
+    t1 = time.time()
+    ema = 0.98
+    env_ts_per_sec = env_steps / (t1 - t0)
+    train_ts_per_sec = replayed_steps / (t1 - t0)
+    # Init.
+    if throughput_train_ts_per_second is None:
+        throughput_env_ts_per_second = env_ts_per_sec
+        throughput_train_ts_per_second = train_ts_per_sec
+    # EMA.
+    else:
+        throughput_env_ts_per_second = ema * throughput_env_ts_per_second + (1.0 - ema) * env_ts_per_sec
+        throughput_train_ts_per_second = ema * throughput_train_ts_per_second + (1.0 - ema) * train_ts_per_sec
+    tbx_writer.add_scalar("THROUGHPUT_env_ts_per_sec", throughput_env_ts_per_second)
+    tbx_writer.add_scalar("THROUGHPUT_train_ts_per_sec", throughput_train_ts_per_second)
 
     # Main iteration done.
     print()
