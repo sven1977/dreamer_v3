@@ -275,6 +275,14 @@ https://arxiv.org/pdf/2010.02193.pdf
       we would like to sample B * T style batches that include episode boundaries.
         TODO
 
+
+2023/03/25
+    - Test running Pong again (after noticing it's not learning on latest changes)
+      with f5de6bba3d34b8401e71882979c66d88ee189311 commit (after CartPole fix for the
+      cont. actions release).
+    - If it works, we need to compare changes between f5de6bba3d34b8401e71882979c66d88ee189311
+      and f5de6bba3d34b8401e71882979c66d88ee189311.
+
 OPEN PROBLEMS:
 - We should look into shifting the env runner sequence by one (see slack discussion)
   reset -> r=0.0 c=False obs=init_obs a=first action
