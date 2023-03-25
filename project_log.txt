@@ -284,14 +284,22 @@ https://arxiv.org/pdf/2010.02193.pdf
       and f5de6bba3d34b8401e71882979c66d88ee189311.
 
 OPEN PROBLEMS:
-- We should look into shifting the env runner sequence by one (see slack discussion)
+- [SOLVED]
+  Solution:
+  We should look into shifting the env runner sequence by one (see slack discussion)
   reset -> r=0.0 c=False obs=init_obs a=first action
   also: V(t) = r(t) + gamma * V(t+1) (instead of V(t) = r(t+1) + gamma * V(t+1)
   reinterpret state-value as value for reaching the state (plus future) instead of
   value for already being in the state.
-- For dreaming: Should we sample from the Bernoulli distribution (for `continue` flags) or use greedy?
+
+- [SOLVED]
+  Solution: Use mode(), not sample().
+  For dreaming: Should we sample from the Bernoulli distribution (for `continue` flags) or use greedy?
   We do use the deterministic mean for the dreamed rewards. Should probably do the same for `continues`.
-- Now that we are using the continuous episode buffer, if an episode is truncated AND the truncated
+
+- [SOLVED]
+  Solution: Treat last timestep i as a fully qualified on within the sampled trajectory; r(i) is the final reward, obs(i) is the final obs, continue(i)=False.
+  Now that we are using the continuous episode buffer, if an episode is truncated AND the truncated
   ts is in the middle of some batch_length_T sized chunk, we would NOT have the next_obs information
   that we need to compute a proper value at the truncation. Instead the obs(t+1) would alredy
   be the first observation of the next episode. To fix this, our buffer could simply
@@ -300,7 +308,10 @@ OPEN PROBLEMS:
   already in [2] albeit due to a different reason: "To observe enough episode end during training, we sample
   the start index of each training sequence uniformly within the episode and then clip it to not exceed the
   episode length minus the training sequence length."
-- We are currently NOT LayerNorm'ing the GRU output (the next h-state). Adding this used to provide
+
+- [SOLVED]
+  Solution: Do not layer norm GRU output.
+  We are currently NOT LayerNorm'ing the GRU output (the next h-state). Adding this used to provide
   a big L_total reduction (in Atari), however, wouldn't this mess with the GRU learning how
   to manipulate its internal state vector properly?
   Instead: Only layer-norm the input to the next NN (after the GRU), e.g. reward predictor, actor, vf, etc..
@@ -312,7 +323,9 @@ OPEN PROBLEMS:
   "Figure J.1: Comparison of DreamerV2 to a version without layer norm in the GRU ....
     We find that the benefit of layer norm depends on the task at hand, increasing
     and decreasing performance on a roughly equal number of tasks"
-- Figure out reason of weird actor loss in the paper.
+
+- [SOLVED] Figure out reason of weird actor loss in the paper.
+  Solution: See our implementation, which now matches Danijar's.
 
 - [DONE] Implement unimix categoricals for actor network (for discrete actions?)
     - Done already for the z-generator.
