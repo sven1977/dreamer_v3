@@ -21,7 +21,7 @@ import gymnasium as gym
 import numpy as np
 import tree  # pip install dm_tree
 import tensorflow as tf
-from tensorboardX import SummaryWriter
+import wandb
 
 from ray.rllib.algorithms.algorithm_config import AlgorithmConfig
 
@@ -50,6 +50,8 @@ from utils.tensorboard import (
     summarize_sampling_and_replay_buffer,
     summarize_world_model_train_results,
 )
+
+now = datetime.datetime.now().strftime("%m-%d-%y-%H-%M-%S")
 
 # Set GPU to grow in memory (so tf does not block all GPU mem).
 gpus = tf.config.list_physical_devices('GPU')
@@ -88,22 +90,28 @@ if args.env and not config.get("env"):
     config["env"] = args.env
     experiment_name += "-" + re.sub("^ALE/|-v\\d$", "", args.env).lower()
 
-print(f"Running with the following config:")
+print(f"Running experiment {experiment_name} with the following config:")
 pprint(config)
 
 # Handle some paths for this experiment.
 experiment_path = os.path.join(
     "experiments",
     experiment_name,
-    datetime.datetime.now().strftime("%m-%d-%y-%H-%M-%S"),
+    now,
 )
 checkpoint_path = os.path.join(experiment_path, "checkpoints")
 tensorboard_path = os.path.join(experiment_path, "tensorboard")
+wandb_path = os.path.join(experiment_path, "wandb")
 # Create the checkpoint path, if it doesn't exist yet.
 os.makedirs(checkpoint_path)
-# Create the tensorboard summary data dir.
-os.makedirs(tensorboard_path)
-tbx_writer = SummaryWriter(tensorboard_path)
+# Create the wandb data dir.
+os.makedirs(wandb_path)
+wandb.init(
+    project=re.sub("/", "-", experiment_name),
+    name=now,
+    dir=wandb_path,
+    config=config,
+)
 
 # How many iterations do we pre-train?
 num_pretrain_iterations = config.get("num_pretrain_iterations", 0)
@@ -137,7 +145,6 @@ discount_gamma = config.get("discount_gamma", 0.997)  # [1] eq. 7.
 gae_lambda = config.get("gae_lambda", 0.95)  # [1] eq. 7.
 entropy_scale = 3e-4  # [1] eq. 11.
 return_normalization_decay = 0.99  # [1] eq. 11 and 12.
-
 
 # EnvRunner config (an RLlib algorithm config).
 algo_config = (
@@ -221,10 +228,12 @@ if args.checkpoint is not None:
     total_env_steps = int(np.load(f"{args.checkpoint}/total_env_steps.npy"))
     total_replayed_steps = int(np.load(f"{args.checkpoint}/total_replayed_steps.npy"))
     total_train_steps = int(np.load(f"{args.checkpoint}/total_train_steps.npy"))
+    training_iteration_start = int(np.load(f"{args.checkpoint}/iteration.npy"))
 else:
     total_env_steps = 0
     total_replayed_steps = 0
     total_train_steps = 0
+    training_iteration_start = 0
 
 # TODO: ugly hack (resulting from the insane fact that you cannot know
 #  an env's spaces prior to actually constructing an instance of it) :(
@@ -299,8 +308,6 @@ if num_pretrain_iterations > 0:
 
         if summary_frequency_train_steps and iteration % summary_frequency_train_steps:
             summarize_forward_train_outs_vs_samples(
-                tbx_writer=tbx_writer,
-                step=total_env_steps,
                 forward_train_outs=forward_train_outs,
                 sample=sample,
                 batch_size_B=batch_size_B,
@@ -308,8 +315,6 @@ if num_pretrain_iterations > 0:
                 symlog_obs=symlog_obs,
             )
             summarize_world_model_train_results(
-                tbx_writer=tbx_writer,
-                step=total_env_steps,
                 world_model_train_results=world_model_train_results,
                 include_histograms=summary_include_histograms,
             )
@@ -332,7 +337,7 @@ if num_pretrain_iterations > 0:
     )
 
 
-for iteration in range(1000000):
+for iteration in range(training_iteration_start, 1000000):
     t0 = time.time()
 
     print(f"Online training main iteration {iteration}")
@@ -343,7 +348,7 @@ for iteration in range(1000000):
     #while iteration == 0:
     #END TEST
 
-    if iteration == 0:
+    if iteration == training_iteration_start:
         print(
             "Filling replay buffer so it contains at least "
             f"{batch_size_B * batch_length_T} ts (required for a single train batch)."
@@ -381,7 +386,6 @@ for iteration in range(1000000):
         ):
             # Summarize environment interaction and buffer data.
             summarize_sampling_and_replay_buffer(
-                tbx_writer=tbx_writer,
                 step=total_env_steps,
                 replay_buffer=buffer,
                 sampler_metrics=env_runner.get_metrics(),
@@ -466,7 +470,7 @@ for iteration in range(1000000):
             )
 
         # Summarize world model.
-        if iteration == 0 and sub_iter == 0 and num_pretrain_iterations == 0:
+        if iteration == training_iteration_start and sub_iter == 0 and num_pretrain_iterations == 0:
             # Dummy forward pass to be able to produce summary.
             dreamer_model(
                 sample["obs"][:1, 0],
@@ -506,8 +510,6 @@ for iteration in range(1000000):
                 total_train_steps % summary_frequency_train_steps == 0
         ):
             summarize_forward_train_outs_vs_samples(
-                tbx_writer=tbx_writer,
-                step=total_env_steps,
                 forward_train_outs=world_model_forward_train_outs,
                 sample=sample,
                 batch_size_B=batch_size_B,
@@ -515,30 +517,22 @@ for iteration in range(1000000):
                 symlog_obs=symlog_obs,
             )
             summarize_world_model_train_results(
-                tbx_writer=tbx_writer,
-                step=total_env_steps,
                 world_model_train_results=world_model_train_results,
                 include_histograms=summary_include_histograms,
             )
             # Summarize actor-critic loss stats.
             if train_critic:
                 summarize_critic_train_results(
-                    tbx_writer=tbx_writer,
-                    step=total_env_steps,
                     actor_critic_train_results=actor_critic_train_results,
                     include_histograms=summary_include_histograms,
                 )
             if train_actor:
                 summarize_actor_train_results(
-                    tbx_writer=tbx_writer,
-                    step=total_env_steps,
                     actor_critic_train_results=actor_critic_train_results,
                     include_histograms=summary_include_histograms,
                 )
             if use_curiosity:
                 summarize_disagree_train_results(
-                    tbx_writer=tbx_writer,
-                    step=total_env_steps,
                     actor_critic_train_results=actor_critic_train_results,
                     include_histograms=summary_include_histograms,
                 )
@@ -547,13 +541,11 @@ for iteration in range(1000000):
                 "CartPoleDebug-v0", "CartPole-v1", "FrozenLake-v1"
             ]:
                 summarize_dreamed_trajectory(
-                    tbx_writer=tbx_writer,
                     dream_data=actor_critic_train_results["dream_data"],
                     actor_critic_train_results=actor_critic_train_results,
                     env=env_runner.config.env,
                     dreamer_model=dreamer_model,
                     obs_dims_shape=sample["obs"].shape[2:],
-                    step=total_env_steps,
                     desc="for_actor_critic_learning",
                 )
 
@@ -611,7 +603,6 @@ for iteration in range(1000000):
         #        use_random_actions_in_dream=False,
         #    )
         #    summarize_dreamed_trajectory(
-        #        tbx_writer=tbx_writer,
         #        dream_data=dream_data,
         #        actor_critic_train_results=actor_critic_train_results,
         #        env=env_runner.config.env,
@@ -650,8 +641,6 @@ for iteration in range(1000000):
             use_random_actions_in_dream=False,
         )
         mse_sampled_vs_dreamed_obs = summarize_dreamed_eval_trajectory_vs_samples(
-            tbx_writer=tbx_writer,
-            step=total_env_steps,
             dream_data=dream_data,
             sample=sample,
             burn_in_T=burn_in_T,
@@ -677,33 +666,26 @@ for iteration in range(1000000):
                 f"\tMean episode return: {np.mean(metrics['episode_returns']):.4f}; "
                 f"mean len: {np.mean(metrics['episode_lengths']):.1f}"
             )
-            tbx_writer.add_scalar(
-                "EVALUATION_mean_episode_return",
-                np.mean(metrics['episode_returns']),
-                global_step=total_env_steps,
-            )
-            tbx_writer.add_scalar(
-                "EVALUATION_mean_episode_length",
-                np.mean(metrics['episode_lengths']),
-                global_step=total_env_steps,
-            )
+            wandb.log({
+                "EVALUATION_mean_episode_return": np.mean(metrics['episode_returns']),
+                "EVALUATION_mean_episode_length": np.mean(metrics['episode_lengths']),
+            }, commit=False)
         # Summarize (best and worst) evaluation episodes.
         sorted_episodes = sorted(episodes, key=lambda e: e.get_return())
-        tbx_writer.add_video(
-            f"EVALUATION_episode_video" + ("_best" if len(sorted_episodes) > 1 else ""),
-            np.expand_dims(sorted_episodes[-1].render_images, axis=0),
-            global_step=total_env_steps,
-            fps=15,
-            dataformats="NTHWC",
-        )
-        if len(sorted_episodes) > 1:
-            tbx_writer.add_video(
-                f"EVALUATION_episode_video_worst",
-                np.expand_dims(sorted_episodes[0].render_images, axis=0),
-                global_step=total_env_steps,
-                fps=15,
-                dataformats="NTHWC",
+        wandb.log({
+            "EVALUATION_episode_video" + ("_best" if len(sorted_episodes) > 1 else ""): (
+                wandb.Video(np.expand_dims(sorted_episodes[-1].render_images, axis=0), fps=15)
             )
+        }, commit=False)
+        if len(sorted_episodes) > 1:
+            wandb.log({
+                f"EVALUATION_episode_video_worst": (
+                    wandb.Video(
+                        np.expand_dims(sorted_episodes[0].render_images, axis=0),
+                        fps=15,
+                    ),
+                ),
+            }, commit=False)
 
     # Save the model every N iterations.
     if model_save_frequency_main_iters and (
@@ -726,6 +708,7 @@ for iteration in range(1000000):
         np.save(f"{checkpoint_path}/{iteration}/total_env_steps", total_env_steps)
         np.save(f"{checkpoint_path}/{iteration}/total_replayed_steps", total_replayed_steps)
         np.save(f"{checkpoint_path}/{iteration}/total_train_steps", total_train_steps)
+        np.save(f"{checkpoint_path}/{iteration}/iteration", iteration)
         #dreamer_model.save(f"{checkpoint_path}/dreamer_model_{iteration}")
 
     # Try trick from https://medium.com/dive-into-ml-ai/dealing-with-memory-leak-
@@ -739,12 +722,10 @@ for iteration in range(1000000):
     try:
         gpu_memory = tf.config.experimental.get_memory_info('GPU:0')
         print(f"\nMEM (GPU) consumption: {gpu_memory['current']}")
-        tbx_writer.add_scalar(
-            "MEM_gpu_memory_used", gpu_memory['current'], global_step=total_env_steps
-        )
-        tbx_writer.add_scalar(
-            "MEM_gpu_memory_peak", gpu_memory['peak'], global_step=total_env_steps
-        )
+        wandb.log({
+            "MEM_gpu_memory_used": gpu_memory['current'],
+            "MEM_gpu_memory_peak": gpu_memory['peak'],
+        }, commit=False)
     # No GPU? No problem.
     except ValueError:
         pass
@@ -761,8 +742,12 @@ for iteration in range(1000000):
     else:
         throughput_env_ts_per_second = ema * throughput_env_ts_per_second + (1.0 - ema) * env_ts_per_sec
         throughput_train_ts_per_second = ema * throughput_train_ts_per_second + (1.0 - ema) * train_ts_per_sec
-    tbx_writer.add_scalar("THROUGHPUT_env_ts_per_sec", throughput_env_ts_per_second)
-    tbx_writer.add_scalar("THROUGHPUT_train_ts_per_sec", throughput_train_ts_per_second)
+
+    # Final wandb (env) step commit.
+    wandb.log({
+        "THROUGHPUT_env_ts_per_sec": throughput_env_ts_per_second,
+        "THROUGHPUT_train_ts_per_sec": throughput_train_ts_per_second,
+    }, step=total_env_steps, commit=True)
 
     # Main iteration done.
     print()

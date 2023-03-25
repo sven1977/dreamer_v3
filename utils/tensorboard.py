@@ -1,6 +1,7 @@
 import numpy as np
 import tensorflow as tf
 import tree  # pip install dm_tree
+import wandb
 
 from utils.cartpole_debug import (
     create_cartpole_dream_image,
@@ -9,7 +10,7 @@ from utils.cartpole_debug import (
 from utils.symlog import inverse_symlog
 
 
-def _summarize(tbx_writer, step, keys_to_log, results, include_histograms=False):
+def _summarize(keys_to_log, results, include_histograms=False):
     results = tree.map_structure(
         lambda s: s.numpy() if tf.is_tensor(s) else s,
         results,
@@ -17,9 +18,9 @@ def _summarize(tbx_writer, step, keys_to_log, results, include_histograms=False)
 
     for k in keys_to_log:
         if results[k].shape == ():
-            tbx_writer.add_scalar(k, results[k], global_step=step)
+            wandb.log({k: results[k]}, commit=False)
         elif include_histograms:
-            tbx_writer.add_histogram(k, results[k], global_step=step)
+            wandb.log({k: results[k]}, commit=False)
 
 
 def reconstruct_obs_from_h_and_z(
@@ -50,13 +51,11 @@ def reconstruct_obs_from_h_and_z(
 
 def summarize_dreamed_trajectory(
     *,
-    tbx_writer,
     dream_data,
     actor_critic_train_results,
     env,
     dreamer_model,
     obs_dims_shape,
-    step,
     batch_indices=(0,),
     desc=None,
 ):
@@ -103,19 +102,14 @@ def summarize_dreamed_trajectory(
             ).numpy())
         # Concat images along width-axis (so they show as a "film sequence" next to each
         # other).
-        images = np.concatenate(images, axis=1)
-        tbx_writer.add_images(
-            f"dreamed_trajectories{('_'+desc) if desc else ''}_B{b}",
-            np.expand_dims(images, axis=0),
-            dataformats="NHWC",
-            global_step=step,
-        )
+        images = wandb.Image(np.concatenate(images, axis=1))
+        wandb.log({
+            f"dreamed_trajectories{('_'+desc) if desc else ''}_B{b}": images,
+        }, commit=False)
 
 
 def summarize_forward_train_outs_vs_samples(
     *,
-    tbx_writer,
-    step,
     forward_train_outs,
     sample,
     batch_size_B,
@@ -144,8 +138,6 @@ def summarize_forward_train_outs_vs_samples(
             trajectory sampled from the buffer.
     """
     _summarize_obs(
-        tbx_writer=tbx_writer,
-        step=step,
         computed_float_obs_B_T_dims=tf.reshape(
             forward_train_outs["obs_distribution_BxT"].loc,
             shape=(batch_size_B, batch_length_T) + sample["obs"].shape[2:],
@@ -157,25 +149,17 @@ def summarize_forward_train_outs_vs_samples(
     )
     predicted_rewards = inverse_symlog(forward_train_outs["rewards_BxT"])
     _summarize_rewards(
-        tbx_writer=tbx_writer,
-        step=step,
         computed_rewards=predicted_rewards,
         sampled_rewards=np.reshape(sample["rewards"], [-1]),
         descr_prefix="WORLD_MODEL",
         descr_reward="predicted_posterior",
     )
-    tbx_writer.add_histogram(
-        "sampled_rewards", sample["rewards"].numpy(), global_step=step
-    )
-    tbx_writer.add_histogram(
-        "WORLD_MODEL_predicted_posterior_rewards",
-        predicted_rewards.numpy(),
-        global_step=step,
-    )
+    wandb.log({
+        "sampled_rewards": sample["rewards"].numpy(),
+        "WORLD_MODEL_predicted_posterior_rewards": predicted_rewards.numpy(),
+    }, commit=False)
 
     _summarize_continues(
-        tbx_writer=tbx_writer,
-        step=step,
         computed_continues=forward_train_outs["continues_BxT"],
         sampled_continues=np.reshape(1.0 - sample["is_terminated"], [-1]),
         descr_prefix="WORLD_MODEL",
@@ -185,8 +169,6 @@ def summarize_forward_train_outs_vs_samples(
 
 def summarize_actor_train_results(
     *,
-    tbx_writer,
-    step,
     actor_critic_train_results,
     include_histograms=False,
 ):
@@ -210,8 +192,6 @@ def summarize_actor_train_results(
     ]
 
     _summarize(
-        tbx_writer,
-        step,
         keys_to_log,
         actor_critic_train_results,
         include_histograms,
@@ -220,8 +200,6 @@ def summarize_actor_train_results(
 
 def summarize_critic_train_results(
     *,
-    tbx_writer,
-    step,
     actor_critic_train_results,
     include_histograms=False,
 ):
@@ -242,8 +220,6 @@ def summarize_critic_train_results(
     ]
 
     _summarize(
-        tbx_writer,
-        step,
         keys_to_log,
         actor_critic_train_results,
         include_histograms,
@@ -252,8 +228,6 @@ def summarize_critic_train_results(
 
 def summarize_disagree_train_results(
     *,
-    tbx_writer,
-    step,
     actor_critic_train_results,
     include_histograms=False,
 ):
@@ -271,8 +245,6 @@ def summarize_disagree_train_results(
     ]
 
     _summarize(
-        tbx_writer,
-        step,
         keys_to_log,
         actor_critic_train_results,
         include_histograms,
@@ -281,8 +253,6 @@ def summarize_disagree_train_results(
 
 def summarize_dreamed_eval_trajectory_vs_samples(
     *,
-    tbx_writer,
-    step,
     dream_data,
     sample,
     burn_in_T,
@@ -301,8 +271,6 @@ def summarize_dreamed_eval_trajectory_vs_samples(
     tH = t0 + dreamed_T
     # Observation MSE and - if applicable - images comparisons.
     mse_sampled_vs_dreamed_obs = _summarize_obs(
-        tbx_writer=tbx_writer,
-        step=step,
         # Have to transpose b/c dreamed data is time-major.
         computed_float_obs_B_T_dims=tf.transpose(
             dreamed_obs_T_B,
@@ -316,8 +284,6 @@ def summarize_dreamed_eval_trajectory_vs_samples(
 
     # Reward MSE.
     _summarize_rewards(
-        tbx_writer=tbx_writer,
-        step=step,
         computed_rewards=dream_data["rewards_dreamed_t0_to_H_B"],
         sampled_rewards=sample["rewards"][:, t0:tH+1],
         descr_prefix="EVALUATION",
@@ -326,8 +292,6 @@ def summarize_dreamed_eval_trajectory_vs_samples(
 
     # Continues MSE.
     _summarize_continues(
-        tbx_writer=tbx_writer,
-        step=step,
         computed_continues=dream_data["continues_dreamed_t0_to_H_B"],
         sampled_continues=(1.0 - sample["is_terminated"])[:, t0:tH+1],
         descr_prefix="EVALUATION",
@@ -338,7 +302,6 @@ def summarize_dreamed_eval_trajectory_vs_samples(
 
 def summarize_sampling_and_replay_buffer(
     *,
-    tbx_writer,
     step,
     replay_buffer,
     sampler_metrics,
@@ -349,12 +312,10 @@ def summarize_sampling_and_replay_buffer(
     replayed_steps = replay_buffer.get_sampled_timesteps()
 
     # Summarize buffer length.
-    tbx_writer.add_scalar(
-        "BUFFER_size_num_episodes", episodes_in_buffer, global_step=step
-    )
-    tbx_writer.add_scalar(
-        "BUFFER_size_timesteps", ts_in_buffer, global_step=step
-    )
+    wandb.log({
+        "BUFFER_size_num_episodes": episodes_in_buffer,
+        "BUFFER_size_timesteps": ts_in_buffer,
+    }, commit=False)
 
     # Summarize episode returns.
     episode_returns = []
@@ -365,16 +326,11 @@ def summarize_sampling_and_replay_buffer(
         episode_returns = list(sampler_metrics["episode_returns"])
         episode_return_mean = np.mean(episode_returns)
 
-        tbx_writer.add_scalar(
-            "SAMPLER_episode_length_mean", episode_length_mean, global_step=step
-        )
-        tbx_writer.add_scalar(
-            "SAMPLER_episode_return_mean", episode_return_mean, global_step=step
-        )
-        # Summarize actions taken.
-        tbx_writer.add_histogram(
-            "SAMPLER_actions_taken", sampler_metrics["actions"], global_step=step
-        )
+        wandb.log({
+            "SAMPLER_actions_taken": sampler_metrics["actions"],
+            "SAMPLER_episode_return_mean": episode_return_mean,
+            "SAMPLER_episode_length_mean": episode_length_mean,
+        }, commit=False)
 
     if print_:
         print(f"SAMPLE: ts={sampler_metrics['ts_taken']} (total={step}); ", end="")
@@ -393,15 +349,15 @@ def summarize_sampling_and_replay_buffer(
 
 def summarize_world_model_train_results(
     *,
-    tbx_writer,
-    step,
     world_model_train_results,
     include_histograms=False,
 ):
     # TODO: Move to returned train_one_step results.
-    tbx_writer.add_scalar("WORLD_MODEL_initial_h_sum_abs", tf.reduce_sum(
-        tf.math.abs(world_model_train_results["WORLD_MODEL_learned_initial_h"].numpy())
-    ).numpy(), global_step=step)
+    wandb.log({
+        "WORLD_MODEL_initial_h_sum_abs": tf.reduce_sum(
+            tf.math.abs(world_model_train_results["WORLD_MODEL_learned_initial_h"])
+        ).numpy()
+    }, commit=False)
 
     keys_to_log = [
         # Learned initial state.
@@ -438,8 +394,6 @@ def summarize_world_model_train_results(
     ]
 
     _summarize(
-        tbx_writer,
-        step,
         keys_to_log,
         world_model_train_results,
         include_histograms,
@@ -448,8 +402,6 @@ def summarize_world_model_train_results(
 
 def _summarize_obs(
     *,
-    tbx_writer,
-    step,
     computed_float_obs_B_T_dims,
     sampled_obs_B_T_dims,
     descr_prefix=None,
@@ -482,11 +434,11 @@ def _summarize_obs(
         computed_float_obs_B_T_dims - tf.cast(sampled_obs_B_T_dims, tf.float32)
     )
     mse_sampled_vs_computed_obs = tf.reduce_mean(mse_sampled_vs_computed_obs)
-    tbx_writer.add_scalar(
-        f"{descr_prefix}sampled_vs_{descr_obs}_obs_mse",
-        mse_sampled_vs_computed_obs.numpy(),
-        global_step=step,
-    )
+    wandb.log({
+        f"{descr_prefix}sampled_vs_{descr_obs}_obs_mse": (
+            mse_sampled_vs_computed_obs.numpy()
+        ),
+    }, commit=False)
 
     # Videos: Create summary, comparing computed images with actual sampled ones.
     if len(sampled_obs_B_T_dims.shape) in [2+2, 2+3]:
@@ -500,31 +452,27 @@ def _summarize_obs(
         computed_images = tf.cast(
             tf.clip_by_value(computed_float_obs_B_T_dims, 0.0, 255.0), tf.uint8
         )
-        # Concat sampled and computed images along the height axis (2) such that
+        # Concat sampled and computed images along the height axis (3) such that
         # real images show below respective predicted ones.
-        # (B, T, h, w, C)
+        # (B, T, C, h, w)
         sampled_vs_computed_images = tf.concat(
-            [computed_images, sampled_obs_B_T_dims], axis=2,
+            [computed_images, sampled_obs_B_T_dims], axis=3,
         )
         # Add grayscale dim, if necessary.
         if len(sampled_obs_B_T_dims.shape) == 2 + 2:
             sampled_vs_computed_images = tf.expand_dims(sampled_vs_computed_images, -1)
 
-        tbx_writer.add_video(
-            f"{descr_prefix}sampled_vs_{descr_obs}_videos",
-            sampled_vs_computed_images.numpy(),
-            dataformats="NTHWC",
-            fps=15,
-            global_step=step,
-        )
+        wandb.log({
+            f"{descr_prefix}sampled_vs_{descr_obs}_videos": (
+                wandb.Video(sampled_vs_computed_images, fps=15)
+            ),
+        }, commit=False)
 
     return mse_sampled_vs_computed_obs
 
 
 def _summarize_rewards(
     *,
-    tbx_writer,
-    step,
     computed_rewards,
     sampled_rewards,
     descr_prefix=None,
@@ -536,17 +484,15 @@ def _summarize_rewards(
         tf.expand_dims(sampled_rewards, axis=-1),
     )
     mse_sampled_vs_computed_rewards = tf.reduce_mean(mse_sampled_vs_computed_rewards)
-    tbx_writer.add_scalar(
-        f"{descr_prefix}sampled_vs_{descr_reward}_rewards_mse",
-        mse_sampled_vs_computed_rewards.numpy(),
-        global_step=step,
-    )
+    wandb.log({
+        f"{descr_prefix}sampled_vs_{descr_reward}_rewards_mse": (
+            mse_sampled_vs_computed_rewards.numpy()
+        ),
+    }, commit=False)
 
 
 def _summarize_continues(
     *,
-    tbx_writer,
-    step,
     computed_continues,
     sampled_continues,
     descr_prefix=None,
@@ -561,9 +507,9 @@ def _summarize_continues(
     mse_sampled_vs_computed_continues = tf.reduce_mean(
         mse_sampled_vs_computed_continues
     )
-    tbx_writer.add_scalar(
-        f"{descr_prefix}sampled_vs_{descr_cont}_continues_mse",
-        mse_sampled_vs_computed_continues.numpy(),
-        global_step=step,
-    )
+    wandb.log({
+        f"{descr_prefix}sampled_vs_{descr_cont}_continues_mse": (
+            mse_sampled_vs_computed_continues.numpy()
+        ),
+    }, commit=False)
 
