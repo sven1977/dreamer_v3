@@ -270,7 +270,7 @@ if __name__ == "__main__":
     T = 4
 
     def _get_episode():
-        eps = Episode(initial_observation=0.0)
+        eps = Episode(observations=[0.0])
         ts = np.random.randint(1, 500)
         for t in range(ts):
             eps.add_timestep(

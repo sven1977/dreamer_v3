@@ -316,7 +316,7 @@ class EnvRunnerV2:
                     is_first[i] = True
                     done_episodes_to_return.append(self.episodes[i])
 
-                    self.episodes[i] = Episode(initial_observation=o, initial_state=s)
+                    self.episodes[i] = Episode(observations=[o], states=s)
                 else:
                     self.episodes[i].add_timestep(
                         o,
@@ -339,8 +339,8 @@ class EnvRunnerV2:
         self.episodes = [
             Episode(
                 id_=eps.id_,
-                initial_observation=eps.observations[-1],
-                initial_state=eps.states,
+                observations=[eps.observations[-1]],
+                states=eps.states,
             )
             for eps in self.episodes
         ]
@@ -471,9 +471,9 @@ class EnvRunnerV2:
                     done_episodes_to_return.append(episodes[i])
 
                     episodes[i] = Episode(
-                        initial_observation=o,
-                        initial_state=s,
-                        initial_render_image=render_images[i],
+                        observations=[o],
+                        states=s,
+                        render_images=[render_images[i]],
                     )
                 else:
                     episodes[i].add_timestep(

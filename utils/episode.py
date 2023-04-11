@@ -5,24 +5,33 @@ import numpy as np
 
 
 class Episode:
-
-    def __init__(self, id_: Optional[str] = None, *, initial_observation=None, initial_state=None, initial_render_image=None):
+    def __init__(
+        self,
+        id_: Optional[str] = None,
+        *,
+        observations=None,
+        actions=None,
+        rewards=None,
+        states=None,
+        is_terminated=False,
+        render_images=None,
+    ):
         self.id_ = id_ or uuid.uuid4().hex
         # Observations: t0 (initial obs) to T.
-        self.observations = [] if initial_observation is None else [initial_observation]
+        self.observations = [] if observations is None else observations
         # Actions: t1 to T.
-        self.actions = []
+        self.actions = [] if actions is None else actions
         # Rewards: t1 to T.
-        self.rewards = []
+        self.rewards = [] if rewards is None else rewards
         # h-states: t0 (in case this Episode is a continuation chunk, we need to know
         # about the initial h) to T.
-        self.states = initial_state
+        self.states = states
         # obs(T) is the final observation in the episode.
-        self.is_terminated = False
+        self.is_terminated = is_terminated
         # RGB uint8 images from rendering the env; the images include the corresponding
         # rewards.
-        assert initial_render_image is None or initial_observation is not None
-        self.render_images = [] if initial_render_image is None else [initial_render_image]
+        assert render_images is None or observations is not None
+        self.render_images = [] if render_images is None else render_images
 
     def concat_episode(self, episode_chunk: "Episode"):
         assert episode_chunk.id_ == self.id_

@@ -10,6 +10,7 @@ import tensorflow as tf
 
 from utils.model_dimensions import get_cnn_multiplier
 
+
 class CNNAtari(tf.keras.Model):
     # TODO: Un-hard-code all hyperparameters, such as input dims, activation,
     #  filters, etc..
