@@ -132,7 +132,8 @@ batch_size_B = config.get("batch_size_B", 16)
 batch_length_T = config.get("batch_length_T", 64)
 # The number of timesteps we use to "initialize" (burn-in) a dream_trajectory run.
 # For this many timesteps, the posterior (actual observation data) will be used
-# to compute z, after that, only the prior (dynamics network) will be used.
+# to compute z, after that, only the prior (dynamics network) will be used (to compute
+# z^).
 burn_in_T = config.get("burn_in_T", 5)
 horizon_H = config.get("horizon_H", 15)
 assert burn_in_T + horizon_H <= batch_length_T, (
@@ -180,6 +181,7 @@ intrinsic_rewards_scale = config.get("intrinsic_rewards_scale", 0.1)
 print(f"Creating initial DreamerModel ...")
 model_dimension = config["model_dimension"]
 gray_scaled = is_img_space and len(env_runner.env.single_observation_space.shape) == 2
+
 world_model = WorldModel(
     model_dimension=model_dimension,
     action_space=action_space,
@@ -367,7 +369,7 @@ for iteration in range(training_iteration_start, 1000000):
 
         # Add ongoing and finished episodes into buffer. The buffer will automatically
         # take care of properly concatenating (by episode IDs) the different chunks of
-        # the same episodes, even if they come in in separate `add()` calls.
+        # the same episodes, even if they come in via separate `add()` calls.
         buffer.add(episodes=done_episodes + ongoing_episodes)
 
         ts_in_buffer = buffer.get_num_timesteps()

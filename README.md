@@ -43,5 +43,5 @@ vim [some path P ...]/supersuit/lambda_wrappers/observation_lambda.py
 # Save your changes and exit vim
 
 # Run the Atari example.
-python run_experoment.py -c examples/atari_100k.yaml --env ALE/Pong-v5
+python run_experiment.py -c examples/atari_100k.yaml --env ALE/Pong-v5
 ```
