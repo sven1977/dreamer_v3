@@ -1,7 +1,8 @@
 dm-control-suite-vision:
   # Run with --env DMC/[task]/[domain], e.g. DMC/cartpole/swingup
 
-  from_pixels: true  # use image observations
+  env_config:
+    from_pixels: true  # use image observations
 
   num_envs_per_worker: 4
   remote_worker_envs: true  # parallel envs

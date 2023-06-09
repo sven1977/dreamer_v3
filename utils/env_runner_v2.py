@@ -146,8 +146,8 @@ class EnvRunnerV2:
             )
             gym.register(
                 "dmc_env-v0",
-                lambda : DMCEnv(
-                    parts[1], parts[2], from_pixels=True, channels_first=False
+                lambda from_pixels=True: DMCEnv(
+                    parts[1], parts[2], from_pixels=from_pixels, channels_first=False
                 )
             )
             self.env = gym.vector.make(
