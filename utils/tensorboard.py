@@ -327,7 +327,7 @@ def summarize_sampling_and_replay_buffer(
         episode_return_mean = np.mean(episode_returns)
 
         wandb.log({
-            "SAMPLER_actions_taken": sampler_metrics["actions"],
+            #"SAMPLER_actions_taken": sampler_metrics["actions"],
             "SAMPLER_episode_return_mean": episode_return_mean,
             "SAMPLER_episode_length_mean": episode_length_mean,
         }, commit=False)
