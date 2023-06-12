@@ -71,10 +71,12 @@ class DreamerModel(tf.keras.Model):
         observations = inputs
         self.get_initial_state()
         # Single action inference.
-        self.forward_inference(
-            previous_states,
-            observations,
-            is_first,
+        self.forward_exploration(
+            {
+                "state_in": previous_states,
+                "obs": observations,
+                "is_first": is_first,
+            }
         )
         previous_states_B = tree.map_structure(
             lambda s: tf.repeat(s, self.batch_size_B, axis=0),
@@ -83,10 +85,12 @@ class DreamerModel(tf.keras.Model):
         observations_B = tf.repeat(observations, self.batch_size_B, axis=0)
         is_first_B = tf.repeat(is_first, self.batch_size_B, axis=0)
         # Inference on "get_action" batch size (parallel envs).
-        self.forward_inference(
-            previous_states_B,
-            observations_B,
-            is_first_B,
+        self.forward_exploration(
+            {
+                "state_in": previous_states_B,
+                "obs": observations_B,
+                "is_first": is_first_B,
+            }
         )
         previous_states_BxT = tree.map_structure(
             lambda s: tf.repeat(s, self.batch_size_B * self.batch_length_T, axis=0),
@@ -110,8 +114,12 @@ class DreamerModel(tf.keras.Model):
         return ret
 
     @tf.function
-    def forward_inference(self, previous_states, observations, is_first, training=None):
-        """TODO"""
+    def forward_exploration(self, batch):
+    # def forward_inference(self, previous_states, observations, is_first, training=None):
+        observations = batch["obs"]
+        previous_states = batch["state_in"]
+        is_first = batch["is_first"]
+
         # Perform one step in the world model (starting from `previous_state` and
         # using the observations to yield a current (posterior) state).
         states = self.world_model(
@@ -121,10 +129,13 @@ class DreamerModel(tf.keras.Model):
         # Compute action using our actor network and the current states.
         actions = self.actor(h=states["h"], z=states["z"])
 
-        return actions, {
-            "h": states["h"],
-            "z": states["z"],
-            "a": actions,
+        return {
+            "actions": actions,
+            "state_out": {
+                "h": states["h"],
+                "z": states["z"],
+                "a": actions,
+            }
         }
 
     @tf.function

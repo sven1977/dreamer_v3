@@ -89,7 +89,7 @@ class ActionClip(gym.ActionWrapper):
         return np.clip(action, self._low, self._high)
 
 
-class EnvRunnerV2:
+class DEPRECATED_EnvRunnerV2:
     """An environment runner to locally collect data from vectorized gym environments.
     """
 

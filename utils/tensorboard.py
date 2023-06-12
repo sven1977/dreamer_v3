@@ -318,12 +318,12 @@ def summarize_sampling_and_replay_buffer(
     }, commit=False)
 
     # Summarize episode returns.
-    episode_returns = []
+    episode_lengths = episode_returns = []
     episode_return_mean = None
-    if sampler_metrics.get("episode_lengths"):
-        episode_lengths = list(sampler_metrics["episode_lengths"])
+    if sampler_metrics:
+        episode_lengths = [m.episode_length for m in sampler_metrics]
         episode_length_mean = np.mean(episode_lengths)
-        episode_returns = list(sampler_metrics["episode_returns"])
+        episode_returns = [m.episode_reward for m in sampler_metrics]
         episode_return_mean = np.mean(episode_returns)
 
         wandb.log({
@@ -333,7 +333,7 @@ def summarize_sampling_and_replay_buffer(
         }, commit=False)
 
     if print_:
-        print(f"SAMPLE: ts={sampler_metrics['ts_taken']} (total={step}); ", end="")
+        print(f"SAMPLE: ts={np.sum(episode_lengths)} (total={step}); ", end="")
         if episode_return_mean is not None:
             print(f"avg(R)={episode_return_mean:.4f}; ", end="")
         else:

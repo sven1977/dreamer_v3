@@ -23,7 +23,22 @@ import tree  # pip install dm_tree
 import tensorflow as tf
 import wandb
 
-from ray.rllib.algorithms.algorithm_config import AlgorithmConfig
+from ray.rllib.algorithms.dreamerv3.dreamerv3 import DreamerV3Config
+from ray.rllib.algorithms.dreamerv3.utils.env_runner import DreamerV3EnvRunner
+from ray.rllib.core.rl_module.rl_module import SingleAgentRLModuleSpec, RLModule
+from ray.rllib.utils.replay_buffers.episode_replay_buffer import EpisodeReplayBuffer
+
+class DummyRLModule(RLModule):
+    def _forward_inference(self, batch, **kwargs):
+        return {"actions": 0}
+    def _forward_exploration(self, **kwargs):
+        return {"actions": 0}
+    def _forward_train(self, batch, **kwargs):
+        return {"action_dist_inputs": 0}
+    def get_state(self):
+        return {}
+    def set_state(self, state_dict):
+        pass
 
 import examples.debug_img_env  # to trigger DebugImgEnv import and registration
 from models.components.cnn_atari import CNNAtari
@@ -36,8 +51,6 @@ from training.train_one_step import (
     train_actor_and_critic_one_step,
     train_world_model_one_step,
 )
-from utils.env_runner_v2 import EnvRunnerV2
-from utils.episode_replay_buffer import EpisodeReplayBuffer
 from utils.episode import Episode
 from utils.cartpole_debug import CartPoleDebug  # import registers `CartPoleDebug-v0`
 from utils.tensorboard import (
@@ -147,18 +160,27 @@ gae_lambda = config.get("gae_lambda", 0.95)  # [1] eq. 7.
 entropy_scale = 3e-4  # [1] eq. 11.
 return_normalization_decay = 0.99  # [1] eq. 11 and 12.
 
+dummy_spec = SingleAgentRLModuleSpec(
+    module_class=DummyRLModule,
+    action_space=gym.spaces.Discrete(1),
+    observation_space=gym.spaces.Discrete(1),
+    model_config_dict={},
+)
+
 # EnvRunner config (an RLlib algorithm config).
 algo_config = (
-    AlgorithmConfig()
+    DreamerV3Config()
     .environment(config["env"], env_config=config.get("env_config", {}))
+    .rl_module(rl_module_spec=dummy_spec)
     .rollouts(
+        remote_worker_envs=False,
         num_envs_per_worker=config.get("num_envs_per_worker", 1),
         rollout_fragment_length=1,
     )
 )
 # The vectorized gymnasium EnvRunner to collect samples of shape (B, T, ...).
-env_runner = EnvRunnerV2(model=None, config=algo_config)
-env_runner_evaluation = EnvRunnerV2(model=None, config=algo_config)
+env_runner = DreamerV3EnvRunner(config=algo_config)
+env_runner_evaluation = DreamerV3EnvRunner(config=algo_config)
 
 # Whether we have an image observation space or not.
 is_img_space = len(env_runner.env.single_observation_space.shape) in [2, 3]
@@ -221,26 +243,26 @@ throughput_env_ts_per_second = None
 throughput_train_ts_per_second = None
 
 # Load state from a saved checkpoint.
-if args.checkpoint is not None:
-    #dreamer_model = tf.keras.models.load_model(args.checkpoint)
-    # Load buffer.
-    print("LOADING data from checkpoint into buffer.")
-    buffer.set_state(np.load(f"{args.checkpoint}/buffer.npz", allow_pickle=True)["state"])
+#if args.checkpoint is not None:
+#    #dreamer_model = tf.keras.models.load_model(args.checkpoint)
+#    # Load buffer.
+#    print("LOADING data from checkpoint into buffer.")
+#    buffer.set_state(np.load(f"{args.checkpoint}/buffer.npz", allow_pickle=True)["state"])
 
-    total_env_steps = int(np.load(f"{args.checkpoint}/total_env_steps.npy"))
-    total_replayed_steps = int(np.load(f"{args.checkpoint}/total_replayed_steps.npy"))
-    total_train_steps = int(np.load(f"{args.checkpoint}/total_train_steps.npy"))
-    training_iteration_start = int(np.load(f"{args.checkpoint}/iteration.npy"))
-else:
-    total_env_steps = 0
-    total_replayed_steps = 0
-    total_train_steps = 0
-    training_iteration_start = 0
+#    total_env_steps = int(np.load(f"{args.checkpoint}/total_env_steps.npy"))
+#    total_replayed_steps = int(np.load(f"{args.checkpoint}/total_replayed_steps.npy"))
+#    total_train_steps = int(np.load(f"{args.checkpoint}/total_train_steps.npy"))
+#    training_iteration_start = int(np.load(f"{args.checkpoint}/iteration.npy"))
+#else:
+total_env_steps = 0
+total_replayed_steps = 0
+total_train_steps = 0
+training_iteration_start = 0
 
 # TODO: ugly hack (resulting from the insane fact that you cannot know
 #  an env's spaces prior to actually constructing an instance of it) :(
-env_runner.model = dreamer_model
-env_runner_evaluation.model = dreamer_model
+env_runner.rl_module = dreamer_model
+env_runner_evaluation.rl_module = dreamer_model
 
 # World model grad (by global norm) clipping according to [1] Appendix W.
 world_model_grad_clip = 1000.0

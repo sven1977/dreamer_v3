@@ -18,7 +18,7 @@ atari-100k:
   training_ratio: 1024
 
   # Run config.
-  summary_frequency_train_steps: 100
-  evaluation_frequency_main_iters: 1000
+  summary_frequency_train_steps: 200
+  evaluation_frequency_main_iters: 0
   evaluation_num_episodes: 2
-  model_save_frequency_main_iters: 10000
+  model_save_frequency_main_iters: 0
