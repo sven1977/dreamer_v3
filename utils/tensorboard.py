@@ -139,7 +139,7 @@ def summarize_forward_train_outs_vs_samples(
     """
     _summarize_obs(
         computed_float_obs_B_T_dims=tf.reshape(
-            forward_train_outs["obs_distribution_BxT"].loc,
+            forward_train_outs["obs_distribution_means_BxT"],
             shape=(batch_size_B, batch_length_T) + sample["obs"].shape[2:],
         ),
         sampled_obs_B_T_dims=sample["obs"],

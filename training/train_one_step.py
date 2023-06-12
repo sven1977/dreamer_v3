@@ -21,6 +21,7 @@ def train_world_model_one_step(
     batch_length_T,
     grad_clip,
     world_model,
+    optimizer,
 ):
     # Compute losses.
     with tf.GradientTape() as tape:
@@ -81,7 +82,7 @@ def train_world_model_one_step(
     # Clip all gradients by global norm.
     clipped_gradients, _ = tf.clip_by_global_norm(gradients, grad_clip)
     # Apply gradients to our model.
-    world_model.optimizer.apply_gradients(
+    optimizer.apply_gradients(
         zip(clipped_gradients, world_model.trainable_variables)
     )
 
@@ -142,6 +143,8 @@ def train_actor_and_critic_one_step(
     return_normalization_decay,
     train_actor=True,
     use_curiosity=False,
+    actor_optimizer,
+    critic_optimizer,
 ):
     # Compute losses.
     with tf.GradientTape(persistent=True) as tape:
@@ -150,7 +153,7 @@ def train_actor_and_critic_one_step(
         dream_data = dreamer_model.dream_trajectory(
             start_states={
                 "h": world_model_forward_train_outs["h_states_BxT"],
-                "z": world_model_forward_train_outs["z_states_BxT"],
+                "z": world_model_forward_train_outs["z_posterior_states_BxT"],
             },
             start_is_terminated=is_terminated,
             timesteps_H=horizon_H,
@@ -159,12 +162,12 @@ def train_actor_and_critic_one_step(
 
         value_targets = compute_value_targets(
             # Learn critic in symlog'd space.
-            rewards_t0_to_H_BxT=dream_data["rewards_dreamed_t0_to_H_B"],
+            rewards_t0_to_H_BxT=dream_data["rewards_dreamed_t0_to_H_BxT"],
             intrinsic_rewards_t1_to_H_BxT=(
-                dream_data["rewards_intrinsic_t1_to_H_B"] if use_curiosity else None
+                dream_data["rewards_intrinsic_t1_to_H_BxT"] if use_curiosity else None
             ),
-            continues_t0_to_H_BxT=dream_data["continues_dreamed_t0_to_H_B"],
-            value_predictions_t0_to_H_BxT=dream_data["values_dreamed_t0_to_H_B"],
+            continues_t0_to_H_BxT=dream_data["continues_dreamed_t0_to_H_BxT"],
+            value_predictions_t0_to_H_BxT=dream_data["values_dreamed_t0_to_H_BxT"],
             gamma=gamma,
             lambda_=lambda_,
         )
@@ -201,10 +204,10 @@ def train_actor_and_critic_one_step(
     if use_curiosity:
         results["DISAGREE_L_total"] = L_disagree
         results["DISAGREE_intrinsic_rewards_H_B"] = (
-            dream_data["rewards_intrinsic_t1_to_H_B"]
+            dream_data["rewards_intrinsic_t1_to_H_BxT"]
         )
         results["DISAGREE_intrinsic_rewards"] = tf.reduce_mean(
-            dream_data["rewards_intrinsic_t1_to_H_B"]
+            dream_data["rewards_intrinsic_t1_to_H_BxT"]
         )
         disagree_gradients = tape.gradient(
             L_disagree,
@@ -232,10 +235,10 @@ def train_actor_and_critic_one_step(
 
     # Apply gradients to our models.
     if train_actor:
-        dreamer_model.actor.optimizer.apply_gradients(
+        actor_optimizer.apply_gradients(
             zip(clipped_actor_gradients, dreamer_model.actor.trainable_variables)
         )
-    dreamer_model.critic.optimizer.apply_gradients(
+    critic_optimizer.apply_gradients(
         zip(clipped_critic_gradients, dreamer_model.critic.trainable_variables)
     )
     if use_curiosity:

@@ -16,7 +16,7 @@ def critic_loss(
     dream_data,
     value_targets,  # t0 to H-1, B
 ):
-    H, B = dream_data["rewards_dreamed_t0_to_H_B"].shape[:2]
+    H, B = dream_data["rewards_dreamed_t0_to_H_BxT"].shape[:2]
     Hm1 = H - 1
     # Note that value targets are NOT symlog'd and go from t0 to H-1, not H, like
     # all the other dream data.
@@ -32,7 +32,7 @@ def critic_loss(
     )
 
     # Get (B x T x probs) tensor from return distributions.
-    value_symlog_logits_HxB = dream_data["values_symlog_dreamed_logits_t0_to_HxB"]
+    value_symlog_logits_HxB = dream_data["values_symlog_dreamed_logits_t0_to_HxBxT"]
     # Unfold time rank and cut last time index to match value targets.
     value_symlog_logits_t0_to_Hm1_B = tf.reshape(
         value_symlog_logits_HxB,
@@ -46,7 +46,7 @@ def critic_loss(
     # Compute EMA regularization loss.
     # Expected values (dreamed) from the EMA (slow critic) net.
     # Note: Slow critic (EMA) outputs are already stop_gradient'd.
-    value_symlog_ema_t0_to_Hm1_B = tf.stop_gradient(dream_data["v_symlog_dreamed_ema_t0_to_H_B"])[:-1]
+    value_symlog_ema_t0_to_Hm1_B = tf.stop_gradient(dream_data["v_symlog_dreamed_ema_t0_to_H_BxT"])[:-1]
     # Fold time rank (for two_hot'ing).
     value_symlog_ema_HxB = tf.reshape(value_symlog_ema_t0_to_Hm1_B, (-1,))
     value_symlog_ema_two_hot_HxB = two_hot(value_symlog_ema_HxB)
@@ -70,7 +70,7 @@ def critic_loss(
     )
 
     # Mask out everything that goes beyond a predicted continue=False boundary.
-    L_critic_H_B *= tf.stop_gradient(dream_data["dream_loss_weights_t0_to_H_B"])[:-1]
+    L_critic_H_B *= tf.stop_gradient(dream_data["dream_loss_weights_t0_to_H_BxT"])[:-1]
 
     # Reduce over H- (time) axis (sum) and then B-axis (mean).
     L_critic = tf.reduce_mean(L_critic_H_B)

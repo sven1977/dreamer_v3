@@ -121,7 +121,7 @@ class WorldModel(tf.keras.Model):
         self.decoder = decoder
 
         # Optimizer.
-        self.optimizer = tf.keras.optimizers.Adam(learning_rate=1e-4, epsilon=1e-8)
+        #self.optimizer = tf.keras.optimizers.Adam(learning_rate=1e-4, epsilon=1e-8)
 
     @tf.function
     def get_initial_state(self):

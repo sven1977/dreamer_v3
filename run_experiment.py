@@ -25,33 +25,14 @@ import wandb
 
 from ray.rllib.algorithms.dreamerv3.dreamerv3 import DreamerV3Config
 from ray.rllib.algorithms.dreamerv3.utils.env_runner import DreamerV3EnvRunner
-from ray.rllib.core.rl_module.rl_module import SingleAgentRLModuleSpec, RLModule
+from ray.rllib.core.rl_module.rl_module import RLModule
 from ray.rllib.utils.replay_buffers.episode_replay_buffer import EpisodeReplayBuffer
 
-class DummyRLModule(RLModule):
-    def _forward_inference(self, batch, **kwargs):
-        return {"actions": 0}
-    def _forward_exploration(self, **kwargs):
-        return {"actions": 0}
-    def _forward_train(self, batch, **kwargs):
-        return {"action_dist_inputs": 0}
-    def get_state(self):
-        return {}
-    def set_state(self, state_dict):
-        pass
-
 import examples.debug_img_env  # to trigger DebugImgEnv import and registration
-from models.components.cnn_atari import CNNAtari
-from models.components.conv_transpose_atari import ConvTransposeAtari
-from models.components.mlp import MLP
-from models.components.vector_decoder import VectorDecoder
-from models.dreamer_model import DreamerModel
-from models.world_model import WorldModel
 from training.train_one_step import (
     train_actor_and_critic_one_step,
     train_world_model_one_step,
 )
-from utils.episode import Episode
 from utils.cartpole_debug import CartPoleDebug  # import registers `CartPoleDebug-v0`
 from utils.tensorboard import (
     summarize_actor_train_results,
@@ -160,18 +141,34 @@ gae_lambda = config.get("gae_lambda", 0.95)  # [1] eq. 7.
 entropy_scale = 3e-4  # [1] eq. 11.
 return_normalization_decay = 0.99  # [1] eq. 11 and 12.
 
-dummy_spec = SingleAgentRLModuleSpec(
-    module_class=DummyRLModule,
-    action_space=gym.spaces.Discrete(1),
-    observation_space=gym.spaces.Discrete(1),
-    model_config_dict={},
-)
+#dummy_spec = SingleAgentRLModuleSpec(
+#    module_class=DummyRLModule,
+#    action_space=gym.spaces.Discrete(1),
+#    observation_space=gym.spaces.Discrete(1),
+#    model_config_dict={},
+#)
 
 # EnvRunner config (an RLlib algorithm config).
 algo_config = (
     DreamerV3Config()
     .environment(config["env"], env_config=config.get("env_config", {}))
-    .rl_module(rl_module_spec=dummy_spec)
+    .training(
+        model={
+            "batch_length_T": batch_length_T,
+            "horizon_H": horizon_H,
+            "model_size": config["model_dimension"],
+            "gamma": discount_gamma,
+            "symlog_obs": False,
+        },
+        batch_size_B=batch_size_B,
+        batch_length_T=batch_length_T,
+        horizon_H=horizon_H,
+        model_size=config["model_dimension"],
+        gamma=discount_gamma,
+        gae_lambda=gae_lambda,
+        burn_in_T=burn_in_T,
+    )
+    #.rl_module(rl_module_spec=dummy_spec)
     .rollouts(
         remote_worker_envs=False,
         num_envs_per_worker=config.get("num_envs_per_worker", 1),
@@ -181,6 +178,7 @@ algo_config = (
 # The vectorized gymnasium EnvRunner to collect samples of shape (B, T, ...).
 env_runner = DreamerV3EnvRunner(config=algo_config)
 env_runner_evaluation = DreamerV3EnvRunner(config=algo_config)
+env_runner_evaluation.rl_module = env_runner.rl_module
 
 # Whether we have an image observation space or not.
 is_img_space = len(env_runner.env.single_observation_space.shape) in [2, 3]
@@ -200,38 +198,39 @@ use_curiosity = config.get("use_curiosity", False)
 intrinsic_rewards_scale = config.get("intrinsic_rewards_scale", 0.1)
 
 # Our DreamerV3 world model.
-print(f"Creating initial DreamerModel ...")
-model_dimension = config["model_dimension"]
-gray_scaled = is_img_space and len(env_runner.env.single_observation_space.shape) == 2
+#print(f"Creating initial DreamerModel ...")
+#model_dimension = config["model_dimension"]
+#gray_scaled = is_img_space and len(env_runner.env.single_observation_space.shape) == 2
 
-world_model = WorldModel(
-    model_dimension=model_dimension,
-    action_space=action_space,
-    batch_length_T=batch_length_T,
-    num_gru_units=config.get("num_gru_units"),
-    encoder=(
-        CNNAtari(model_dimension=model_dimension) if is_img_space
-        else MLP(model_dimension=model_dimension)
-    ),
-    decoder=ConvTransposeAtari(
-        model_dimension=model_dimension,
-        gray_scaled=gray_scaled,
-    ) if is_img_space else VectorDecoder(
-        model_dimension=model_dimension,
-        observation_space=env_runner.env.single_observation_space,
-    ),
-    symlog_obs=symlog_obs,
-)
-dreamer_model = DreamerModel(
-    model_dimension=model_dimension,
-    action_space=action_space,
-    world_model=world_model,
-    use_curiosity=use_curiosity,
-    intrinsic_rewards_scale=intrinsic_rewards_scale,
-    batch_size_B=batch_size_B,
-    batch_length_T=batch_length_T,
-    horizon_H=horizon_H,
-)
+#world_model = WorldModel(
+#    model_dimension=model_dimension,
+#    action_space=action_space,
+#    batch_length_T=batch_length_T,
+#    num_gru_units=config.get("num_gru_units"),
+#    encoder=(
+#        CNNAtari(model_dimension=model_dimension) if is_img_space
+#        else MLP(model_dimension=model_dimension)
+#    ),
+#    decoder=ConvTransposeAtari(
+#        model_dimension=model_dimension,
+#        gray_scaled=gray_scaled,
+#    ) if is_img_space else VectorDecoder(
+#        model_dimension=model_dimension,
+#        observation_space=env_runner.env.single_observation_space,
+#    ),
+#    symlog_obs=symlog_obs,
+#)
+#dreamer_model = DreamerModel(
+#    model_dimension=model_dimension,
+#    action_space=action_space,
+#    world_model=world_model,
+#    use_curiosity=use_curiosity,
+#    intrinsic_rewards_scale=intrinsic_rewards_scale,
+#    batch_size_B=batch_size_B,
+#    batch_length_T=batch_length_T,
+#    horizon_H=horizon_H,
+#)
+dreamer_model = env_runner.rl_module.dreamer_model
 
 # The replay buffer for storing actual env samples.
 buffer = EpisodeReplayBuffer(capacity=int(1e6))
@@ -261,8 +260,8 @@ training_iteration_start = 0
 
 # TODO: ugly hack (resulting from the insane fact that you cannot know
 #  an env's spaces prior to actually constructing an instance of it) :(
-env_runner.rl_module = dreamer_model
-env_runner_evaluation.rl_module = dreamer_model
+#env_runner.rl_module = dreamer_model
+#env_runner_evaluation.rl_module = dreamer_model
 
 # World model grad (by global norm) clipping according to [1] Appendix W.
 world_model_grad_clip = 1000.0
@@ -276,89 +275,10 @@ disagree_grad_clip = 100.0
 # Training ratio: Ratio of replayed steps over env steps.
 training_ratio = config["training_ratio"]
 
-if num_pretrain_iterations > 0:
-    # 1) Initialize dataset
-    import d3rlpy
-    if config["env"].startswith("ALE/"):
-        dataset, _ = d3rlpy.datasets.get_atari(config["offline_dataset"])
-    elif config["env"] == "CartPole-v0":
-        dataset, _ = d3rlpy.datasets.get_cartpole()
-    elif config["env"] == "Pendulum-v0":
-        dataset, _ = d3rlpy.datasets.get_pendulum()
-    else:
-        raise ValueError("Unknown offline environment.")
-    
-    print("LOADING episodes from d3rlpy to dreamer_v3")
-    episodes = []
-    for eps in dataset:
-        eps_ = Episode()
-        eps_.observations = np.concatenate(
-            [eps.observations, np.array([eps.observations[-1]])], axis=0
-        )
-        eps_.actions = eps.actions
-        eps_.rewards = eps.rewards
-        eps_.is_terminated = eps.terminal == 1.0
-        initial_h = dreamer_model._get_initial_h(1).numpy().astype(np.float32)
-        eps_.h_states = np.repeat(initial_h, len(eps_.rewards), axis = 0)
-        eps_.validate()
-        buffer.add(eps_)
-
-    assert buffer.get_num_episodes() == len(dataset)
-    assert buffer.get_num_timesteps() == dataset.rewards.shape[0]
-
-    print("Loaded d3rlpy dataset into replay buffer:")
-    print(f"{dataset.size()} episodes {dataset.rewards.shape[0]} steps")
-    print("Pretraining world model")
-
-    # 2) Pretrain world model on offline data for n iterations.
-    for iteration in range(num_pretrain_iterations):
-        print(f"Offline training iteration {iteration}")
-
-        sample = buffer.sample(batch_size_B=batch_size_B, batch_length_T=batch_length_T)
-        total_replayed_steps += batch_size_B * batch_length_T
-
-        # Convert samples (numpy) to tensors.
-        sample = tree.map_structure(lambda v: tf.convert_to_tensor(v), sample)
-
-        # Perform one world-model training step.
-        world_model_train_results = train_world_model_one_step(
-            sample=sample,
-            batch_size_B=tf.convert_to_tensor(batch_size_B),
-            batch_length_T=tf.convert_to_tensor(batch_length_T),
-            grad_clip=tf.convert_to_tensor(world_model_grad_clip),
-            world_model=world_model,
-        )
-        forward_train_outs = world_model_train_results["forward_train_outs"]
-
-        if summary_frequency_train_steps and iteration % summary_frequency_train_steps:
-            summarize_forward_train_outs_vs_samples(
-                forward_train_outs=forward_train_outs,
-                sample=sample,
-                batch_size_B=batch_size_B,
-                batch_length_T=batch_length_T,
-                symlog_obs=symlog_obs,
-            )
-            summarize_world_model_train_results(
-                world_model_train_results=world_model_train_results,
-                include_histograms=summary_include_histograms,
-            )
-
-        print(
-            "\t\tL_world_model_total="
-            f"{world_model_train_results['L_world_model_total'].numpy():.5f} ("
-            f"L_pred={world_model_train_results['L_pred'].numpy():.5f} ("
-            f"decoder/obs={world_model_train_results['L_decoder'].numpy()} "
-            f"reward(two-hot)={world_model_train_results['L_reward_two_hot'].numpy()} "
-            f"cont={world_model_train_results['L_continue'].numpy()}"
-            "); "
-            f"L_dyn={world_model_train_results['L_dyn'].numpy():.5f}; "
-            f"L_rep={world_model_train_results['L_rep'].numpy():.5f})"
-        )
-
-    print()
-    print(
-        "Pretraining offline completed ... switching to online training and evaluation"
-    )
+# Optimizer.
+world_model_optimizer = tf.keras.optimizers.Adam(learning_rate=1e-4, epsilon=1e-8)
+actor_optimizer = tf.keras.optimizers.Adam(learning_rate=3e-5, epsilon=1e-5)
+critic_optimizer = tf.keras.optimizers.Adam(learning_rate=3e-5, epsilon=1e-5)
 
 
 for iteration in range(training_iteration_start, 1000000):
@@ -451,6 +371,7 @@ for iteration in range(training_iteration_start, 1000000):
             batch_length_T=tf.convert_to_tensor(batch_length_T),
             grad_clip=tf.convert_to_tensor(world_model_grad_clip),
             world_model=dreamer_model.world_model,
+            optimizer=world_model_optimizer,
         )
         world_model_forward_train_outs = (
             world_model_train_results["WORLD_MODEL_forward_train_outs"]
@@ -459,21 +380,21 @@ for iteration in range(training_iteration_start, 1000000):
         # Train critic and actor.
         if train_critic:
             # Build critic model first, so we can initialize EMA weights.
-            if not dreamer_model.critic.trainable_variables:
+            #if not dreamer_model.critic.trainable_variables:
                 # Forward pass for fast critic.
-                dreamer_model.critic(
-                    h=world_model_forward_train_outs["h_states_BxT"],
-                    z=world_model_forward_train_outs["z_states_BxT"],
-                    return_logits=True,
-                )
+                #dreamer_model.critic(
+                #    h=world_model_forward_train_outs["h_states_BxT"],
+                #    z=world_model_forward_train_outs["z_states_BxT"],
+                #    return_logits=True,
+                #)
                 # Forward pass for EMA-weights critic.
-                dreamer_model.critic(
-                    h=world_model_forward_train_outs["h_states_BxT"],
-                    z=world_model_forward_train_outs["z_states_BxT"],
-                    return_logits=False,
-                    use_ema=True,
-                )
-                dreamer_model.critic.init_ema()
+                #dreamer_model.critic(
+                #    h=world_model_forward_train_outs["h_states_BxT"],
+                #    z=world_model_forward_train_outs["z_states_BxT"],
+                #    return_logits=False,
+                #    use_ema=True,
+                #)
+                #dreamer_model.critic.init_ema()
                 # Summarize critic models.
                 #dreamer_model.critic.summary()
 
@@ -491,22 +412,24 @@ for iteration in range(training_iteration_start, 1000000):
                 return_normalization_decay=return_normalization_decay,
                 train_actor=train_actor,
                 use_curiosity=use_curiosity,
+                actor_optimizer=actor_optimizer,
+                critic_optimizer=critic_optimizer,
             )
 
         # Summarize world model.
         if iteration == training_iteration_start and sub_iter == 0 and num_pretrain_iterations == 0:
             # Dummy forward pass to be able to produce summary.
-            dreamer_model(
-                sample["obs"][:1, 0],
-                sample["actions"][:1, 0],
-                {
-                    "h": world_model_forward_train_outs["h_states_BxT"][:1],
-                    "z": world_model_forward_train_outs["z_states_BxT"][:1],
-                    "a": sample["actions"][:1, 0],
-                },
-                sample["is_first"][:1, 0],
-            )
-            dreamer_model.summary()
+            #dreamer_model(
+            #    sample["obs"][:1, 0],
+            #    sample["actions"][:1, 0],
+            #    {
+            #        "h": world_model_forward_train_outs["h_states_BxT"][:1],
+            #        "z": world_model_forward_train_outs["z_posterior_states_BxT"][:1],
+            #        "a": sample["actions"][:1, 0],
+            #    },
+            #    sample["is_first"][:1, 0],
+            #)
+            #dreamer_model.summary()
 
             if args.checkpoint:
                 print(f"LOADING data into DreamerModel from checkpoint {args.checkpoint} ...")

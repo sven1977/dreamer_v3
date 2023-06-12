@@ -20,24 +20,31 @@ def actor_loss(
     # Note: `value_targets` are NOT stop_gradient'd yet.
     scaled_value_targets_t0_to_Hm1_B = compute_scaled_value_targets(
         value_targets=value_targets,  # targets are already [t0 to H-1, B]
-        value_predictions=dream_data["values_dreamed_t0_to_H_B"][:-1],
+        value_predictions=dream_data["values_dreamed_t0_to_H_BxT"][:-1],
         actor=actor,
         return_normalization_decay=return_normalization_decay,
     )
 
     # Actions actually taken in the dream.
-    actions_dreamed = tf.stop_gradient(dream_data["actions_dreamed_t0_to_H_B"])[:-1]
-    dist_actions_t0_to_Hm1_B = dream_data["actions_dreamed_distributions_t0_to_H_B"][:-1]
+    actions_dreamed = tf.stop_gradient(dream_data["actions_dreamed_t0_to_H_BxT"])[:-1]
+    #dist_actions_t0_to_Hm1_B = dream_data["actions_dreamed_distributions_t0_to_H_B"][:-1]
+
+    actions_dreamed_dist_params_t0_to_Hm1_B = dream_data[
+                                                  "actions_dreamed_dist_params_t0_to_H_BxT"
+                                              ][:-1]
+    dist_t0_to_Hm1_B = (
+        actor.get_action_dist_object(actions_dreamed_dist_params_t0_to_Hm1_B)
+    )
 
     # Compute log(p)s of all possible actions in the dream.
     if isinstance(actor.action_space, gym.spaces.Discrete):
         # Note that when we create the Categorical action distributions, we compute
         # unimix probs, then math.log these and provide these log(p) as "logits" to the
         # Categorical. So here, we'll continue to work with log(p)s (not really "logits")!
-        logp_actions_t0_to_Hm1_B = tf.stack(
-            [dist.logits for dist in dist_actions_t0_to_Hm1_B],
-            axis=0,
-        )
+        logp_actions_t0_to_Hm1_B = actions_dreamed_dist_params_t0_to_Hm1_B#tf.stack(
+            #[dist.logits for dist in dist_actions_t0_to_Hm1_B],
+            #axis=0,
+        #)
         # Log probs of actions actually taken in the dream.
         logp_actions_dreamed_t0_to_Hm1_B = tf.reduce_sum(
             actions_dreamed * logp_actions_t0_to_Hm1_B,
@@ -61,12 +68,13 @@ def actor_loss(
     assert len(logp_loss_H_B.shape) == 2
 
     # Add entropy loss term (second term [1] eq. 11).
-    entropy_H_B = tf.stack(
-        [dist.entropy()
-         for dist in dream_data["actions_dreamed_distributions_t0_to_H_B"][:-1]
-         ],
-        axis=0,
-    )
+    #entropy_H_B = tf.stack(
+    #    [dist.entropy()
+    #     for dist in dream_data["actions_dreamed_distributions_t0_to_H_B"][:-1]
+    #     ],
+    #    axis=0,
+    #)
+    entropy_H_B = dist_t0_to_Hm1_B.entropy()
     assert len(entropy_H_B.shape) == 2
     entropy = tf.reduce_mean(entropy_H_B)
 
@@ -75,7 +83,7 @@ def actor_loss(
 
     L_actor_H_B = L_actor_reinforce_term_H_B + L_actor_action_entropy_term_H_B
     # Mask out everything that goes beyond a predicted continue=False boundary.
-    L_actor_H_B *= tf.stop_gradient(dream_data["dream_loss_weights_t0_to_H_B"])[:-1]
+    L_actor_H_B *= tf.stop_gradient(dream_data["dream_loss_weights_t0_to_H_BxT"])[:-1]
     L_actor = tf.reduce_mean(L_actor_H_B)
 
     return {
