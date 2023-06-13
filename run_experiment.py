@@ -170,6 +170,7 @@ algo_config = (
         gae_lambda=gae_lambda,
         burn_in_T=burn_in_T,
     )
+    .reporting(summarize_individual_batch_item_stats=True)
     #.rl_module(rl_module_spec=dummy_spec)
     .rollouts(
         remote_worker_envs=False,
@@ -430,9 +431,7 @@ for iteration in range(training_iteration_start, 1000000):
                 env_steps=len(sample["obs"]),
             ),
         )
-        world_model_forward_train_outs = (
-            results["WORLD_MODEL_forward_train_outs"]
-        )
+        results = results["default_policy"]
         learner.additional_update(timestep=0)  # timestep shouldn't matter
         # Summarize world model.
         #if iteration == training_iteration_start and sub_iter == 0 and num_pretrain_iterations == 0:
@@ -452,13 +451,13 @@ for iteration in range(training_iteration_start, 1000000):
         if summary_frequency_train_steps and (
                 total_train_steps % summary_frequency_train_steps == 0
         ):
-            summarize_forward_train_outs_vs_samples(
-                forward_train_outs=world_model_forward_train_outs,
-                sample=sample,
-                batch_size_B=batch_size_B,
-                batch_length_T=batch_length_T,
-                symlog_obs=symlog_obs,
-            )
+            #summarize_forward_train_outs_vs_samples(
+            #    forward_train_outs=results,
+            #    sample=sample,
+            #    batch_size_B=batch_size_B,
+            #    batch_length_T=batch_length_T,
+            #    symlog_obs=symlog_obs,
+            #)
             summarize_world_model_train_results(
                 world_model_train_results=results,
                 include_histograms=summary_include_histograms,
@@ -494,27 +493,27 @@ for iteration in range(training_iteration_start, 1000000):
 
         print(
             "\t\tWORLD_MODEL_L_total="
-            f"{results['WORLD_MODEL_L_total'].numpy():.5f} ("
+            f"{results['WORLD_MODEL_L_total']:.5f} ("
             "L_pred="
-            f"{results['WORLD_MODEL_L_prediction'].numpy():.5f} ("
-            f"dec/obs={results['WORLD_MODEL_L_decoder'].numpy()} "
-            f"rew(two-hot)={results['WORLD_MODEL_L_reward'].numpy()} "
-            f"cont={results['WORLD_MODEL_L_continue'].numpy()}"
+            f"{results['WORLD_MODEL_L_prediction']:.5f} ("
+            f"dec/obs={results['WORLD_MODEL_L_decoder']} "
+            f"rew(two-hot)={results['WORLD_MODEL_L_reward']} "
+            f"cont={results['WORLD_MODEL_L_continue']}"
             "); "
-            f"L_dyn={results['WORLD_MODEL_L_dynamics'].numpy():.5f}; "
+            f"L_dyn={results['WORLD_MODEL_L_dynamics']:.5f}; "
             "L_rep="
-            f"{results['WORLD_MODEL_L_representation'].numpy():.5f})"
+            f"{results['WORLD_MODEL_L_representation']:.5f})"
         )
         print("\t\t", end="")
         if train_actor:
             L_actor = results["ACTOR_L_total"]
-            print(f"L_actor={L_actor.numpy() if train_actor else 0.0:.5f} ", end="")
+            print(f"L_actor={L_actor if train_actor else 0.0:.5f} ", end="")
         if train_critic:
             L_critic = results["CRITIC_L_total"]
-            print(f"L_critic={L_critic.numpy():.5f} ", end="")
+            print(f"L_critic={L_critic:.5f} ", end="")
         if use_curiosity:
             L_disagree = results["DISAGREE_L_total"]
-            print(f"L_disagree={L_disagree.numpy():.5f}", end="")
+            print(f"L_disagree={L_disagree:.5f}", end="")
         print()
 
         sub_iter += 1

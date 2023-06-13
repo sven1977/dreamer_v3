@@ -139,7 +139,7 @@ def summarize_forward_train_outs_vs_samples(
     """
     _summarize_obs(
         computed_float_obs_B_T_dims=tf.reshape(
-            forward_train_outs["obs_distribution_means_BxT"],
+            forward_train_outs["WORLD_MODEL_fwd_out_obs_distribution_means_BxT"],
             shape=(batch_size_B, batch_length_T) + sample["obs"].shape[2:],
         ),
         sampled_obs_B_T_dims=sample["obs"],
@@ -147,24 +147,24 @@ def summarize_forward_train_outs_vs_samples(
         descr_obs=f"predicted_posterior_T{batch_length_T}",
         symlog_obs=symlog_obs,
     )
-    predicted_rewards = inverse_symlog(forward_train_outs["rewards_BxT"])
-    _summarize_rewards(
-        computed_rewards=predicted_rewards,
-        sampled_rewards=np.reshape(sample["rewards"], [-1]),
-        descr_prefix="WORLD_MODEL",
-        descr_reward="predicted_posterior",
-    )
-    wandb.log({
-        "sampled_rewards": sample["rewards"].numpy(),
-        "WORLD_MODEL_predicted_posterior_rewards": predicted_rewards.numpy(),
-    }, commit=False)
+    #predicted_rewards = inverse_symlog(forward_train_outs["rewards_BxT"])
+    #_summarize_rewards(
+    #    computed_rewards=predicted_rewards,
+    #    sampled_rewards=np.reshape(sample["rewards"], [-1]),
+    #    descr_prefix="WORLD_MODEL",
+    #    descr_reward="predicted_posterior",
+    #)
+    #wandb.log({
+    #    "sampled_rewards": sample["rewards"].numpy(),
+    #    "WORLD_MODEL_predicted_posterior_rewards": predicted_rewards.numpy(),
+    #}, commit=False)
 
-    _summarize_continues(
-        computed_continues=forward_train_outs["continues_BxT"],
-        sampled_continues=np.reshape(1.0 - sample["is_terminated"], [-1]),
-        descr_prefix="WORLD_MODEL",
-        descr_cont="predicted_posterior",
-    )
+    #_summarize_continues(
+    #    computed_continues=forward_train_outs["continues_BxT"],
+    #    sampled_continues=np.reshape(1.0 - sample["is_terminated"], [-1]),
+    #    descr_prefix="WORLD_MODEL",
+    #    descr_cont="predicted_posterior",
+    #)
 
 
 def summarize_actor_train_results(
@@ -182,13 +182,13 @@ def summarize_actor_train_results(
         "ACTOR_action_entropy",
 
         # Terms related to scaling the value targets.
-        "ACTOR_scaled_value_targets_H_B",
+        "ACTOR_scaled_value_targets_H_BxT",
         "ACTOR_value_targets_pct95_ema",
         "ACTOR_value_targets_pct5_ema",
 
         # Gradients.
-        "ACTOR_gradients_maxabs",
-        "ACTOR_gradients_clipped_by_glob_norm_maxabs",
+        "ACTOR_gradients_maxabs_after_clipping",
+        "ACTOR_gradients_global_norm",
     ]
 
     _summarize(
@@ -206,8 +206,8 @@ def summarize_critic_train_results(
     keys_to_log = [
         # TODO: Move this to generic function as value targets are also important for actor
         #  loss.
-        "VALUE_TARGETS_H_B",
-        "VALUE_TARGETS_symlog_H_B",
+        "VALUE_TARGETS_H_BxT",
+        "VALUE_TARGETS_symlog_H_BxT",
 
         # Loss terms.
         "CRITIC_L_total",
@@ -215,8 +215,8 @@ def summarize_critic_train_results(
         "CRITIC_L_slow_critic_regularization",
 
         # Gradients.
-        "CRITIC_gradients_maxabs",
-        "CRITIC_gradients_clipped_by_glob_norm_maxabs",
+        "CRITIC_gradients_maxabs_after_clipping",
+        "CRITIC_gradients_global_norm",
     ]
 
     _summarize(
@@ -389,8 +389,8 @@ def summarize_world_model_train_results(
         "WORLD_MODEL_L_total",
 
         # Gradients.
-        "WORLD_MODEL_gradients_maxabs",
-        "WORLD_MODEL_gradients_clipped_by_glob_norm_maxabs",
+        "WORLD_MODEL_gradients_maxabs_after_clipping",
+        "WORLD_MODEL_gradients_global_norm",
     ]
 
     _summarize(
