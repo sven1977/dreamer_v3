@@ -27,7 +27,9 @@ def actor_loss(
 
     # Actions actually taken in the dream.
     actions_dreamed = tf.stop_gradient(dream_data["actions_dreamed_t0_to_H_B"])[:-1]
-    dist_actions_t0_to_Hm1_B = dream_data["actions_dreamed_distributions_t0_to_H_B"][:-1]
+    dist_actions_t0_to_Hm1_B = dream_data["actions_dreamed_distributions_t0_to_H_B"][
+        :-1
+    ]
 
     # Compute log(p)s of all possible actions in the dream.
     if isinstance(actor.action_space, gym.spaces.Discrete):
@@ -49,10 +51,12 @@ def actor_loss(
         )
     elif isinstance(actor.action_space, gym.spaces.Box):
         # TODO (Rohan138, Sven): Figure out how to vectorize this instead!
-        logp_actions_dreamed_t0_to_Hm1_B = tf.stack([
-            dist.log_prob(actions_dreamed[i])
-            for i, dist in enumerate(dist_actions_t0_to_Hm1_B)
-        ])
+        logp_actions_dreamed_t0_to_Hm1_B = tf.stack(
+            [
+                dist.log_prob(actions_dreamed[i])
+                for i, dist in enumerate(dist_actions_t0_to_Hm1_B)
+            ]
+        )
         # First term of loss function. [1] eq. 11.
         logp_loss_H_B = scaled_value_targets_t0_to_Hm1_B
     else:
@@ -62,16 +66,17 @@ def actor_loss(
 
     # Add entropy loss term (second term [1] eq. 11).
     entropy_H_B = tf.stack(
-        [dist.entropy()
-         for dist in dream_data["actions_dreamed_distributions_t0_to_H_B"][:-1]
-         ],
+        [
+            dist.entropy()
+            for dist in dream_data["actions_dreamed_distributions_t0_to_H_B"][:-1]
+        ],
         axis=0,
     )
     assert len(entropy_H_B.shape) == 2
     entropy = tf.reduce_mean(entropy_H_B)
 
-    L_actor_reinforce_term_H_B = - logp_loss_H_B
-    L_actor_action_entropy_term_H_B = - entropy_scale * entropy_H_B
+    L_actor_reinforce_term_H_B = -logp_loss_H_B
+    L_actor_action_entropy_term_H_B = -entropy_scale * entropy_H_B
 
     L_actor_H_B = L_actor_reinforce_term_H_B + L_actor_action_entropy_term_H_B
     # Mask out everything that goes beyond a predicted continue=False boundary.
@@ -87,7 +92,6 @@ def actor_loss(
         "ACTOR_value_targets_pct5_ema": actor.ema_value_target_pct5,
         "ACTOR_action_entropy_H_B": entropy_H_B,
         "ACTOR_action_entropy": entropy,
-
         # Individual loss terms.
         "ACTOR_L_neglogp_reinforce_term_H_B": L_actor_reinforce_term_H_B,
         "ACTOR_L_neglogp_reinforce_term": tf.reduce_mean(L_actor_reinforce_term_H_B),
@@ -118,20 +122,20 @@ def compute_scaled_value_targets(
     # Later update (something already stored in EMA variable): Update EMA.
     else:
         actor.ema_value_target_pct5.assign(
-            return_normalization_decay * actor.ema_value_target_pct5 + (
-                1.0 - return_normalization_decay
-            ) * Per_R_5
+            return_normalization_decay * actor.ema_value_target_pct5
+            + (1.0 - return_normalization_decay) * Per_R_5
         )
         actor.ema_value_target_pct95.assign(
-            return_normalization_decay * actor.ema_value_target_pct95 + (
-                1.0 - return_normalization_decay
-            ) * Per_R_95
+            return_normalization_decay * actor.ema_value_target_pct95
+            + (1.0 - return_normalization_decay) * Per_R_95
         )
 
     # [1] eq. 11 (first term).
     # Dani's code: TODO: describe ...
     offset = actor.ema_value_target_pct5
-    invscale = tf.math.maximum(1e-8, (actor.ema_value_target_pct95 - actor.ema_value_target_pct5))
+    invscale = tf.math.maximum(
+        1e-8, (actor.ema_value_target_pct95 - actor.ema_value_target_pct5)
+    )
     scaled_value_targets_H_B = (value_targets_H_B - offset) / invscale
     scaled_value_predictions_H_B = (value_predictions_H_B - offset) / invscale
     # Return advantages.

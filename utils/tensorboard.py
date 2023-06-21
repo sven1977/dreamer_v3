@@ -29,7 +29,7 @@ def reconstruct_obs_from_h_and_z(
     dreamer_model,
     obs_dims_shape,
 ):
-    """Returns """
+    """Returns"""
     shape = tf.shape(h_t0_to_H)
     T = shape[0]  # inputs are time-major
     B = shape[1]
@@ -67,45 +67,46 @@ def summarize_dreamed_trajectory(
     )
     func = (
         create_cartpole_dream_image
-        if env.startswith("CartPole") else create_frozenlake_dream_image
+        if env.startswith("CartPole")
+        else create_frozenlake_dream_image
     )
     # Take 0th dreamed trajectory and produce series of images.
     for b in batch_indices:
         images = []
         for t in range(len(dreamed_obs_H_B) - 1):
-            images.append(func(
-                dreamed_obs=dreamed_obs_H_B[t][b],
-                dreamed_V=dream_data["values_dreamed_t0_to_H_B"][t][b],
-                dreamed_a=(
-                    dream_data["actions_ints_dreamed_t0_to_H_B"][t][b]
-                ),
-                dreamed_r_tp1=(
-                    dream_data["rewards_dreamed_t0_to_H_B"][t + 1][b]
-                ),
-                # `DISAGREE_intrinsic_rewards_H_B` are shifted by 1 already
-                # (from t1 to H, not t0 to H like all other data here).
-                dreamed_ri_tp1=(
-                    actor_critic_train_results[
-                        "DISAGREE_intrinsic_rewards_H_B"
-                    ][t][b]
-                    if "DISAGREE_intrinsic_rewards_H_B" in actor_critic_train_results
-                    else None
-                ),
-                dreamed_c_tp1=(
-                    dream_data["continues_dreamed_t0_to_H_B"][t + 1][b]
-                ),
-                value_target=(
-                    actor_critic_train_results["VALUE_TARGETS_H_B"][t][b]
-                ),
-                initial_h=dream_data["h_states_t0_to_H_B"][t][b],
-                as_tensor=True,
-            ).numpy())
+            images.append(
+                func(
+                    dreamed_obs=dreamed_obs_H_B[t][b],
+                    dreamed_V=dream_data["values_dreamed_t0_to_H_B"][t][b],
+                    dreamed_a=(dream_data["actions_ints_dreamed_t0_to_H_B"][t][b]),
+                    dreamed_r_tp1=(dream_data["rewards_dreamed_t0_to_H_B"][t + 1][b]),
+                    # `DISAGREE_intrinsic_rewards_H_B` are shifted by 1 already
+                    # (from t1 to H, not t0 to H like all other data here).
+                    dreamed_ri_tp1=(
+                        actor_critic_train_results["DISAGREE_intrinsic_rewards_H_B"][t][
+                            b
+                        ]
+                        if "DISAGREE_intrinsic_rewards_H_B"
+                        in actor_critic_train_results
+                        else None
+                    ),
+                    dreamed_c_tp1=(dream_data["continues_dreamed_t0_to_H_B"][t + 1][b]),
+                    value_target=(
+                        actor_critic_train_results["VALUE_TARGETS_H_B"][t][b]
+                    ),
+                    initial_h=dream_data["h_states_t0_to_H_B"][t][b],
+                    as_tensor=True,
+                ).numpy()
+            )
         # Concat images along width-axis (so they show as a "film sequence" next to each
         # other).
         images = wandb.Image(np.concatenate(images, axis=1))
-        wandb.log({
-            f"dreamed_trajectories{('_'+desc) if desc else ''}_B{b}": images,
-        }, commit=False)
+        wandb.log(
+            {
+                f"dreamed_trajectories{('_'+desc) if desc else ''}_B{b}": images,
+            },
+            commit=False,
+        )
 
 
 def summarize_forward_train_outs_vs_samples(
@@ -154,10 +155,13 @@ def summarize_forward_train_outs_vs_samples(
         descr_prefix="WORLD_MODEL",
         descr_reward="predicted_posterior",
     )
-    wandb.log({
-        "sampled_rewards": sample["rewards"].numpy(),
-        "WORLD_MODEL_predicted_posterior_rewards": predicted_rewards.numpy(),
-    }, commit=False)
+    wandb.log(
+        {
+            "sampled_rewards": sample["rewards"].numpy(),
+            "WORLD_MODEL_predicted_posterior_rewards": predicted_rewards.numpy(),
+        },
+        commit=False,
+    )
 
     _summarize_continues(
         computed_continues=forward_train_outs["continues_BxT"],
@@ -177,15 +181,12 @@ def summarize_actor_train_results(
         "ACTOR_L_total",
         "ACTOR_L_neglogp_reinforce_term",
         "ACTOR_L_neg_entropy_term",
-
         # Action entropy.
         "ACTOR_action_entropy",
-
         # Terms related to scaling the value targets.
         "ACTOR_scaled_value_targets_H_B",
         "ACTOR_value_targets_pct95_ema",
         "ACTOR_value_targets_pct5_ema",
-
         # Gradients.
         "ACTOR_gradients_maxabs",
         "ACTOR_gradients_clipped_by_glob_norm_maxabs",
@@ -208,12 +209,10 @@ def summarize_critic_train_results(
         #  loss.
         "VALUE_TARGETS_H_B",
         "VALUE_TARGETS_symlog_H_B",
-
         # Loss terms.
         "CRITIC_L_total",
         "CRITIC_L_neg_logp_of_value_targets",
         "CRITIC_L_slow_critic_regularization",
-
         # Gradients.
         "CRITIC_gradients_maxabs",
         "CRITIC_gradients_clipped_by_glob_norm_maxabs",
@@ -234,11 +233,9 @@ def summarize_disagree_train_results(
     keys_to_log = [
         # Loss terms.
         "DISAGREE_L_total",
-
         # Intrinsic rewards.
         "DISAGREE_intrinsic_rewards_H_B",
         "DISAGREE_intrinsic_rewards",
-
         # Gradients.
         "DISAGREE_gradients_maxabs",
         "DISAGREE_gradients_clipped_by_glob_norm_maxabs",
@@ -276,7 +273,7 @@ def summarize_dreamed_eval_trajectory_vs_samples(
             dreamed_obs_T_B,
             perm=[1, 0] + list(range(2, len(dreamed_obs_T_B.shape.as_list()))),
         ),
-        sampled_obs_B_T_dims=sample["obs"][:, t0:tH+1],
+        sampled_obs_B_T_dims=sample["obs"][:, t0 : tH + 1],
         descr_prefix="EVALUATION",
         descr_obs=f"dreamed_prior_H{dreamed_T}",
         symlog_obs=symlog_obs,
@@ -285,7 +282,7 @@ def summarize_dreamed_eval_trajectory_vs_samples(
     # Reward MSE.
     _summarize_rewards(
         computed_rewards=dream_data["rewards_dreamed_t0_to_H_B"],
-        sampled_rewards=sample["rewards"][:, t0:tH+1],
+        sampled_rewards=sample["rewards"][:, t0 : tH + 1],
         descr_prefix="EVALUATION",
         descr_reward=f"dreamed_prior_H{dreamed_T}",
     )
@@ -293,7 +290,7 @@ def summarize_dreamed_eval_trajectory_vs_samples(
     # Continues MSE.
     _summarize_continues(
         computed_continues=dream_data["continues_dreamed_t0_to_H_B"],
-        sampled_continues=(1.0 - sample["is_terminated"])[:, t0:tH+1],
+        sampled_continues=(1.0 - sample["is_terminated"])[:, t0 : tH + 1],
         descr_prefix="EVALUATION",
         descr_cont=f"dreamed_prior_H{dreamed_T}",
     )
@@ -312,10 +309,13 @@ def summarize_sampling_and_replay_buffer(
     replayed_steps = replay_buffer.get_sampled_timesteps()
 
     # Summarize buffer length.
-    wandb.log({
-        "BUFFER_size_num_episodes": episodes_in_buffer,
-        "BUFFER_size_timesteps": ts_in_buffer,
-    }, commit=False)
+    wandb.log(
+        {
+            "BUFFER_size_num_episodes": episodes_in_buffer,
+            "BUFFER_size_timesteps": ts_in_buffer,
+        },
+        commit=False,
+    )
 
     # Summarize episode returns.
     episode_returns = []
@@ -326,11 +326,14 @@ def summarize_sampling_and_replay_buffer(
         episode_returns = list(sampler_metrics["episode_returns"])
         episode_return_mean = np.mean(episode_returns)
 
-        wandb.log({
-            "SAMPLER_actions_taken": sampler_metrics["actions"],
-            "SAMPLER_episode_return_mean": episode_return_mean,
-            "SAMPLER_episode_length_mean": episode_length_mean,
-        }, commit=False)
+        wandb.log(
+            {
+                "SAMPLER_actions_taken": sampler_metrics["actions"],
+                "SAMPLER_episode_return_mean": episode_return_mean,
+                "SAMPLER_episode_length_mean": episode_length_mean,
+            },
+            commit=False,
+        )
 
     if print_:
         print(f"SAMPLE: ts={sampler_metrics['ts_taken']} (total={step}); ", end="")
@@ -353,16 +356,18 @@ def summarize_world_model_train_results(
     include_histograms=False,
 ):
     # TODO: Move to returned train_one_step results.
-    wandb.log({
-        "WORLD_MODEL_initial_h_sum_abs": tf.reduce_sum(
-            tf.math.abs(world_model_train_results["WORLD_MODEL_learned_initial_h"])
-        ).numpy()
-    }, commit=False)
+    wandb.log(
+        {
+            "WORLD_MODEL_initial_h_sum_abs": tf.reduce_sum(
+                tf.math.abs(world_model_train_results["WORLD_MODEL_learned_initial_h"])
+            ).numpy()
+        },
+        commit=False,
+    )
 
     keys_to_log = [
         # Learned initial state.
         "WORLD_MODEL_learned_initial_h",
-
         # Loss terms.
         # Prediction loss.
         "WORLD_MODEL_L_prediction_B_T",
@@ -375,19 +380,15 @@ def summarize_world_model_train_results(
         "WORLD_MODEL_L_continue_B_T",
         "WORLD_MODEL_L_continue",
         # ----
-
         # Dynamics loss.
         "WORLD_MODEL_L_dynamics_B_T",
         "WORLD_MODEL_L_dynamics",
-
         # Representation loss.
         "WORLD_MODEL_L_representation_B_T",
         "WORLD_MODEL_L_representation",
-
         # TOTAL loss.
         "WORLD_MODEL_L_total_B_T",
         "WORLD_MODEL_L_total",
-
         # Gradients.
         "WORLD_MODEL_gradients_maxabs",
         "WORLD_MODEL_gradients_clipped_by_glob_norm_maxabs",
@@ -434,14 +435,17 @@ def _summarize_obs(
         computed_float_obs_B_T_dims - tf.cast(sampled_obs_B_T_dims, tf.float32)
     )
     mse_sampled_vs_computed_obs = tf.reduce_mean(mse_sampled_vs_computed_obs)
-    wandb.log({
-        f"{descr_prefix}sampled_vs_{descr_obs}_obs_mse": (
-            mse_sampled_vs_computed_obs.numpy()
-        ),
-    }, commit=False)
+    wandb.log(
+        {
+            f"{descr_prefix}sampled_vs_{descr_obs}_obs_mse": (
+                mse_sampled_vs_computed_obs.numpy()
+            ),
+        },
+        commit=False,
+    )
 
     # Videos: Create summary, comparing computed images with actual sampled ones.
-    if len(sampled_obs_B_T_dims.shape) in [2+2, 2+3]:
+    if len(sampled_obs_B_T_dims.shape) in [2 + 2, 2 + 3]:
         # Restore image pixels from normalized (non-symlog'd) data.
         if not symlog_obs:
             computed_float_obs_B_T_dims = (computed_float_obs_B_T_dims + 1.0) * 128
@@ -456,17 +460,21 @@ def _summarize_obs(
         # real images show below respective predicted ones.
         # (B, T, C, h, w)
         sampled_vs_computed_images = tf.concat(
-            [computed_images, sampled_obs_B_T_dims], axis=3,
+            [computed_images, sampled_obs_B_T_dims],
+            axis=3,
         )
         # Add grayscale dim, if necessary.
         if len(sampled_obs_B_T_dims.shape) == 2 + 2:
             sampled_vs_computed_images = tf.expand_dims(sampled_vs_computed_images, -1)
 
-        wandb.log({
-            f"{descr_prefix}sampled_vs_{descr_obs}_videos": (
-                wandb.Video(sampled_vs_computed_images, fps=15)
-            ),
-        }, commit=False)
+        wandb.log(
+            {
+                f"{descr_prefix}sampled_vs_{descr_obs}_videos": (
+                    wandb.Video(sampled_vs_computed_images, fps=15)
+                ),
+            },
+            commit=False,
+        )
 
     return mse_sampled_vs_computed_obs
 
@@ -484,11 +492,14 @@ def _summarize_rewards(
         tf.expand_dims(sampled_rewards, axis=-1),
     )
     mse_sampled_vs_computed_rewards = tf.reduce_mean(mse_sampled_vs_computed_rewards)
-    wandb.log({
-        f"{descr_prefix}sampled_vs_{descr_reward}_rewards_mse": (
-            mse_sampled_vs_computed_rewards.numpy()
-        ),
-    }, commit=False)
+    wandb.log(
+        {
+            f"{descr_prefix}sampled_vs_{descr_reward}_rewards_mse": (
+                mse_sampled_vs_computed_rewards.numpy()
+            ),
+        },
+        commit=False,
+    )
 
 
 def _summarize_continues(
@@ -507,9 +518,11 @@ def _summarize_continues(
     mse_sampled_vs_computed_continues = tf.reduce_mean(
         mse_sampled_vs_computed_continues
     )
-    wandb.log({
-        f"{descr_prefix}sampled_vs_{descr_cont}_continues_mse": (
-            mse_sampled_vs_computed_continues.numpy()
-        ),
-    }, commit=False)
-
+    wandb.log(
+        {
+            f"{descr_prefix}sampled_vs_{descr_cont}_continues_mse": (
+                mse_sampled_vs_computed_continues.numpy()
+            ),
+        },
+        commit=False,
+    )

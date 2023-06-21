@@ -4,8 +4,9 @@ D. Hafner, J. Pasukonis, J. Ba, T. Lillicrap
 https://arxiv.org/pdf/2301.04104v1.pdf
 """
 import tensorflow as tf
+
 from losses.actor_loss import actor_loss
-from losses.critic_loss import critic_loss, compute_value_targets
+from losses.critic_loss import compute_value_targets, critic_loss
 from losses.disagree_loss import disagree_loss
 from losses.world_model_losses import (
     world_model_dynamics_and_representation_loss,
@@ -57,8 +58,8 @@ def train_world_model_one_step(
         # TEST: Out of interest, compare with simplge -log(p) loss for individual
         # rewards using the FiniteDiscrete distribution. This should be very close
         # to the two-hot reward loss.
-        #L_reward_logp_B_T = prediction_losses["reward_loss_logp_B_T"]
-        #L_reward_logp = tf.reduce_mean(L_reward_logp_B_T)
+        # L_reward_logp_B_T = prediction_losses["reward_loss_logp_B_T"]
+        # L_reward_logp = tf.reduce_mean(L_reward_logp_B_T)
 
         L_continue_B_T = prediction_losses["continue_loss_B_T"]
         L_continue = tf.reduce_mean(L_continue_B_T)
@@ -89,7 +90,6 @@ def train_world_model_one_step(
         # Forward train results.
         "WORLD_MODEL_forward_train_outs": forward_train_outs,
         "WORLD_MODEL_learned_initial_h": world_model.initial_h,
-
         # Prediction losses.
         # Decoder (obs) loss.
         "WORLD_MODEL_L_decoder_B_T": L_decoder_B_T,
@@ -103,19 +103,15 @@ def train_world_model_one_step(
         # Total.
         "WORLD_MODEL_L_prediction_B_T": L_pred_B_T,
         "WORLD_MODEL_L_prediction": L_pred,
-
         # Dynamics loss.
         "WORLD_MODEL_L_dynamics_B_T": L_dyn_B_T,
         "WORLD_MODEL_L_dynamics": L_dyn,
-
         # Representation loss.
         "WORLD_MODEL_L_representation_B_T": L_rep_B_T,
         "WORLD_MODEL_L_representation": L_rep,
-
         # Total loss.
         "WORLD_MODEL_L_total_B_T": L_world_model_total_B_T,
         "WORLD_MODEL_L_total": L_world_model_total,
-
         # Gradient stats.
         "WORLD_MODEL_gradients_maxabs": (
             tf.reduce_max([tf.reduce_max(tf.math.abs(g)) for g in gradients])
@@ -175,7 +171,7 @@ def train_actor_and_critic_one_step(
                 value_targets=value_targets,
                 actor=dreamer_model.actor,
                 entropy_scale=entropy_scale,
-                return_normalization_decay=return_normalization_decay
+                return_normalization_decay=return_normalization_decay,
             )
         if use_curiosity:
             L_disagree = disagree_loss(dream_data=dream_data)
@@ -200,9 +196,9 @@ def train_actor_and_critic_one_step(
     )
     if use_curiosity:
         results["DISAGREE_L_total"] = L_disagree
-        results["DISAGREE_intrinsic_rewards_H_B"] = (
-            dream_data["rewards_intrinsic_t1_to_H_B"]
-        )
+        results["DISAGREE_intrinsic_rewards_H_B"] = dream_data[
+            "rewards_intrinsic_t1_to_H_B"
+        ]
         results["DISAGREE_intrinsic_rewards"] = tf.reduce_mean(
             dream_data["rewards_intrinsic_t1_to_H_B"]
         )
@@ -216,19 +212,31 @@ def train_actor_and_critic_one_step(
         clipped_actor_gradients, _ = tf.clip_by_global_norm(
             actor_gradients, actor_grad_clip
         )
-        results["ACTOR_gradients_maxabs"] = tf.reduce_max([tf.reduce_max(tf.math.abs(g)) for g in actor_gradients])
-        results["ACTOR_gradients_clipped_by_glob_norm_maxabs"] = tf.reduce_max([tf.reduce_max(tf.math.abs(g)) for g in clipped_actor_gradients])
+        results["ACTOR_gradients_maxabs"] = tf.reduce_max(
+            [tf.reduce_max(tf.math.abs(g)) for g in actor_gradients]
+        )
+        results["ACTOR_gradients_clipped_by_glob_norm_maxabs"] = tf.reduce_max(
+            [tf.reduce_max(tf.math.abs(g)) for g in clipped_actor_gradients]
+        )
     clipped_critic_gradients, _ = tf.clip_by_global_norm(
         critic_gradients, critic_grad_clip
     )
-    results["CRITIC_gradients_maxabs"] = tf.reduce_max([tf.reduce_max(tf.math.abs(g)) for g in critic_gradients])
-    results["CRITIC_gradients_clipped_by_glob_norm_maxabs"] = tf.reduce_max([tf.reduce_max(tf.math.abs(g)) for g in clipped_critic_gradients])
+    results["CRITIC_gradients_maxabs"] = tf.reduce_max(
+        [tf.reduce_max(tf.math.abs(g)) for g in critic_gradients]
+    )
+    results["CRITIC_gradients_clipped_by_glob_norm_maxabs"] = tf.reduce_max(
+        [tf.reduce_max(tf.math.abs(g)) for g in clipped_critic_gradients]
+    )
     if use_curiosity:
         clipped_disagree_gradients, _ = tf.clip_by_global_norm(
             disagree_gradients, disagree_grad_clip
         )
-        results["DISAGREE_gradients_maxabs"] = tf.reduce_max([tf.reduce_max(tf.math.abs(g)) for g in disagree_gradients])
-        results["DISAGREE_gradients_clipped_by_glob_norm_maxabs"] = tf.reduce_max([tf.reduce_max(tf.math.abs(g)) for g in clipped_disagree_gradients])
+        results["DISAGREE_gradients_maxabs"] = tf.reduce_max(
+            [tf.reduce_max(tf.math.abs(g)) for g in disagree_gradients]
+        )
+        results["DISAGREE_gradients_clipped_by_glob_norm_maxabs"] = tf.reduce_max(
+            [tf.reduce_max(tf.math.abs(g)) for g in clipped_disagree_gradients]
+        )
 
     # Apply gradients to our models.
     if train_actor:

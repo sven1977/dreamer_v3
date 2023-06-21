@@ -22,6 +22,7 @@ class RepresentationLayer(tf.keras.layers.Layer):
     The value for z is the result of sampling from a categorical distribution with
     shape B x `num_classes`.
     """
+
     def __init__(
         self,
         *,
@@ -42,7 +43,7 @@ class RepresentationLayer(tf.keras.layers.Layer):
             self.num_categoricals * self.num_classes_per_categorical,
             activation=None,
             name=f"z-{self.num_categoricals}x{self.num_classes_per_categorical}-"
-                 "generating-layer",
+            "generating-layer",
         )
 
     def call(self, input_, return_z_probs=False):

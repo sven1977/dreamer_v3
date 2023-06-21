@@ -20,8 +20,8 @@ from utils.symlog import symlog
 
 
 class WorldModel(tf.keras.Model):
-    """TODO
-    """
+    """TODO"""
+
     def __init__(
         self,
         *,
@@ -137,7 +137,7 @@ class WorldModel(tf.keras.Model):
     def call(self, inputs, *args, **kwargs):
         return self.forward_inference(inputs, *args, **kwargs)
 
-    @tf.function#(experimental_relax_shapes=True)
+    @tf.function  # (experimental_relax_shapes=True)
     def forward_inference(self, previous_states, observations, is_first, training=None):
         """Performs a forward step for inference.
 
@@ -160,7 +160,7 @@ class WorldModel(tf.keras.Model):
         """
         initial_states = tree.map_structure(
             lambda s: tf.repeat(s, tf.shape(observations)[0], axis=0),
-            self.get_initial_state()
+            self.get_initial_state(),
         )
 
         # If first, mask it with initial state/actions.
@@ -211,10 +211,14 @@ class WorldModel(tf.keras.Model):
         # Fold time dimension for CNN pass.
         shape = tf.shape(observations)
         B, T = shape[0], shape[1]
-        observations = tf.reshape(observations, shape=tf.concat([[-1], shape[2:]], axis=0))
+        observations = tf.reshape(
+            observations, shape=tf.concat([[-1], shape[2:]], axis=0)
+        )
         encoder_out = self.encoder(observations)
         # Unfold time dimension.
-        encoder_out = tf.reshape(encoder_out, shape=tf.concat([[B, T], tf.shape(encoder_out)[1:]], axis=0))
+        encoder_out = tf.reshape(
+            encoder_out, shape=tf.concat([[B, T], tf.shape(encoder_out)[1:]], axis=0)
+        )
         # Make time major for faster upcoming loop.
         encoder_out = tf.transpose(
             encoder_out, perm=[1, 0] + list(range(2, len(encoder_out.shape.as_list())))
@@ -222,8 +226,7 @@ class WorldModel(tf.keras.Model):
         # encoder_out=[T, B, ...]
 
         initial_states = tree.map_structure(
-            lambda s: tf.repeat(s, B, axis=0),
-            self.get_initial_state()
+            lambda s: tf.repeat(s, B, axis=0), self.get_initial_state()
         )
 
         # Make actions and `is_first` time-major.

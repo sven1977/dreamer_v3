@@ -25,7 +25,7 @@ def disagree_loss(dream_data):
         # Unfold time (H) rank and fold z-dims (num_categoricals x num_classes).
         z_predicted_t0_to_H_B = tf.reshape(
             z_predicted_HxB,
-            shape=[H+1, B, -1],
+            shape=[H + 1, B, -1],
         )
         del z_predicted_HxB
         z_predicted_t0_to_Hm1_B = z_predicted_t0_to_H_B[:-1]
@@ -36,6 +36,6 @@ def disagree_loss(dream_data):
         mse_H_B = tf.reduce_sum(
             tf.math.square(z_predicted_t0_to_Hm1_B - targets_t1_to_H_B),
             axis=-1,
-        )# TEST: no weights, like in Danijar's code: * tf.stop_gradient(dream_data["dream_loss_weights_t0_to_H_B"])[1:]
+        )  # TEST: no weights, like in Danijar's code: * tf.stop_gradient(dream_data["dream_loss_weights_t0_to_H_B"])[1:]
         loss += tf.reduce_mean(mse_H_B)
     return loss

@@ -1,4 +1,5 @@
 from collections import deque
+
 import numpy as np
 
 
@@ -30,10 +31,10 @@ class ReplayBuffer:
         return sample
 
     def save(self):
-        np.savez("buffer.npz", {
-            key: np.stack(deq, axis=0)
-            for key, deq in self.buffers.items()
-        })
+        np.savez(
+            "buffer.npz",
+            {key: np.stack(deq, axis=0) for key, deq in self.buffers.items()},
+        )
 
     def load(self):
         buffer_content = np.load("buffer.npz")

@@ -57,4 +57,3 @@ if __name__ == "__main__":
     model = DynamicsPredictor()
     out = model(inputs)
     print(out.shape)
-

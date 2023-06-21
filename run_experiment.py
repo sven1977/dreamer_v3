@@ -12,17 +12,16 @@ import argparse
 import datetime
 import gc
 import os
-from pprint import pprint
 import re
 import time
-import yaml
+from pprint import pprint
 
 import gymnasium as gym
 import numpy as np
-import tree  # pip install dm_tree
 import tensorflow as tf
+import tree  # pip install dm_tree
 import wandb
-
+import yaml
 from ray.rllib.algorithms.algorithm_config import AlgorithmConfig
 
 import examples.debug_img_env  # to trigger DebugImgEnv import and registration
@@ -36,10 +35,10 @@ from training.train_one_step import (
     train_actor_and_critic_one_step,
     train_world_model_one_step,
 )
-from utils.env_runner_v2 import EnvRunnerV2
-from utils.episode_replay_buffer import EpisodeReplayBuffer
-from utils.episode import Episode
 from utils.cartpole_debug import CartPoleDebug  # import registers `CartPoleDebug-v0`
+from utils.env_runner_v2 import EnvRunnerV2
+from utils.episode import Episode
+from utils.episode_replay_buffer import EpisodeReplayBuffer
 from utils.tensorboard import (
     summarize_actor_train_results,
     summarize_critic_train_results,
@@ -54,7 +53,7 @@ from utils.tensorboard import (
 now = datetime.datetime.now().strftime("%m-%d-%y-%H-%M-%S")
 
 # Set GPU to grow in memory (so tf does not block all GPU mem).
-gpus = tf.config.list_physical_devices('GPU')
+gpus = tf.config.list_physical_devices("GPU")
 for gpu in gpus:
     tf.config.experimental.set_memory_growth(gpu, True)
 
@@ -77,9 +76,15 @@ parser.add_argument(
     "--checkpoint",
     type=str,
     default=None,
-    help="Checkpoint dir to load dreamer model model from."
+    help="Checkpoint dir to load dreamer model model from.",
 )
 args = parser.parse_args()
+
+# Allows us to run multiple experiments in parallel on one gpu
+gpus = tf.config.experimental.list_physical_devices("GPU")
+for gpu in gpus:
+    tf.config.experimental.set_memory_growth(gpu, True)
+
 print(f"Trying to open config file {args.config} ...")
 with open(args.config, "r") as f:
     config = yaml.safe_load(f)
@@ -100,7 +105,6 @@ experiment_path = os.path.join(
     now,
 )
 checkpoint_path = os.path.join(experiment_path, "checkpoints")
-tensorboard_path = os.path.join(experiment_path, "tensorboard")
 wandb_path = os.path.join(experiment_path, "wandb")
 # Create the checkpoint path, if it doesn't exist yet.
 os.makedirs(checkpoint_path)
@@ -188,13 +192,16 @@ world_model = WorldModel(
     batch_length_T=batch_length_T,
     num_gru_units=config.get("num_gru_units"),
     encoder=(
-        CNNAtari(model_dimension=model_dimension) if is_img_space
+        CNNAtari(model_dimension=model_dimension)
+        if is_img_space
         else MLP(model_dimension=model_dimension)
     ),
     decoder=ConvTransposeAtari(
         model_dimension=model_dimension,
         gray_scaled=gray_scaled,
-    ) if is_img_space else VectorDecoder(
+    )
+    if is_img_space
+    else VectorDecoder(
         model_dimension=model_dimension,
         observation_space=env_runner.env.single_observation_space,
     ),
@@ -222,10 +229,12 @@ throughput_train_ts_per_second = None
 
 # Load state from a saved checkpoint.
 if args.checkpoint is not None:
-    #dreamer_model = tf.keras.models.load_model(args.checkpoint)
+    # dreamer_model = tf.keras.models.load_model(args.checkpoint)
     # Load buffer.
     print("LOADING data from checkpoint into buffer.")
-    buffer.set_state(np.load(f"{args.checkpoint}/buffer.npz", allow_pickle=True)["state"])
+    buffer.set_state(
+        np.load(f"{args.checkpoint}/buffer.npz", allow_pickle=True)["state"]
+    )
 
     total_env_steps = int(np.load(f"{args.checkpoint}/total_env_steps.npy"))
     total_replayed_steps = int(np.load(f"{args.checkpoint}/total_replayed_steps.npy"))
@@ -257,15 +266,16 @@ training_ratio = config["training_ratio"]
 if num_pretrain_iterations > 0:
     # 1) Initialize dataset
     import d3rlpy
+
     if config["env"].startswith("ALE/"):
         dataset, _ = d3rlpy.datasets.get_atari(config["offline_dataset"])
     elif config["env"] == "CartPole-v0":
-        dataset, _ = d3rlpy.datasets.get_cartpole()
-    elif config["env"] == "Pendulum-v0":
-        dataset, _ = d3rlpy.datasets.get_pendulum()
+        dataset, _ = d3rlpy.datasets.get_cartpole(config["offline_dataset"])
+    elif config["env"] == "Pendulum-v1":
+        dataset, _ = d3rlpy.datasets.get_pendulum(config["offline_dataset"])
     else:
         raise ValueError("Unknown offline environment.")
-    
+
     print("LOADING episodes from d3rlpy to dreamer_v3")
     episodes = []
     for eps in dataset:
@@ -276,8 +286,11 @@ if num_pretrain_iterations > 0:
         eps_.actions = eps.actions
         eps_.rewards = eps.rewards
         eps_.is_terminated = eps.terminal == 1.0
-        initial_h = dreamer_model._get_initial_h(1).numpy().astype(np.float32)
-        eps_.h_states = np.repeat(initial_h, len(eps_.rewards), axis = 0)
+        breakpoint()
+        eps_.states = tree.map_structure(
+            lambda s: tf.repeat(s, len(eps_.rewards), axis=0),
+            dreamer_model.get_initial_state(),
+        )
         eps_.validate()
         buffer.add(eps_)
 
@@ -345,10 +358,10 @@ for iteration in range(training_iteration_start, 1000000):
     print(f"Online training main iteration {iteration}")
     # Push enough samples into buffer initially before we start training.
     env_steps = env_steps_last_sample = 0
-    #TEST: Put only a single row in the buffer and try to memorize it.
-    #env_steps_last_sample = 64
-    #while iteration == 0:
-    #END TEST
+    # TEST: Put only a single row in the buffer and try to memorize it.
+    # env_steps_last_sample = 64
+    # while iteration == 0:
+    # END TEST
 
     if iteration == training_iteration_start:
         print(
@@ -359,6 +372,7 @@ for iteration in range(training_iteration_start, 1000000):
     while True:
         # Sample one round.
         done_episodes, ongoing_episodes = env_runner.sample(random_actions=False)
+        breakpoint()
 
         # We took B x T env steps.
         env_steps_last_sample = sum(
@@ -384,7 +398,7 @@ for iteration in range(training_iteration_start, 1000000):
             ## But also at least as many episodes as the batch size B.
             ## Actually: This is not useful for longer episode envs, such as Atari.
             ## Too much initial data goes into the buffer, then.
-            #and episodes_in_buffer >= batch_size_B
+            # and episodes_in_buffer >= batch_size_B
         ):
             # Summarize environment interaction and buffer data.
             summarize_sampling_and_replay_buffer(
@@ -397,10 +411,10 @@ for iteration in range(training_iteration_start, 1000000):
 
     replayed_steps = 0
 
-    #TEST: re-use same sample.
-    #sample = buffer.sample(num_items=batch_size_B)
-    #sample = tree.map_structure(lambda v: tf.convert_to_tensor(v), sample)
-    #END TEST
+    # TEST: re-use same sample.
+    # sample = buffer.sample(num_items=batch_size_B)
+    # sample = tree.map_structure(lambda v: tf.convert_to_tensor(v), sample)
+    # END TEST
 
     sub_iter = 0
     while replayed_steps / env_steps_last_sample < training_ratio:
@@ -418,9 +432,7 @@ for iteration in range(training_iteration_start, 1000000):
         sample["is_terminated"] = tf.cast(sample["is_terminated"], tf.float32)
         if isinstance(action_space, gym.spaces.Discrete):
             sample["actions_ints"] = sample["actions"]
-            sample["actions"] = tf.one_hot(
-                sample["actions_ints"], depth=action_space.n
-            )
+            sample["actions"] = tf.one_hot(sample["actions_ints"], depth=action_space.n)
 
         # Perform one world-model training step.
         world_model_train_results = train_world_model_one_step(
@@ -430,9 +442,9 @@ for iteration in range(training_iteration_start, 1000000):
             grad_clip=tf.convert_to_tensor(world_model_grad_clip),
             world_model=dreamer_model.world_model,
         )
-        world_model_forward_train_outs = (
-            world_model_train_results["WORLD_MODEL_forward_train_outs"]
-        )
+        world_model_forward_train_outs = world_model_train_results[
+            "WORLD_MODEL_forward_train_outs"
+        ]
 
         # Train critic and actor.
         if train_critic:
@@ -453,7 +465,7 @@ for iteration in range(training_iteration_start, 1000000):
                 )
                 dreamer_model.critic.init_ema()
                 # Summarize critic models.
-                #dreamer_model.critic.summary()
+                # dreamer_model.critic.summary()
 
             actor_critic_train_results = train_actor_and_critic_one_step(
                 world_model_forward_train_outs=world_model_forward_train_outs,
@@ -472,7 +484,11 @@ for iteration in range(training_iteration_start, 1000000):
             )
 
         # Summarize world model.
-        if iteration == training_iteration_start and sub_iter == 0 and num_pretrain_iterations == 0:
+        if (
+            iteration == training_iteration_start
+            and sub_iter == 0
+            and num_pretrain_iterations == 0
+        ):
             # Dummy forward pass to be able to produce summary.
             dreamer_model(
                 sample["obs"][:1, 0],
@@ -487,7 +503,9 @@ for iteration in range(training_iteration_start, 1000000):
             dreamer_model.summary()
 
             if args.checkpoint:
-                print(f"LOADING data into DreamerModel from checkpoint {args.checkpoint} ...")
+                print(
+                    f"LOADING data into DreamerModel from checkpoint {args.checkpoint} ..."
+                )
                 for name, model in [
                     ("world_model", dreamer_model.world_model),
                     ("actor", dreamer_model.actor),
@@ -509,7 +527,7 @@ for iteration in range(training_iteration_start, 1000000):
                         )
 
         if summary_frequency_train_steps and (
-                total_train_steps % summary_frequency_train_steps == 0
+            total_train_steps % summary_frequency_train_steps == 0
         ):
             summarize_forward_train_outs_vs_samples(
                 forward_train_outs=world_model_forward_train_outs,
@@ -540,7 +558,9 @@ for iteration in range(training_iteration_start, 1000000):
                 )
             # TODO: Make this work with any renderable env.
             if env_runner.config.env in [
-                "CartPoleDebug-v0", "CartPole-v1", "FrozenLake-v1"
+                "CartPoleDebug-v0",
+                "CartPole-v1",
+                "FrozenLake-v1",
             ]:
                 summarize_dreamed_trajectory(
                     dream_data=actor_critic_train_results["dream_data"],
@@ -583,14 +603,14 @@ for iteration in range(training_iteration_start, 1000000):
 
     # EVALUATION.
     if evaluation_frequency_main_iters and (
-            total_train_steps % evaluation_frequency_main_iters == 0
+        total_train_steps % evaluation_frequency_main_iters == 0
     ):
         print("\nEVALUATION:")
 
         # Special debug evaluation for intrinsic rewards -> Roll out a special
         # episode and draw the intrinsic rewards in the rendered images so we can
         # check, whether curiosity is actually producing the correct rewards.
-        #if use_curiosity and env_runner.config.env == "FrozenLake-v1":
+        # if use_curiosity and env_runner.config.env == "FrozenLake-v1":
         #    start_states = dreamer_model.get_initial_state(batch_size_B=batch_size_B)
         #    dream_data = dreamer_model.dream_trajectory_with_burn_in(
         #        start_states=start_states,
@@ -628,7 +648,7 @@ for iteration in range(training_iteration_start, 1000000):
         )
         start_states = tree.map_structure(
             lambda s: tf.repeat(s, batch_size_B, axis=0),
-            dreamer_model.get_initial_state()
+            dreamer_model.get_initial_state(),
         )
         dream_data = dreamer_model.dream_trajectory_with_burn_in(
             start_states=start_states,
@@ -637,7 +657,7 @@ for iteration in range(training_iteration_start, 1000000):
             # Use only first burn_in_T obs.
             observations=sample["obs"][:, :burn_in_T],
             # Use all actions from 0 to T (no actor).
-            actions=sample["actions"][:, :burn_in_T + dreamed_T],
+            actions=sample["actions"][:, : burn_in_T + dreamed_T],
             # Use sampled actions, not the actor.
             use_sampled_actions_in_dream=True,
             use_random_actions_in_dream=False,
@@ -668,26 +688,43 @@ for iteration in range(training_iteration_start, 1000000):
                 f"\tMean episode return: {np.mean(metrics['episode_returns']):.4f}; "
                 f"mean len: {np.mean(metrics['episode_lengths']):.1f}"
             )
-            wandb.log({
-                "EVALUATION_mean_episode_return": np.mean(metrics['episode_returns']),
-                "EVALUATION_mean_episode_length": np.mean(metrics['episode_lengths']),
-            }, commit=False)
+            wandb.log(
+                {
+                    "EVALUATION_mean_episode_return": np.mean(
+                        metrics["episode_returns"]
+                    ),
+                    "EVALUATION_mean_episode_length": np.mean(
+                        metrics["episode_lengths"]
+                    ),
+                },
+                commit=False,
+            )
         # Summarize (best and worst) evaluation episodes.
         sorted_episodes = sorted(episodes, key=lambda e: e.get_return())
-        wandb.log({
-            "EVALUATION_episode_video" + ("_best" if len(sorted_episodes) > 1 else ""): (
-                wandb.Video(np.expand_dims(sorted_episodes[-1].render_images, axis=0), fps=15)
-            )
-        }, commit=False)
-        if len(sorted_episodes) > 1:
-            wandb.log({
-                f"EVALUATION_episode_video_worst": (
+        wandb.log(
+            {
+                "EVALUATION_episode_video"
+                + ("_best" if len(sorted_episodes) > 1 else ""): (
                     wandb.Video(
-                        np.expand_dims(sorted_episodes[0].render_images, axis=0),
+                        np.expand_dims(sorted_episodes[-1].render_images, axis=0),
                         fps=15,
+                    )
+                )
+            },
+            commit=False,
+        )
+        if len(sorted_episodes) > 1:
+            wandb.log(
+                {
+                    f"EVALUATION_episode_video_worst": (
+                        wandb.Video(
+                            np.expand_dims(sorted_episodes[0].render_images, axis=0),
+                            fps=15,
+                        ),
                     ),
-                ),
-            }, commit=False)
+                },
+                commit=False,
+            )
 
     # Save the model every N iterations.
     if model_save_frequency_main_iters and (
@@ -702,32 +739,40 @@ for iteration in range(training_iteration_start, 1000000):
             ("disagree_nets", dreamer_model.disagree_nets),
         ]:
             if model is not None:
-                np.savez(f"{checkpoint_path}/{iteration}/{name}", weights=model.get_weights())
-                np.savez(f"{checkpoint_path}/{iteration}/{name}_optimizer", weights=model.optimizer.get_weights())
+                np.savez(
+                    f"{checkpoint_path}/{iteration}/{name}", weights=model.get_weights()
+                )
+                np.savez(
+                    f"{checkpoint_path}/{iteration}/{name}_optimizer",
+                    weights=model.optimizer.get_weights(),
+                )
         # Save buffer.
         np.savez(f"{checkpoint_path}/{iteration}/buffer", state=buffer.get_state())
         # Save state variables.
         np.save(f"{checkpoint_path}/{iteration}/total_env_steps", total_env_steps)
-        np.save(f"{checkpoint_path}/{iteration}/total_replayed_steps", total_replayed_steps)
+        np.save(
+            f"{checkpoint_path}/{iteration}/total_replayed_steps", total_replayed_steps
+        )
         np.save(f"{checkpoint_path}/{iteration}/total_train_steps", total_train_steps)
         np.save(f"{checkpoint_path}/{iteration}/iteration", iteration)
-        #dreamer_model.save(f"{checkpoint_path}/dreamer_model_{iteration}")
+        # dreamer_model.save(f"{checkpoint_path}/dreamer_model_{iteration}")
 
     # Try trick from https://medium.com/dive-into-ml-ai/dealing-with-memory-leak-
     # issue-in-keras-model-training-e703907a6501
-    if gc_frequency_train_steps and (
-        total_train_steps % gc_frequency_train_steps == 0
-    ):
+    if gc_frequency_train_steps and (total_train_steps % gc_frequency_train_steps == 0):
         gc.collect()
 
     # Log GPU memory consumption.
     try:
-        gpu_memory = tf.config.experimental.get_memory_info('GPU:0')
+        gpu_memory = tf.config.experimental.get_memory_info("GPU:0")
         print(f"\nMEM (GPU) consumption: {gpu_memory['current']}")
-        wandb.log({
-            "MEM_gpu_memory_used": gpu_memory['current'],
-            "MEM_gpu_memory_peak": gpu_memory['peak'],
-        }, commit=False)
+        wandb.log(
+            {
+                "MEM_gpu_memory_used": gpu_memory["current"],
+                "MEM_gpu_memory_peak": gpu_memory["peak"],
+            },
+            commit=False,
+        )
     # No GPU? No problem.
     except ValueError:
         pass
@@ -742,14 +787,22 @@ for iteration in range(training_iteration_start, 1000000):
         throughput_train_ts_per_second = train_ts_per_sec
     # EMA.
     else:
-        throughput_env_ts_per_second = ema * throughput_env_ts_per_second + (1.0 - ema) * env_ts_per_sec
-        throughput_train_ts_per_second = ema * throughput_train_ts_per_second + (1.0 - ema) * train_ts_per_sec
+        throughput_env_ts_per_second = (
+            ema * throughput_env_ts_per_second + (1.0 - ema) * env_ts_per_sec
+        )
+        throughput_train_ts_per_second = (
+            ema * throughput_train_ts_per_second + (1.0 - ema) * train_ts_per_sec
+        )
 
     # Final wandb (env) step commit.
-    wandb.log({
-        "THROUGHPUT_env_ts_per_sec": throughput_env_ts_per_second,
-        "THROUGHPUT_train_ts_per_sec": throughput_train_ts_per_second,
-    }, step=total_env_steps, commit=True)
+    wandb.log(
+        {
+            "THROUGHPUT_env_ts_per_sec": throughput_env_ts_per_second,
+            "THROUGHPUT_train_ts_per_sec": throughput_train_ts_per_second,
+        },
+        step=total_env_steps,
+        commit=True,
+    )
 
     # Main iteration done.
     print()

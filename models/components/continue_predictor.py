@@ -40,8 +40,8 @@ class ContinuePredictor(tf.keras.Model):
         # Create the Bernoulli distribution object.
         bernoulli = tfp.distributions.Bernoulli(logits=logits, dtype=tf.float32)
 
-        #TODO: Draw a sample?
-        #continue_ = bernoulli.sample()
+        # TODO: Draw a sample?
+        # continue_ = bernoulli.sample()
         # OR: Take the mode (greedy, deterministic "sample").
         continue_ = bernoulli.mode()
 

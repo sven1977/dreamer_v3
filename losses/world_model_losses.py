@@ -13,11 +13,11 @@ from utils.two_hot import two_hot
 
 @tf.function
 def world_model_prediction_losses(
-        rewards,
-        continues,
-        B,
-        T,
-        forward_train_outs,
+    rewards,
+    continues,
+    B,
+    T,
+    forward_train_outs,
 ):
     # Learn to produce symlog'd observation predictions.
     # If symlog is disabled (e.g. for uint8 image inputs), `obs_symlog_BxT` is the same
@@ -25,13 +25,11 @@ def world_model_prediction_losses(
     obs_BxT = forward_train_outs["sampled_obs_symlog_BxT"]
     obs_distr = forward_train_outs["obs_distribution_BxT"]
     # Fold time dim and flatten all other (image?) dims.
-    obs_BxT = tf.reshape(
-        obs_BxT, shape=[-1, int(np.prod(obs_BxT.shape.as_list()[1:]))]
-    )
+    obs_BxT = tf.reshape(obs_BxT, shape=[-1, int(np.prod(obs_BxT.shape.as_list()[1:]))])
 
     # Neg logp loss.
-    #decoder_loss = - obs_distr.log_prob(observations)
-    #decoder_loss /= observations.shape.as_list()[1]
+    # decoder_loss = - obs_distr.log_prob(observations)
+    # decoder_loss /= observations.shape.as_list()[1]
     # Squared diff loss w/ sum(!) over all (already folded) obs dims.
     decoder_loss_BxT = tf.reduce_sum(tf.math.square(obs_distr.loc - obs_BxT), axis=-1)
 
@@ -49,21 +47,25 @@ def world_model_prediction_losses(
     # A) Two-hot encode.
     two_hot_rewards = two_hot(rewards)
     # two_hot_rewards=[B*T, num_buckets]
-    #predicted_reward_log_probs = tf.math.log(reward_distr.probs)
-    #predicted_reward_probs = reward_distr.probs
+    # predicted_reward_log_probs = tf.math.log(reward_distr.probs)
+    # predicted_reward_probs = reward_distr.probs
     # predicted_reward_log_probs=[B*T, num_buckets]
-    #reward_loss_two_hot = - tf.reduce_sum(tf.multiply(two_hot_rewards, predicted_reward_log_probs), axis=-1)
-    #reward_loss_two_hot_BxT = - tf.math.log(tf.reduce_sum(tf.multiply(two_hot_rewards, predicted_reward_probs), axis=-1))
-    reward_log_pred_BxT = reward_logits_BxT - tf.math.reduce_logsumexp(reward_logits_BxT, axis=-1, keepdims=True)
+    # reward_loss_two_hot = - tf.reduce_sum(tf.multiply(two_hot_rewards, predicted_reward_log_probs), axis=-1)
+    # reward_loss_two_hot_BxT = - tf.math.log(tf.reduce_sum(tf.multiply(two_hot_rewards, predicted_reward_probs), axis=-1))
+    reward_log_pred_BxT = reward_logits_BxT - tf.math.reduce_logsumexp(
+        reward_logits_BxT, axis=-1, keepdims=True
+    )
     # Multiply with two-hot targets and neg.
-    reward_loss_two_hot_BxT = - tf.reduce_sum(reward_log_pred_BxT * two_hot_rewards, axis=-1)
+    reward_loss_two_hot_BxT = -tf.reduce_sum(
+        reward_log_pred_BxT * two_hot_rewards, axis=-1
+    )
     # Unfold time rank back in.
     reward_loss_two_hot_B_T = tf.reshape(reward_loss_two_hot_BxT, (B, T))
 
     # B) Simple neg log(p) on distribution, NOT using two-hot.
-    #reward_loss_logp_BxT = - reward_distr.log_prob(rewards)
+    # reward_loss_logp_BxT = - reward_distr.log_prob(rewards)
     ## Unfold time rank back in.
-    #reward_loss_logp_B_T = tf.reshape(reward_loss_logp_BxT, (B, T))
+    # reward_loss_logp_B_T = tf.reshape(reward_loss_logp_BxT, (B, T))
 
     # Probabilities that episode continues, computed by our continue predictor.
     # [B]
@@ -71,16 +73,18 @@ def world_model_prediction_losses(
     # -log(p) loss
     # Fold time dim.
     continues = tf.reshape(continues, shape=[-1])
-    continue_loss_BxT = - continue_distr.log_prob(continues)
+    continue_loss_BxT = -continue_distr.log_prob(continues)
     # Unfold time rank back in.
     continue_loss_B_T = tf.reshape(continue_loss_BxT, (B, T))
 
     return {
         "decoder_loss_B_T": decoder_loss_B_T,
         "reward_loss_two_hot_B_T": reward_loss_two_hot_B_T,
-        #"reward_loss_logp_B_T": reward_loss_logp_B_T,
+        # "reward_loss_logp_B_T": reward_loss_logp_B_T,
         "continue_loss_B_T": continue_loss_B_T,
-        "prediction_loss_B_T": decoder_loss_B_T + reward_loss_two_hot_B_T + continue_loss_B_T,
+        "prediction_loss_B_T": decoder_loss_B_T
+        + reward_loss_two_hot_B_T
+        + continue_loss_B_T,
     }
 
 
@@ -110,9 +114,7 @@ def world_model_dynamics_and_representation_loss(forward_train_outs, B, T):
     )
     # Stop gradient for dynamics model's z-outputs:
     sg_z_prior_distr_BxT = tfp.distributions.Independent(
-        tfp.distributions.OneHotCategorical(
-            probs=tf.stop_gradient(z_prior_probs_BxT)
-        ),
+        tfp.distributions.OneHotCategorical(probs=tf.stop_gradient(z_prior_probs_BxT)),
         reinterpreted_batch_ndims=1,
     )
 
@@ -127,10 +129,10 @@ def world_model_dynamics_and_representation_loss(forward_train_outs, B, T):
         ## Sum KL over all `num_categoricals` as these are independent.
         ## This is the same thing that a tfp.distributions.Independent() distribution
         ## with an underlying set of different Categoricals would do.
-        #tf.reduce_sum(
+        # tf.reduce_sum(
         tfp.distributions.kl_divergence(sg_z_posterior_distr_BxT, z_prior_distr_BxT),
         #    axis=-1,
-        #),
+        # ),
     )
     # Unfold time rank back in.
     L_dyn_B_T = tf.reshape(L_dyn_BxT, (B, T))
@@ -140,10 +142,10 @@ def world_model_dynamics_and_representation_loss(forward_train_outs, B, T):
         ## Sum KL over all `num_categoricals` as these are independent.
         ## This is the same thing that a tfp.distributions.Independent() distribution
         ## with an underlying set of different Categoricals would do.
-        #tf.reduce_sum(
+        # tf.reduce_sum(
         tfp.distributions.kl_divergence(z_posterior_distr_BxT, sg_z_prior_distr_BxT),
         #    axis=-1,
-        #),
+        # ),
     )
     # Unfold time rank back in.
     L_rep_B_T = tf.reshape(L_rep_BxT, (B, T))

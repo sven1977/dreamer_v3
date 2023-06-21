@@ -1,4 +1,5 @@
 from collections import deque
+
 import numpy as np
 
 
@@ -10,6 +11,7 @@ class ContinuousEpisodeReplayBuffer:
 
     sample()
     """
+
     def __init__(self, capacity: int = 10000, num_data_tracks: int = 1):
         self.capacity = capacity
         self.num_data_tracks = num_data_tracks
@@ -42,17 +44,27 @@ class ContinuousEpisodeReplayBuffer:
     def sample(self, num_items: int = 1):
         assert num_items % self.num_data_tracks == 0
         max_idx = len(self) // self.num_data_tracks
-        indices = [np.random.randint(0, max_idx, size=num_items // self.num_data_tracks) for _ in range(self.num_data_tracks)]
+        indices = [
+            np.random.randint(0, max_idx, size=num_items // self.num_data_tracks)
+            for _ in range(self.num_data_tracks)
+        ]
         sample = {}
         for key, bufs in self.buffers.items():
-            sample[key] = np.stack([bufs[buf_idx][i] for buf_idx in range(self.num_data_tracks) for i in indices[buf_idx]], axis=0)
+            sample[key] = np.stack(
+                [
+                    bufs[buf_idx][i]
+                    for buf_idx in range(self.num_data_tracks)
+                    for i in indices[buf_idx]
+                ],
+                axis=0,
+            )
         return sample
 
     def save(self):
-        np.savez("buffer.npz", {
-            key: np.stack(deq, axis=0)
-            for key, deq in self.buffers.items()
-        })
+        np.savez(
+            "buffer.npz",
+            {key: np.stack(deq, axis=0) for key, deq in self.buffers.items()},
+        )
 
     def load(self):
         buffer_content = np.load("buffer.npz")
